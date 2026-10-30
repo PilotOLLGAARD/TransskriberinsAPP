@@ -11,7 +11,7 @@ Sådan fortsætter du på en anden computer, opsætter tjenesterne og udgiver en
 | Nøglen til Gemini | Google Secret Manager og lokalt i `.env` | Skiftes manuelt, se nedenfor |
 | Login | Microsoft Entra ID | IT, se `docs/it-opsaetning.md` |
 
-Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Appen ligger på https://pilotollgaard.github.io/transskriberingsapp/.
+Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Repoet hedder `TransskriberinsAPP`, og appen ligger på https://pilotollgaard.github.io/TransskriberinsAPP/. Brug præcis de store og små bogstaver, for adressen skal stemme med login-opsætningen.
 
 ## Filer, der kun ligger i projektmappen
 
@@ -29,11 +29,11 @@ Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv
 Kræver Node 24 og Git.
 
 ```bash
-git clone <repoets adresse>
+git clone https://github.com/PilotOLLGAARD/TransskriberinsAPP.git
 ```
 
 ```bash
-cd transskriberingsapp
+cd TransskriberinsAPP
 ```
 
 ```bash
