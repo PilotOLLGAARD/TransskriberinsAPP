@@ -1,0 +1,26 @@
+name: Tjek
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tjek:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.vaerktoej/browsere
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Hele historikken skal med i søgningen efter nøgler.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run tjek:hemmeligheder
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
