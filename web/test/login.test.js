@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lavLogin, LoginKraevet } from '../js/login.js';
+import { lavLogin, lavLokalLogin, LoginKraevet } from '../js/login.js';
 
 const ENTRA = { tenantId: 't', clientId: 'c' };
 const KONTO = { username: 'a@ollgaard.dk' };
@@ -89,6 +89,19 @@ test('manglende net giver net, ikke login', async () => {
   const l = lav(falskMsal({ tilstille: async () => { throw fejl; } }));
   await l.init();
   await assert.rejects(l.hentBevis('api'), (e) => e.type === 'net');
+});
+
+test('lokal login: manglende net giver net', async () => {
+  const gemt = { testKonto: '1' };
+  globalThis.localStorage = { getItem: (k) => gemt[k] ?? null, setItem: (k, v) => { gemt[k] = v; } };
+  const hentNormal = globalThis.fetch;
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  try {
+    await assert.rejects(lavLokalLogin().hentBevis('api'), (e) => e.type === 'net');
+  } finally {
+    globalThis.fetch = hentNormal;
+    delete globalThis.localStorage;
+  }
 });
 
 test('logInd beder om begge tilladelser på én gang', async () => {

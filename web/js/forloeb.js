@@ -55,6 +55,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
     /** Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv. */
     async genoptag() {
       for (const note of await lager.alleNoter()) {
+        // Lukket før første stykke blev gemt: Der er intet at gemme.
+        if (note.status === STATUS.OPTAGER && (await lager.hentLyd(note.id)).size === 0) {
+          await lager.sletNote(note.id);
+          continue;
+        }
         const rettet = efterGenstart(note);
         if (rettet !== note) await lager.opdaterNote(note.id, rettet);
       }

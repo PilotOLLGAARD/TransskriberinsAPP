@@ -77,8 +77,12 @@ export function lavLokalLogin() {
     async hentBevis(omraade) {
       if (!localStorage.getItem('testKonto')) throw new LoginKraevet();
       if (omraade === 'mail') return 'falsk-graph-bevis';
-      const svar = await fetch(`/test/bevis?type=${localStorage.getItem('testType') || 'medarbejder'}`);
-      return (await svar.json()).bevis;
+      try {
+        const svar = await fetch(`/test/bevis?type=${localStorage.getItem('testType') || 'medarbejder'}`);
+        return (await svar.json()).bevis;
+      } catch {
+        throw new NetFejl();
+      }
     },
     async logInd() {
       localStorage.setItem('testKonto', '1');

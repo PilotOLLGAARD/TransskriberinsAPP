@@ -179,6 +179,19 @@ test('genstart under afsendelse giver netfejl og sender ikke', async () => {
   assert.equal(s.t.lydKald, 0);
 });
 
+test('genstart fjerner en optagelse uden lyd', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4' }] });
+  s.lager.hentLyd = async () => new Blob([]);
+  assert.deepEqual(await s.forloeb.genoptag(), []);
+});
+
+test('genstart beholder en optagelse med lyd', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4' }] });
+  const [note] = await s.forloeb.genoptag();
+  assert.equal(note.status, STATUS.GEMT);
+  assert.equal(note.afbrudt, true);
+});
+
 test('slet virker på fejlede noter', async () => {
   const s = opsaet({ noter: [{ id: 'a', status: STATUS.FEJL, fejlType: 'kanIkkeBehandles' }] });
   await s.forloeb.slet('a');
