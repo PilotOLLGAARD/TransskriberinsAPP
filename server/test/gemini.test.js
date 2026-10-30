@@ -210,6 +210,40 @@ test('klientens afbrydelse afbryder kaldet og sletter filen', async () => {
   assert.ok(kald.some((k) => k.metode === 'DELETE'));
 });
 
+test('rigtig fetch kan sende strømmen med oplyst længde', async () => {
+  const http = require('node:http');
+  let modtaget = null;
+  let laengde = null;
+  const server = http.createServer(async (req, res) => {
+    if (req.url === '/start') {
+      res.writeHead(200, { 'x-goog-upload-url': `http://localhost:${server.address().port}/data` });
+      res.end('{}');
+      return;
+    }
+    laengde = req.headers['content-length'];
+    const dele = [];
+    for await (const d of req) dele.push(d);
+    modtaget = Buffer.concat(dele).toString();
+    res.writeHead(200);
+    res.end(JSON.stringify({ file: FIL }));
+  });
+  await new Promise((ok) => server.listen(0, ok));
+  try {
+    const hent = (url, v) => {
+      if (String(url).endsWith('/upload/v1beta/files')) return fetch(`http://localhost:${server.address().port}/start`, v);
+      if (String(url).endsWith('/v1beta/interactions')) return Promise.resolve(json(200, SVAR_OK));
+      if (v.method === 'DELETE') return Promise.resolve(new Response('{}'));
+      return fetch(url, v);
+    };
+    await lav(hent).transskriber(Readable.from([Buffer.from('ly'), Buffer.from('d')]), valg());
+    assert.equal(modtaget, 'lyd');
+    assert.equal(laengde, '3');
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
 test('nøglen indgår aldrig i en fejlbesked', async () => {
   const hent = async () => { throw new Error(`nede ${NOEGLE}`); };
   await assert.rejects(lav(hent).transskriber(lyd(), valg()), (e) => {
