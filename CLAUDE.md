@@ -2,7 +2,9 @@
 
 Medarbejderen indtaler en note på telefonen, læser teksten og sender den til sig selv. Erstatter Notta.ai.
 
-Design og plan: `docs/plan.md`. Opsætning og udgivelse: `docs/vejledning.md`. Til IT: `docs/it-opsaetning.md`.
+Opsætning og udgivelse: `docs/vejledning.md`.
+
+Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/plan.md` (design og plan), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`.
 
 ## Krav der aldrig må brydes
 

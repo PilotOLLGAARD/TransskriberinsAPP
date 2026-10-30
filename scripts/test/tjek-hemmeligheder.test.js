@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findLaek, grepFejlede } = require('../tjek-hemmeligheder.js');
+const { findLaek, grepFejlede, erForbudtFil } = require('../tjek-hemmeligheder.js');
 
 const FALSK_NOEGLE = 'AIza' + 'x'.repeat(35);
 
@@ -28,4 +28,13 @@ test('git-fejl tælles ikke som ingen fund', () => {
   assert.equal(grepFejlede({ status: 1 }), false);
   assert.equal(grepFejlede({ status: 128 }), true);
   assert.equal(grepFejlede({ status: null, error: new Error('git findes ikke') }), true);
+});
+
+test('interne dokumenter og hemmelige filer må ikke ligge i git', () => {
+  for (const navn of ['.env', '.env.local', 'server/.env', 'local.settings.json', 'docs/plan.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md']) {
+    assert.equal(erForbudtFil(navn), true, navn);
+  }
+  for (const navn of ['.env.example', 'docs/vejledning.md', 'docs/vejledning-medarbejdere.md', 'README.md', 'web/js/konfig.js']) {
+    assert.equal(erForbudtFil(navn), false, navn);
+  }
 });

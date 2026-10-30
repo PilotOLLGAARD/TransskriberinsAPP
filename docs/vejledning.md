@@ -11,6 +11,19 @@ Sådan fortsætter du på en anden computer, opsætter tjenesterne og udgiver en
 | Nøglen til Gemini | Google Secret Manager og lokalt i `.env` | Skiftes manuelt, se nedenfor |
 | Login | Microsoft Entra ID | IT, se `docs/it-opsaetning.md` |
 
+Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Appen ligger på https://pilotollgaard.github.io/transskriberingsapp/.
+
+## Filer, der kun ligger i projektmappen
+
+Disse filer kommer ikke på GitHub og følger ikke med `git clone`. Skifter du computer, skal du selv kopiere dem:
+
+- `.env`
+- `docs/plan.md`
+- `docs/it-opsaetning.md`
+- `docs/test-resultater.md`
+
+Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv et sted med sikkerhedskopi.
+
 ## Lokal opstart
 
 Kræver Node 24 og Git.
@@ -91,7 +104,7 @@ gcloud secrets create gemini-api-key --data-file=-
 |---|---|
 | `GCP_WIF_PROVIDER` | `projects/123/locations/global/workloadIdentityPools/github/providers/repo` |
 | `GCP_SERVICE_ACCOUNT` | `github-udgivelse@projekt.iam.gserviceaccount.com` |
-| `TILLADT_OPRINDELSE` | `https://navn.github.io` (uden sti) |
+| `TILLADT_OPRINDELSE` | `https://pilotollgaard.github.io` (uden sti) |
 | `GEMINI_NOEGLE_VERSION` | `1` |
 
 9. **Slå GitHub Pages til** under Settings > Pages > Source: GitHub Actions.

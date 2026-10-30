@@ -12,8 +12,13 @@ const { spawnSync } = require('node:child_process');
 
 const NOEGLE_MOENSTER = /AIza[0-9A-Za-z_-]{30,}/;
 const NOEGLE_MOENSTER_GIT = 'AIza[0-9A-Za-z_-]{30,}';
-const FORBUDTE_FILER = /(^|\/)(\.env(\.(?!example$)[^/]+)?|local\.settings\.json)$/;
+// Repoet er offentligt, så interne dokumenter må heller ikke komme med.
+const FORBUDTE_FILER = /(^|\/)(\.env(\.(?!example$)[^/]+)?|local\.settings\.json)$|^docs\/(plan|it-opsaetning|test-resultater)\.md$/;
 const REVISIONER_PR_KALD = 200;
+
+function erForbudtFil(navn) {
+  return FORBUDTE_FILER.test(navn);
+}
 
 function findLaek(filer, vaerdier = []) {
   return filer
@@ -57,7 +62,7 @@ function main() {
   const problemer = [];
 
   for (const navn of linjer(git(['ls-files']).stdout)) {
-    if (FORBUDTE_FILER.test(navn)) problemer.push(`Må ikke ligge i git: ${navn}`);
+    if (erForbudtFil(navn)) problemer.push(`Må ikke ligge i git: ${navn}`);
   }
   if (git(['check-ignore', '-q', '.env']).status !== 0) problemer.push('.env er ikke ignoreret af git');
 
@@ -78,4 +83,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { findLaek, grepFejlede };
+module.exports = { findLaek, grepFejlede, erForbudtFil };

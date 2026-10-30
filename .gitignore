@@ -11,3 +11,7 @@ testlyd/
 .vaerktoej/
 .playwright-mcp/
 .superpowers/
+# Interne dokumenter: repoet er offentligt, så de bliver kun i projektmappen.
+docs/plan.md
+docs/it-opsaetning.md
+docs/test-resultater.md

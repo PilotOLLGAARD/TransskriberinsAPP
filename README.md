@@ -3,8 +3,9 @@
 Medarbejdere indtaler noter på telefonen på byggepladsen. Lyden transskriberes, og teksten sendes til dem selv.
 
 - **Kom i gang og udgiv:** `docs/vejledning.md`
-- **Opsætning hos IT:** `docs/it-opsaetning.md`
-- **Design og plan:** `docs/plan.md`
+- **Til medarbejdere:** `docs/vejledning-medarbejdere.md`
+
+Appen kræver login med en godkendt ØLLGAARD-konto. Der er ingen hemmeligheder i dette repo.
 
 ```
 npm install
