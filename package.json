@@ -1,0 +1,14 @@
+{
+  "name": "transskriberingsapp",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test \"scripts/test/*.test.js\" \"server/test/*.test.js\" \"web/test/*.test.js\"",
+    "e2e": "node --test --test-concurrency=1 \"e2e/*.spec.js\"",
+    "lokal": "node scripts/lokal.js",
+    "tjek:hemmeligheder": "node scripts/tjek-hemmeligheder.js"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

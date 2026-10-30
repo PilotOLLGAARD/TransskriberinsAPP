@@ -10,3 +10,4 @@ api/local.settings.json
 testlyd/
 .vaerktoej/
 .playwright-mcp/
+.superpowers/
