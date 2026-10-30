@@ -1,0 +1,12 @@
+node_modules/
+api/local.settings.json
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+testlyd/
+.vaerktoej/
+.playwright-mcp/
