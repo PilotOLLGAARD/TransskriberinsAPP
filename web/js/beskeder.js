@@ -1,0 +1,17 @@
+export const BESKEDER = {
+  mikrofonNaegtet: 'Appen må ikke bruge mikrofonen. Giv tilladelse i telefonens indstillinger, og prøv igen.',
+  kanIkkeOptage: 'Telefonen kan ikke optage her. Åbn appen fra hjemmeskærmen.',
+  net: 'Ingen forbindelse. Optagelsen er gemt. Prøv igen, når du har net.',
+  login: 'Du skal logge ind igen. Optagelsen er gemt.',
+  adgang: 'Din konto har ikke adgang til appen. Optagelsen er gemt. Kontakt IT.',
+  tjeneste: 'Transskriptionen mislykkedes. Optagelsen er gemt. Prøv igen.',
+  kanIkkeBehandles: 'Optagelsen kunne ikke behandles. Den er gemt på telefonen. Kontakt IT, hvis det sker igen.',
+  ingenTale: 'Der blev ikke fundet tale i optagelsen. Den er gemt på telefonen.',
+  afbrudt: 'Optagelsen blev afbrudt, fordi telefonen låste eller skiftede app. Det indtalte er gemt.',
+  tomOptagelse: 'Der blev ikke optaget noget lyd. Prøv igen.',
+  pladsMangler: 'Telefonen er løbet tør for plads. Det indtalte indtil nu er gemt.',
+  snartSlut: 'Optagelsen stopper om 4 minutter.',
+  maksNaaet: 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.',
+  mailFejl: 'Mailen blev ikke sendt. Teksten er gemt. Prøv igen.',
+  maaskeSendt: 'Mailen er måske allerede sendt. Tjek din indbakke, før du sender igen.',
+};
