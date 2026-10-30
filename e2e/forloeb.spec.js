@@ -153,6 +153,61 @@ test('app dræbt før første stykke efterlader ingen tom note', async () => {
   await kontekst.close();
 });
 
+test('koldstart, hvor login er væk: kan stadig optage, og login gør arbejdet færdigt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => localStorage.removeItem('testKonto'));
+  await side.reload();
+  await optag(side);
+  await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+  assert.ok((await lydBytes(side)) > 0);
+  await knap(side, 'Log ind og prøv igen').click();
+  await vis(side, 'Testtekst');
+  await kontekst.close();
+});
+
+test('måske sendt: advarsel, ingen automatisk afsendelse, og noten kan fjernes', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side);
+  await vis(side, 'Testtekst');
+  const foer = await tal(miljoe);
+  await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const [note] = await l.alleNoter();
+    await l.opdaterNote(note.id, { status: 'sender-mail' });
+  });
+  await side.reload();
+  await knap(side, 'Læs og send').click();
+  await vis(side, 'Mailen er måske allerede sendt.');
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald);
+  await knap(side, 'Jeg har fået mailen, slet').click();
+  await knap(side, 'Optag').waitFor();
+  assert.equal(await antalNoter(side), 0);
+  await kontekst.close();
+});
+
+test('måske sendt og udløbet login sender ikke automatisk efter login', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side);
+  await vis(side, 'Testtekst');
+  const foer = await tal(miljoe);
+  await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const [note] = await l.alleNoter();
+    await l.opdaterNote(note.id, { maaskeSendt: true, fejlType: 'login' });
+  });
+  await side.reload();
+  await knap(side, 'Læs og send').click();
+  await vis(side, 'Mailen er måske allerede sendt.');
+  await knap(side, 'Log ind og prøv igen').click();
+  await vis(side, 'Mailen er måske allerede sendt.');
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald);
+  assert.equal(await antalNoter(side), 1);
+  await kontekst.close();
+});
+
 test('mikrofon nægtet', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await side.addInitScript(() => {

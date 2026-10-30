@@ -11,6 +11,7 @@
 
 const NOEGLE_LEVETID_MS = 60 * 60 * 1000;
 const MIN_MS_MELLEM_HENTNING = 5 * 60 * 1000; // Falske beviser må ikke kunne hamre løs på Microsoft.
+const MIN_MS_EFTER_FEJL = 30 * 1000;
 const UR_SKEW_S = 60;
 const MAX_BEVIS_LAENGDE = 16 * 1024;
 const SCOPE = 'access_as_user';
@@ -28,42 +29,55 @@ function lavNoegleHenter(tenantId, hent, nu) {
   const url = `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`;
   let noegler = new Map();
   let hentet = -Infinity;
+  let naesteForsoeg = -Infinity;
+  let igang = null;
 
-  async function opdater() {
-    if (nu() - hentet < MIN_MS_MELLEM_HENTNING) return;
-    hentet = nu();
-    const svar = await hent(url, { signal: AbortSignal.timeout(5000) });
-    if (!svar.ok) throw new Error(`JWKS status ${svar.status}`);
-    const { keys } = await svar.json();
-    const nye = new Map();
-    for (const jwk of keys) {
-      if (jwk.kty !== 'RSA' || !jwk.kid) continue;
-      nye.set(jwk.kid, await crypto.subtle.importKey(
-        'jwk',
-        { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
-        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-        false,
-        ['verify'],
-      ));
+  async function hentNoegler() {
+    try {
+      const svar = await hent(url, { signal: AbortSignal.timeout(5000) });
+      if (!svar.ok) throw new Error(`JWKS status ${svar.status}`);
+      const { keys } = await svar.json();
+      const nye = new Map();
+      for (const jwk of keys) {
+        if (jwk.kty !== 'RSA' || !jwk.kid) continue;
+        nye.set(jwk.kid, await crypto.subtle.importKey(
+          'jwk',
+          { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
+          { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+          false,
+          ['verify'],
+        ));
+      }
+      noegler = nye;
+      hentet = nu();
+      naesteForsoeg = hentet + MIN_MS_MELLEM_HENTNING;
+    } catch {
+      // Gamle nøgler må gerne bruges videre, hvis Microsoft ikke svarer. Ukendt nøgle afvises.
+      naesteForsoeg = nu() + MIN_MS_EFTER_FEJL;
+    } finally {
+      igang = null;
     }
-    noegler = nye;
   }
 
-  return async function noegle(kid) {
-    if (!noegler.has(kid) || nu() - hentet > NOEGLE_LEVETID_MS) {
-      try {
-        await opdater();
-      } catch {
-        // Gamle nøgler må gerne bruges videre, hvis Microsoft ikke svarer. Ukendt nøgle afvises.
-      }
-    }
+  /** Samtidige kald deler samme hentning, så en koldstart ikke afviser nogen. */
+  function opdater() {
+    if (igang) return igang;
+    if (nu() < naesteForsoeg) return Promise.resolve();
+    igang = hentNoegler();
+    return igang;
+  }
+
+  async function noegle(kid) {
+    if (!noegler.has(kid) || nu() - hentet > NOEGLE_LEVETID_MS) await opdater();
     return noegler.get(kid) || null;
-  };
+  }
+  noegle.ingenNoegler = () => noegler.size === 0;
+  return noegle;
 }
 
 /**
  * @param {{tenantId: string, clientId: string, hent?: typeof fetch, nu?: () => number}} valg
- * @returns {(autorisation: string|undefined) => Promise<{ok: true} | {ok: false, status: 401|403, grund: string}>}
+ * @returns {(autorisation: string|undefined) => Promise<{ok: true} | {ok: false, status: 401|403|503, grund: string}>}
  */
 function lavAdgangsTjek({ tenantId, clientId, hent = (...a) => fetch(...a), nu = Date.now }) {
   const tid = String(tenantId || '').trim().toLowerCase();
@@ -84,7 +98,8 @@ function lavAdgangsTjek({ tenantId, clientId, hent = (...a) => fetch(...a), nu =
       if (h.alg !== 'RS256' || typeof h.kid !== 'string') return afvist(401, 'ugyldigt-bevis');
 
       const k = await noegle(h.kid);
-      if (!k) return afvist(401, 'ukendt-noegle');
+      // Uden nøgler kan intet bevis tjekkes. Det er ikke brugerens login, der er noget galt med.
+      if (!k) return noegle.ingenNoegler() ? afvist(503, 'noegler-utilgaengelige') : afvist(401, 'ukendt-noegle');
       const gyldig = await crypto.subtle.verify(
         'RSASSA-PKCS1-v1_5',
         k,

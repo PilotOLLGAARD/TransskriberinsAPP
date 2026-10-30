@@ -52,6 +52,20 @@ test('sletNote fjerner note og alle stykker', async () => {
   await kontekst.close();
 });
 
+test('en tabt forbindelse åbnes igen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const svar = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const id = await l.opretNote({ mime: 'audio/mp4' });
+    (await l.aabn()).close();
+    await l.gemStykke(id, 0, new Uint8Array([7]).buffer);
+    return (await l.hentLyd(id)).size;
+  });
+  assert.equal(svar, 1);
+  await kontekst.close();
+});
+
 test('opdaterNote fletter felter', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await side.goto(`${miljoe.adresse}/test/tom`);

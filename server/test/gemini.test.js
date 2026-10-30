@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const { lavGemini, GeminiFejl } = require('../src/gemini.js');
+const { lavGemini, GeminiFejl, hentUdenGraense } = require('../src/gemini.js');
 
 const NOEGLE = 'hemmelig-testnoegle';
 const FIL = { name: 'files/abc', uri: 'https://generativelanguage.googleapis.com/v1beta/files/abc' };
@@ -238,6 +238,65 @@ test('rigtig fetch kan sende strømmen med oplyst længde', async () => {
     await lav(hent).transskriber(Readable.from([Buffer.from('ly'), Buffer.from('d')]), valg());
     assert.equal(modtaget, 'lyd');
     assert.equal(laengde, '3');
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
+test('transskriptionen bruger kaldet uden svartidsgrænse', async () => {
+  const { hent, kald } = falskHent();
+  const langsomme = [];
+  const hentLangsom = async (url, v) => {
+    langsomme.push(String(url));
+    return json(200, SVAR_OK);
+  };
+  await lav(hent, { hentLangsom }).transskriber(lyd(), valg());
+  assert.ok(langsomme[0].endsWith('/v1beta/interactions'));
+  assert.ok(!kald.some((k) => k.url.endsWith('/v1beta/interactions')));
+});
+
+test('hentUdenGraense læser svaret og sender headers og krop', async () => {
+  const http = require('node:http');
+  let modtaget;
+  const server = http.createServer(async (req, res) => {
+    let krop = '';
+    for await (const d of req) krop += d;
+    modtaget = { krop, noegle: req.headers['x-goog-api-key'], metode: req.method };
+    setTimeout(() => { res.writeHead(202); res.end('{"a":1}'); }, 30);
+  });
+  await new Promise((ok) => server.listen(0, ok));
+  try {
+    const svar = await hentUdenGraense(`http://localhost:${server.address().port}/x`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': 'n' },
+      body: '{"b":2}',
+      signal: new AbortController().signal,
+    });
+    assert.equal(svar.ok, true);
+    assert.equal(svar.status, 202);
+    assert.deepEqual(await svar.json(), { a: 1 });
+    assert.deepEqual(modtaget, { krop: '{"b":2}', noegle: 'n', metode: 'POST' });
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
+test('hentUdenGraense kan afbrydes', async () => {
+  const http = require('node:http');
+  const server = http.createServer(() => {});
+  await new Promise((ok) => server.listen(0, ok));
+  const ctrl = new AbortController();
+  try {
+    const kald = hentUdenGraense(`http://localhost:${server.address().port}/x`, {
+      method: 'POST',
+      headers: {},
+      body: '{}',
+      signal: ctrl.signal,
+    });
+    setTimeout(() => ctrl.abort(), 20);
+    await assert.rejects(kald);
   } finally {
     server.close();
     server.closeAllConnections();

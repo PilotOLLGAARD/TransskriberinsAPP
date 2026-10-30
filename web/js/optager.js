@@ -7,9 +7,11 @@ const LYDKRAV = { echoCancellation: false, noiseSuppression: false, autoGainCont
 const BITRATE = 128000;
 const STYKKE_MS = 5000;
 const MAKS_HUL_MS = 15000;
+const VAGT_MS = 5000;
 const ADVARSEL_MS = 55 * 60 * 1000;
 const MAKS_MS = 59 * 60 * 1000;
 const STOP_VENTETID_MS = 3000;
+const LAGER_VENTETID_MS = 5000;
 
 export class OptageFejl extends Error {
   /** @param {'mikrofonNaegtet'|'kanIkkeOptage'} type */
@@ -42,6 +44,10 @@ const standardUr = {
   ryd: (t) => clearTimeout(t),
 };
 
+function stopSpor(stream) {
+  for (const spor of stream.getTracks()) spor.stop();
+}
+
 /**
  * Lyden gemmes, mens der optages. Ved en afbrydelse afsluttes optagelsen, så der ikke
  * opstår et hul, som brugeren ikke opdager.
@@ -54,7 +60,9 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
   async function tagSkaermlaas(o) {
     if (o.laas && o.laas.released === false) return;
     try {
-      o.laas = await medier.skaermlaas();
+      const laas = await medier.skaermlaas();
+      if (o.afsluttet) await laas.release();
+      else o.laas = laas;
     } catch {
       // Ikke alle telefoner tillader det. Optagelsen kører videre.
     }
@@ -76,49 +84,75 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
     });
   }
 
+  /** Giver true, hvis optageren selv meldte stop. Sene stykker gemmes også bagefter. */
   function ventPaaStop(o) {
     return new Promise((ok) => {
-      const timer = ur.saetTimeout(ok, STOP_VENTETID_MS);
-      o.recorder.addEventListener('stop', () => { ur.ryd(timer); ok(); }, { once: true });
-      if (o.recorder.state === 'inactive') { ur.ryd(timer); ok(); return; }
+      if (o.recorder.state === 'inactive') { ok(true); return; }
+      const timer = ur.saetTimeout(() => ok(false), STOP_VENTETID_MS);
+      o.recorder.addEventListener('stop', () => { ur.ryd(timer); ok(true); }, { once: true });
       try {
         o.recorder.stop();
       } catch {
         ur.ryd(timer);
-        ok();
+        ok(false);
       }
     });
   }
 
-  function afslut(o, grund) {
-    o.afslutter ||= (async () => {
-      o.grund = grund;
-      ur.ryd(o.advarselTimer);
-      ur.ryd(o.maksTimer);
-      medier.dokument.removeEventListener('visibilitychange', o.vedSynlighed);
-      await ventPaaStop(o);
-      for (const spor of o.stream.getTracks()) spor.stop();
-      await o.kaede;
-      try {
-        await o.laas?.release();
-      } catch { /* Skærmlåsen er allerede frigivet. */ }
+  function ventPaaLager(o) {
+    return new Promise((ok) => {
+      const timer = ur.saetTimeout(ok, LAGER_VENTETID_MS);
+      o.kaede.then(() => { ur.ryd(timer); ok(); });
+    });
+  }
 
-      let endelig = o.grund;
-      try {
-        if (o.gemte === 0) {
-          await lager.sletNote(o.id);
-          if (endelig !== 'plads') endelig = 'tom';
-        } else {
-          const afbrudt = o.grund === 'afbrudt' || o.grund === 'plads';
-          await lager.opdaterNote(o.id, { status: STATUS.GEMT, ...(afbrudt ? { afbrudt: true } : {}) });
-        }
-      } catch {
-        // Noten står som optager og rettes ved næste start. Lyden er gemt.
+  async function fuldfoer(o) {
+    ur.ryd(o.advarselTimer);
+    ur.ryd(o.maksTimer);
+    ur.ryd(o.vagtTimer);
+    medier.dokument.removeEventListener('visibilitychange', o.vedSynlighed);
+
+    const stopBekraeftet = await ventPaaStop(o);
+    stopSpor(o.stream);
+    await ventPaaLager(o);
+    o.afsluttet = true;
+    try {
+      await o.laas?.release();
+    } catch { /* Skærmlåsen er allerede frigivet. */ }
+
+    let endelig = o.grund;
+    const ingenLyd = o.naesteNr === 0 && stopBekraeftet;
+    const ingenPlads = o.fuld && o.gemte === 0;
+    // Uden stop-melding kan lyden stadig være på vej, så noten beholdes.
+    if (o.naesteNr === 0 && !stopBekraeftet) endelig = 'afbrudt';
+    try {
+      if (ingenLyd || ingenPlads) {
+        await lager.sletNote(o.id);
+        if (ingenLyd && endelig !== 'plads') endelig = 'tom';
+      } else {
+        const afbrudt = endelig === 'afbrudt' || endelig === 'plads';
+        await lager.opdaterNote(o.id, { status: STATUS.GEMT, ...(afbrudt ? { afbrudt: true } : {}) });
       }
-      if (aktiv === o) aktiv = null;
-      vedAfsluttet({ id: o.id, grund: endelig });
-    })();
+    } catch {
+      // Noten står som optager og rettes ved næste start. Lyden er gemt.
+    }
+    if (aktiv === o) aktiv = null;
+    vedAfsluttet({ id: o.id, grund: endelig });
+  }
+
+  function afslut(o, grund) {
+    if (o.afslutter) return o.afslutter;
+    o.grund = grund;
+    o.afslutter = Promise.resolve().then(() => fuldfoer(o));
     return o.afslutter;
+  }
+
+  function vagt(o) {
+    if (ur.nu() - o.sidsteStykke > MAKS_HUL_MS) {
+      afslut(o, 'afbrudt');
+      return;
+    }
+    o.vagtTimer = ur.saetTimeout(() => vagt(o), VAGT_MS);
   }
 
   return {
@@ -138,23 +172,35 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       }
 
       let recorder;
+      let id;
       try {
         recorder = medier.lavRecorder(stream, { mimeType: mime, audioBitsPerSecond: BITRATE });
+        id = await lager.opretNote({ mime: recorder.mimeType || mime });
       } catch {
-        for (const spor of stream.getTracks()) spor.stop();
+        stopSpor(stream);
         throw new OptageFejl('kanIkkeOptage');
       }
 
-      const id = await lager.opretNote({ mime: recorder.mimeType || mime });
       const o = { id, stream, recorder, naesteNr: 0, gemte: 0, kaede: Promise.resolve(), sidsteStykke: ur.nu(), fuld: false };
-      aktiv = o;
 
       recorder.addEventListener('dataavailable', (e) => gemData(o, e.data));
       recorder.addEventListener('error', () => afslut(o, 'afbrudt'));
+      recorder.addEventListener('stop', () => afslut(o, 'afbrudt'));
       for (const spor of stream.getTracks()) {
         spor.addEventListener('mute', () => afslut(o, 'afbrudt'));
         spor.addEventListener('ended', () => afslut(o, 'afbrudt'));
       }
+
+      try {
+        recorder.start(STYKKE_MS);
+      } catch {
+        o.afslutter = Promise.resolve();
+        stopSpor(stream);
+        await lager.sletNote(id).catch(() => {});
+        throw new OptageFejl('kanIkkeOptage');
+      }
+
+      aktiv = o;
       o.vedSynlighed = () => {
         if (medier.dokument.visibilityState !== 'visible') return;
         if (ur.nu() - o.sidsteStykke > MAKS_HUL_MS) afslut(o, 'afbrudt');
@@ -163,9 +209,10 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       medier.dokument.addEventListener('visibilitychange', o.vedSynlighed);
       o.advarselTimer = ur.saetTimeout(() => vedAdvaret('snartSlut'), ADVARSEL_MS);
       o.maksTimer = ur.saetTimeout(() => afslut(o, 'maks'), MAKS_MS);
+      o.vagtTimer = ur.saetTimeout(() => vagt(o), VAGT_MS);
 
-      recorder.start(STYKKE_MS);
-      await tagSkaermlaas(o);
+      // Ventes der på skærmlåsen, kan en langsom telefon nå at afslutte optagelsen, før skærmen skifter.
+      tagSkaermlaas(o);
       return id;
     },
 
@@ -177,5 +224,6 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
     },
 
     erAktiv: () => Boolean(aktiv),
+    aktivId: () => aktiv?.id ?? null,
   };
 }

@@ -18,11 +18,20 @@ class NetFejl extends Error {
   }
 }
 
-export function lavLogin({ msal, entra, redirectUri }) {
+const HAR_VAERET_LOGGET_IND = 'harVaeretLoggetInd';
+
+export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.localStorage }) {
   const apiScope = `api://${entra.clientId}/access_as_user`;
   let app;
 
-  const konto = () => app.getAllAccounts()[0] ?? null;
+  // MSAL krypterer sit lager med en sessions-cookie, så kontoen kan være væk, efter telefonen har lukket appen.
+  const konto = () => {
+    try {
+      return app?.getAllAccounts()[0] ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   return {
     async init() {
@@ -41,9 +50,11 @@ export function lavLogin({ msal, entra, redirectUri }) {
       } catch {
         // Et mislykket login må ikke forhindre appen i at starte. Optagelser skal kunne nås.
       }
+      if (konto()) hukommelse.setItem(HAR_VAERET_LOGGET_IND, '1');
     },
 
     harKonto: () => Boolean(konto()),
+    harVaeretLoggetInd: () => Boolean(hukommelse.getItem(HAR_VAERET_LOGGET_IND)),
     brugerMail: () => konto()?.username ?? '',
 
     /** @param {'api'|'mail'} omraade */
@@ -73,6 +84,7 @@ export function lavLokalLogin() {
   return {
     async init() {},
     harKonto: () => Boolean(localStorage.getItem('testKonto')),
+    harVaeretLoggetInd: () => Boolean(localStorage.getItem('testTidligere')),
     brugerMail: () => 'test@ollgaard.dk',
     async hentBevis(omraade) {
       if (!localStorage.getItem('testKonto')) throw new LoginKraevet();
@@ -86,6 +98,7 @@ export function lavLokalLogin() {
     },
     async logInd() {
       localStorage.setItem('testKonto', '1');
+      localStorage.setItem('testTidligere', '1');
       localStorage.setItem('testType', localStorage.getItem('testNaesteType') || 'medarbejder');
       location.reload();
     },

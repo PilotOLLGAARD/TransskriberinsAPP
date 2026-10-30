@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findLaek } = require('../tjek-hemmeligheder.js');
+const { findLaek, grepFejlede } = require('../tjek-hemmeligheder.js');
 
 const FALSK_NOEGLE = 'AIza' + 'x'.repeat(35);
 
@@ -21,4 +21,11 @@ test('finder en bestemt værdi', () => {
 test('finder ingenting i .env.example', () => {
   const indhold = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../.env.example'), 'utf8');
   assert.deepEqual(findLaek([{ navn: '.env.example', indhold }]), []);
+});
+
+test('git-fejl tælles ikke som ingen fund', () => {
+  assert.equal(grepFejlede({ status: 0 }), false);
+  assert.equal(grepFejlede({ status: 1 }), false);
+  assert.equal(grepFejlede({ status: 128 }), true);
+  assert.equal(grepFejlede({ status: null, error: new Error('git findes ikke') }), true);
 });

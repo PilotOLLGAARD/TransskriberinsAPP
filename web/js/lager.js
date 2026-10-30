@@ -14,21 +14,41 @@ export function aabn() {
       r.result.createObjectStore(NOTER, { keyPath: 'id' });
       r.result.createObjectStore(STYKKER, { keyPath: ['noteId', 'nr'] });
     };
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => fejl(r.error);
+    r.onsuccess = () => {
+      const db = r.result;
+      // iOS kan lukke forbindelsen, mens appen ligger i baggrunden.
+      db.onclose = () => { dbLoefte = null; };
+      db.onversionchange = () => { db.close(); dbLoefte = null; };
+      ok(db);
+    };
+    r.onerror = () => {
+      dbLoefte = null;
+      fejl(r.error);
+    };
   });
   return dbLoefte;
 }
 
-function transaktion(db, lagre, tilstand, arbejde) {
+function enTransaktion(db, lagre, tilstand, arbejde) {
   return new Promise((ok, fejl) => {
     const t = db.transaction(lagre, tilstand);
     let resultat;
     t.oncomplete = () => ok(resultat);
     t.onerror = () => fejl(t.error);
-    t.onabort = () => fejl(t.error);
+    t.onabort = () => fejl(t.error ?? new DOMException('afbrudt', 'AbortError'));
     arbejde(t, (r) => { resultat = r; });
   });
+}
+
+/** Prøver én gang til på en ny forbindelse, medmindre lageret er fuldt. */
+async function transaktion(lagre, tilstand, arbejde) {
+  try {
+    return await enTransaktion(await aabn(), lagre, tilstand, arbejde);
+  } catch (e) {
+    if (e?.name === 'QuotaExceededError') throw e;
+    dbLoefte = null;
+    return enTransaktion(await aabn(), lagre, tilstand, arbejde);
+  }
 }
 
 function alleStykkerInterval(id) {
@@ -38,17 +58,16 @@ function alleStykkerInterval(id) {
 export async function opretNote({ mime }) {
   const id = crypto.randomUUID();
   const note = { id, mime, status: STATUS.OPTAGER, oprettet: Date.now() };
-  await transaktion(await aabn(), NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
+  await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
   return id;
 }
 
 export async function gemStykke(id, nr, bytes) {
-  await transaktion(await aabn(), STYKKER, 'readwrite', (t) => t.objectStore(STYKKER).put({ noteId: id, nr, bytes }));
+  await transaktion(STYKKER, 'readwrite', (t) => t.objectStore(STYKKER).put({ noteId: id, nr, bytes }));
 }
 
 export async function hentLyd(id) {
-  const db = await aabn();
-  return transaktion(db, [NOTER, STYKKER], 'readonly', (t, svar) => {
+  return transaktion([NOTER, STYKKER], 'readonly', (t, svar) => {
     const noteR = t.objectStore(NOTER).get(id);
     const stykkerR = t.objectStore(STYKKER).getAll(alleStykkerInterval(id));
     stykkerR.onsuccess = () => {
@@ -58,14 +77,14 @@ export async function hentLyd(id) {
 }
 
 export async function hentNote(id) {
-  return transaktion(await aabn(), NOTER, 'readonly', (t, svar) => {
+  return transaktion(NOTER, 'readonly', (t, svar) => {
     const r = t.objectStore(NOTER).get(id);
     r.onsuccess = () => svar(r.result ?? null);
   });
 }
 
 export async function opdaterNote(id, felter) {
-  await transaktion(await aabn(), NOTER, 'readwrite', (t) => {
+  await transaktion(NOTER, 'readwrite', (t) => {
     const s = t.objectStore(NOTER);
     const r = s.get(id);
     r.onsuccess = () => {
@@ -75,14 +94,14 @@ export async function opdaterNote(id, felter) {
 }
 
 export async function alleNoter() {
-  return transaktion(await aabn(), NOTER, 'readonly', (t, svar) => {
+  return transaktion(NOTER, 'readonly', (t, svar) => {
     const r = t.objectStore(NOTER).getAll();
     r.onsuccess = () => svar(r.result.sort((a, b) => b.oprettet - a.oprettet));
   });
 }
 
 export async function sletNote(id) {
-  await transaktion(await aabn(), [NOTER, STYKKER], 'readwrite', (t) => {
+  await transaktion([NOTER, STYKKER], 'readwrite', (t) => {
     t.objectStore(NOTER).delete(id);
     t.objectStore(STYKKER).delete(alleStykkerInterval(id));
   });

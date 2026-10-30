@@ -72,6 +72,14 @@ for (const [navn, status, grund] of AFVISNINGER) {
   });
 }
 
+test('nøgler utilgængelige giver 503 uden Gemini-kald', async () => {
+  const s = await start({ tjekAdgang: async () => ({ ok: false, status: 503, grund: 'noegler-utilgaengelige' }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 503);
+  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
+  assert.equal(s.gemini.kald, 0);
+});
+
 test('afvisning sker før format og størrelse', async () => {
   const s = await start({ tjekAdgang: async () => ({ ok: false, status: 401, grund: 'x' }) });
   const svar = await post(s.adresse, { headers: { 'content-type': 'text/plain' }, krop: Buffer.alloc(500) });

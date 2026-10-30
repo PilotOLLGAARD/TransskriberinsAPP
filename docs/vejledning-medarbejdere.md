@@ -39,4 +39,4 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 
 - En optagelse kan højst vare 59 minutter. Den stopper selv og bliver gemt.
 - Telefonen er ikke en sikkerhedskopi. Mister du den, er optagelser, der ikke er sendt, væk.
-- Appen skal logge ind igen ca. en gang i døgnet. Normalt kræver det ikke kodeord.
+- Du kan blive bedt om at logge ind igen, for eksempel når telefonen har lukket appen. Normalt kræver det ikke kodeord, og du kan altid optage først.

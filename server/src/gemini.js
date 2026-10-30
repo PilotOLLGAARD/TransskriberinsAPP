@@ -5,6 +5,9 @@
  * Format efterprøvet mod ai.google.dev (transcribe, files, interactions), oktober 2026.
  */
 
+const http = require('node:http');
+const https = require('node:https');
+
 const BASE = 'https://generativelanguage.googleapis.com';
 const SLET_TIMEOUT_MS = 5000;
 
@@ -45,9 +48,37 @@ function udtraekTekst(svar) {
   return dele.join('\n').trim();
 }
 
-function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent = (...a) => fetch(...a), advar = () => {} }) {
+/**
+ * POST uden tidsgrænse på svaret. Nodes fetch giver selv op efter 300 s uden svar, og lange
+ * optagelser kan tage længere. Tidsgrænsen styres af signal.
+ */
+function hentUdenGraense(url, { method, headers, body, signal }) {
+  const modul = String(url).startsWith('https:') ? https : http;
+  return new Promise((ok, fejl) => {
+    const anmodning = modul.request(url, { method, headers, signal }, (svar) => {
+      const dele = [];
+      svar.on('data', (d) => dele.push(d));
+      svar.on('error', fejl);
+      svar.on('end', () => {
+        const tekst = Buffer.concat(dele).toString('utf8');
+        ok({
+          ok: svar.statusCode >= 200 && svar.statusCode < 300,
+          status: svar.statusCode,
+          json: async () => JSON.parse(tekst),
+        });
+      });
+    });
+    anmodning.on('error', fejl);
+    anmodning.end(body);
+  });
+}
+
+function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {} }) {
+  const hentKald = hent || ((...a) => fetch(...a));
+  const hentTransskription = hentLangsom || hent || hentUdenGraense;
+
   async function upload(strom, bytes, mime, signal) {
-    const start = await hent(`${BASE}/upload/v1beta/files`, {
+    const start = await hentKald(`${BASE}/upload/v1beta/files`, {
       method: 'POST',
       signal,
       headers: {
@@ -64,7 +95,7 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent =
     const adresse = start.headers.get('x-goog-upload-url');
     if (!adresse) throw new GeminiFejl('tjeneste', 'upload-start: mangler adresse');
 
-    const svar = await hent(adresse, {
+    const svar = await hentKald(adresse, {
       method: 'POST',
       signal,
       duplex: 'half',
@@ -88,7 +119,7 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent =
     };
     if (ordliste.length) transcription_config.custom_vocabulary = ordliste;
 
-    const svar = await hent(`${BASE}/v1beta/interactions`, {
+    const svar = await hentTransskription(`${BASE}/v1beta/interactions`, {
       method: 'POST',
       signal,
       headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
@@ -109,7 +140,7 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent =
 
   async function sletFil(navn) {
     try {
-      const svar = await hent(`${BASE}/v1beta/${navn}`, {
+      const svar = await hentKald(`${BASE}/v1beta/${navn}`, {
         method: 'DELETE',
         headers: { 'x-goog-api-key': noegle },
         signal: AbortSignal.timeout(SLET_TIMEOUT_MS),
@@ -140,4 +171,4 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent =
   };
 }
 
-module.exports = { lavGemini, GeminiFejl, geminiMime };
+module.exports = { lavGemini, GeminiFejl, geminiMime, hentUdenGraense };

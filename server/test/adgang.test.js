@@ -135,10 +135,39 @@ test('kendt nøgle hentes kun én gang', async () => {
   assert.equal(hentninger.antal, 1);
 });
 
-test('Microsoft nede afviser', async () => {
+test('Microsoft nede afviser med 503, ikke krav om login', async () => {
   const hent = async () => { throw new Error('nede'); };
   const svar = await lavTjek({ hent }).tjek(bevis(medarbejder()));
-  assert.deepEqual([svar.ok, svar.status], [false, 401]);
+  assert.deepEqual([svar.ok, svar.status], [false, 503]);
+});
+
+test('samtidige kald ved koldstart deler én hentning og får begge adgang', async () => {
+  const { tjek, hentninger } = lavTjek();
+  const svar = await Promise.all([tjek(bevis(medarbejder())), tjek(bevis(medarbejder()))]);
+  assert.deepEqual(svar, [{ ok: true }, { ok: true }]);
+  assert.equal(hentninger.antal, 1);
+});
+
+test('fejlet hentning prøves igen efter kort tid', async () => {
+  let tid = NU;
+  let nede = true;
+  const hent = async () => {
+    if (nede) throw new Error('nede');
+    return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+  };
+  const { tjek } = lavTjek({ hent, nu: () => tid });
+  assert.equal((await tjek(bevis(medarbejder()))).status, 503);
+  nede = false;
+  tid += 31 * 1000;
+  assert.deepEqual(await tjek(bevis(medarbejder())), { ok: true });
+});
+
+test('fejlet hentning hamrer ikke Microsoft', async () => {
+  let antal = 0;
+  const hent = async () => { antal++; throw new Error('nede'); };
+  const { tjek } = lavTjek({ hent });
+  for (let i = 0; i < 10; i++) await tjek(bevis(medarbejder()));
+  assert.equal(antal, 1);
 });
 
 test('uden tenant eller client afvises alt', async () => {

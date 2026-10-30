@@ -29,14 +29,27 @@ function linjer(tekst) {
   return tekst.split('\n').map((l) => l.trim()).filter(Boolean);
 }
 
+/** git grep svarer 0 ved fund og 1 ved ingen fund. Alt andet betyder, at søgningen ikke blev gennemført. */
+function grepFejlede(svar) {
+  return Boolean(svar.error) || (svar.status !== 0 && svar.status !== 1);
+}
+
+function grep(args, input) {
+  const svar = git(['grep', '-l', ...args], input);
+  if (grepFejlede(svar)) throw new Error('git grep kunne ikke gennemføres');
+  return linjer(svar.stdout);
+}
+
 function soegHistorik(soegeArgs, input) {
-  const revisioner = linjer(git(['rev-list', '--all']).stdout);
+  const revisioner = git(['rev-list', '--all']);
+  if (revisioner.error || revisioner.status !== 0) throw new Error('git rev-list kunne ikke gennemføres');
+  const alle = linjer(revisioner.stdout);
   const fund = new Set();
-  for (let i = 0; i < revisioner.length; i += REVISIONER_PR_KALD) {
-    const del = revisioner.slice(i, i + REVISIONER_PR_KALD);
-    for (const linje of linjer(git(['grep', '-l', ...soegeArgs, ...del], input).stdout)) fund.add(linje);
+  for (let i = 0; i < alle.length; i += REVISIONER_PR_KALD) {
+    const del = alle.slice(i, i + REVISIONER_PR_KALD);
+    for (const linje of grep([...soegeArgs, ...del], input)) fund.add(linje);
   }
-  for (const linje of linjer(git(['grep', '-l', ...soegeArgs], input).stdout)) fund.add(linje);
+  for (const linje of grep(soegeArgs, input)) fund.add(linje);
   return [...fund];
 }
 
@@ -65,4 +78,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { findLaek };
+module.exports = { findLaek, grepFejlede };

@@ -4,7 +4,7 @@ import { lavOptager, vaelgFormat } from '../js/optager.js';
 
 const MINUT = 60 * 1000;
 
-function falskLager({ fejlFraStykke = Infinity } = {}) {
+function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}) {
   const l = {
     noter: new Map(),
     stykker: [],
@@ -15,6 +15,7 @@ function falskLager({ fejlFraStykke = Infinity } = {}) {
     },
     async gemStykke(id, nr, bytes) {
       if (nr >= fejlFraStykke) throw new DOMException('fuld', 'QuotaExceededError');
+      if (nr >= haengFraStykke) await new Promise(() => {});
       l.stykker.push({ id, nr, bytes });
     },
     async opdaterNote(id, felter) {
@@ -37,6 +38,7 @@ class FalskRecorder extends EventTarget {
     this.slutStykke = true;
   }
   start(interval) {
+    if (FalskRecorder.startFejl) throw FalskRecorder.startFejl;
     this.interval = interval;
     this.state = 'recording';
   }
@@ -102,11 +104,18 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
   const advarsler = [];
   optager.naarAfsluttet((a) => afsluttet.push(a));
   optager.naarAdvaret((a) => advarsler.push(a));
+  // Optager videre med et stykke hvert 5. sekund, så vagthunden ikke griber ind.
+  const skridMedLyd = (ms) => {
+    for (let rest = ms; rest > 0; rest -= 5000) {
+      skrid(Math.min(5000, rest));
+      if (tilstand.recorder.state === 'recording') tilstand.recorder.send('x');
+    }
+  };
   const venTilAfsluttet = async () => {
     for (let i = 0; i < 50 && !afsluttet.length; i++) await new Promise((ok) => setTimeout(ok, 1));
     return afsluttet[0];
   };
-  return { lager, optager, tilstand, spor, dokument, skrid, afsluttet, advarsler, venTilAfsluttet };
+  return { lager, optager, tilstand, spor, dokument, skrid, skridMedLyd, afsluttet, advarsler, venTilAfsluttet };
 }
 
 test('vælger mp4 når muligt', () => {
@@ -235,18 +244,106 @@ test('afslutter når lageret er fuldt', async () => {
 test('advarer ved 55 minutter', async () => {
   const s = opsaet();
   await s.optager.start();
-  s.skrid(55 * MINUT - 1);
+  s.skridMedLyd(55 * MINUT - 5000);
   assert.deepEqual(s.advarsler, []);
-  s.skrid(1);
+  s.skridMedLyd(5000);
   assert.deepEqual(s.advarsler, ['snartSlut']);
 });
 
 test('stopper efter 59 minutter', async () => {
   const s = opsaet();
   const id = await s.optager.start();
-  s.tilstand.recorder.send('a');
-  s.skrid(59 * MINUT);
+  s.skridMedLyd(59 * MINUT);
   assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'maks' });
+});
+
+test('sen lyd efter stop-timeout slettes ikke', async () => {
+  const s = opsaet();
+  const id = await s.optager.start();
+  s.tilstand.recorder.stop = () => { s.tilstand.recorder.state = 'inactive'; };
+  const stoppet = s.optager.stop();
+  await new Promise((ok) => setTimeout(ok, 5));
+  s.skrid(3000);
+  await stoppet;
+  assert.equal(s.lager.noter.has(id), true);
+  assert.deepEqual(s.afsluttet, [{ id, grund: 'afbrudt' }]);
+  s.tilstand.recorder.send('sen');
+  await new Promise((ok) => setTimeout(ok, 5));
+  assert.deepEqual(s.lager.stykker.map((x) => x.id), [id]);
+});
+
+test('hængende lager stopper ikke Stop', async () => {
+  const s = opsaet({ lager: falskLager({ haengFraStykke: 0 }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  const stoppet = s.optager.stop();
+  await new Promise((ok) => setTimeout(ok, 5));
+  s.skrid(5000);
+  assert.equal(await stoppet, id);
+  assert.equal(s.lager.noter.has(id), true);
+  assert.equal(s.optager.erAktiv(), false);
+});
+
+test('afslutter, når optageren stopper af sig selv', async () => {
+  const s = opsaet();
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  s.tilstand.recorder.stop();
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'afbrudt' });
+});
+
+test('vagthund afslutter, når der ikke kommer stykker', async () => {
+  const s = opsaet();
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  await new Promise((ok) => setTimeout(ok, 5));
+  s.skrid(5000);
+  s.skrid(5000);
+  s.skrid(5000);
+  assert.deepEqual(s.afsluttet, []);
+  s.skrid(5000);
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'afbrudt' });
+});
+
+test('fejl i recorder.start rydder op, så man kan prøve igen', async () => {
+  const s = opsaet();
+  FalskRecorder.startFejl = new Error('kan ikke starte');
+  try {
+    await assert.rejects(s.optager.start(), (e) => e.type === 'kanIkkeOptage');
+  } finally {
+    FalskRecorder.startFejl = null;
+  }
+  assert.equal(s.optager.erAktiv(), false);
+  assert.ok(s.spor.stoppet);
+  assert.equal(s.lager.noter.size, 0);
+  await s.optager.start();
+  assert.equal(s.optager.erAktiv(), true);
+});
+
+test('fejl i opretNote lukker mikrofonen', async () => {
+  const s = opsaet();
+  s.lager.opretNote = async () => { throw new Error('lager'); };
+  await assert.rejects(s.optager.start(), (e) => e.type === 'kanIkkeOptage');
+  assert.ok(s.spor.stoppet);
+  assert.equal(s.optager.erAktiv(), false);
+});
+
+test('start venter ikke på skærmlås', async () => {
+  const s = opsaet({ skaermlaas: () => new Promise(() => {}) });
+  const id = await s.optager.start();
+  assert.ok(id);
+});
+
+test('skærmlås, der kommer efter afslutning, frigives', async () => {
+  let frigivet = 0;
+  let giv;
+  const s = opsaet({ skaermlaas: () => new Promise((ok) => { giv = ok; }) });
+  await s.optager.start();
+  s.tilstand.recorder.send('a');
+  await s.optager.stop();
+  giv({ release: async () => { frigivet++; } });
+  await new Promise((ok) => setTimeout(ok, 5));
+  assert.equal(frigivet, 1);
 });
 
 test('tom optagelse slettes', async () => {

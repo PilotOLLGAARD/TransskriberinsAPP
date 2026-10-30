@@ -7,6 +7,44 @@ const { lavHandler } = require('../src/handler.js');
 
 const STOERRELSE = 33 * 1024 * 1024; // Over Cloud Runs grænse på 32 MiB for HTTP/1.
 
+test('h2c-klient, der afbryder, stopper Gemini', async () => {
+  let afbrudt;
+  const stoppet = new Promise((ok) => { afbrudt = ok; });
+  const handler = lavHandler({
+    konfig: { tilladtOprindelse: 'https://x', maxBytes: 100 },
+    tjekAdgang: async () => ({ ok: true }),
+    gemini: {
+      async transskriber(strom, { signal }) {
+        signal.addEventListener('abort', afbrudt);
+        await new Promise((_, afvis) => signal.addEventListener('abort', () => afvis(signal.reason)));
+      },
+    },
+    log: () => {},
+  });
+  const server = lavServer(handler);
+  await new Promise((ok) => server.listen(0, ok));
+  const klient = http2.connect(`http://localhost:${server.address().port}`);
+  try {
+    const r = klient.request({
+      ':method': 'POST',
+      ':path': '/transskriber',
+      'content-type': 'audio/mp4',
+      'content-length': '3',
+      authorization: 'Bearer x',
+    });
+    r.on('error', () => {});
+    r.end('lyd');
+    setTimeout(() => r.close(http2.constants.NGHTTP2_CANCEL), 30);
+    await Promise.race([
+      stoppet,
+      new Promise((_, afvis) => setTimeout(() => afvis(new Error('Gemini blev ikke stoppet')), 2000)),
+    ]);
+  } finally {
+    klient.destroy();
+    server.close();
+  }
+});
+
 test('h2c-klient kan sende 33 MiB', async () => {
   let modtaget = 0;
   const gemini = {

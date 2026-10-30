@@ -4,6 +4,7 @@ const { Transform, pipeline } = require('node:stream');
 const { GeminiFejl } = require('./gemini.js');
 
 const FORMATER = new Set(['audio/mp4', 'audio/webm']);
+const ADGANG_FEJL = { 401: 'login-kraeves', 403: 'ingen-adgang' };
 
 function standardLog(o) {
   console.log(JSON.stringify(o));
@@ -61,7 +62,7 @@ function lavHandler({ konfig, tjekAdgang, gemini, log = standardLog }) {
     const adgang = await tjekAdgang(req.headers.authorization);
     if (!adgang.ok) {
       log({ haendelse: 'adgang-afvist', grund: adgang.grund });
-      return sendJson(res, cors, adgang.status, { fejl: adgang.status === 401 ? 'login-kraeves' : 'ingen-adgang' });
+      return sendJson(res, cors, adgang.status, { fejl: ADGANG_FEJL[adgang.status] || 'tjeneste' });
     }
 
     const mime = String(req.headers['content-type'] || '');
@@ -76,8 +77,9 @@ function lavHandler({ konfig, tjekAdgang, gemini, log = standardLog }) {
     if (bytes > konfig.maxBytes) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
 
     const afbryd = new AbortController();
+    // writableFinished er true på en nulstillet HTTP/2-strøm, så det kan ikke bruges her.
     res.on('close', () => {
-      if (!res.writableFinished) afbryd.abort();
+      if (!res.writableEnded) afbryd.abort();
     });
 
     const vagt = lavBytevagt(bytes);

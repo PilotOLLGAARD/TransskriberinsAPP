@@ -179,6 +179,50 @@ test('genstart under afsendelse giver netfejl og sender ikke', async () => {
   assert.equal(s.t.lydKald, 0);
 });
 
+test('note, der stadig står som optager efter afslutning, kan behandles', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4' }] });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+});
+
+test('lagerfejl under behandling afviser ikke, så skærmen ikke hænger', async () => {
+  const s = opsaet();
+  s.lager.opdaterNote = async () => { throw new Error('lager'); };
+  await s.forloeb.behandl('a');
+  assert.ok(await s.lager.hentLyd('a'));
+});
+
+test('lagerfejl under mail afviser ikke, og noten slettes ikke', async () => {
+  const s = opsaet({ noter: [KLAR] });
+  s.lager.opdaterNote = async () => { throw new Error('lager'); };
+  await s.forloeb.sendTilMig('a');
+  assert.equal(s.lager.kort.has('a'), true);
+  assert.equal(s.t.mailKald.length, 0);
+});
+
+test('fuldt lager under genstart viser stadig alle noter', async () => {
+  const s = opsaet({ noter: [
+    { id: 'a', status: STATUS.SENDER, mime: 'audio/mp4' },
+    { id: 'b', status: STATUS.FEJL, fejlType: 'net', mime: 'audio/mp4' },
+  ] });
+  s.lager.opdaterNote = async () => { throw new DOMException('fuld', 'QuotaExceededError'); };
+  const noter = await s.forloeb.genoptag();
+  assert.deepEqual(noter.map((n) => n.id), ['a', 'b']);
+});
+
+test('bekræftet mail sletter noten', async () => {
+  const s = opsaet({ noter: [{ ...KLAR, maaskeSendt: true }] });
+  await s.forloeb.bekraeftSendt('a');
+  assert.equal(s.lager.kort.has('a'), false);
+  assert.equal(s.t.mailKald.length, 0);
+});
+
+test('bekræftelse afvises uden advarsel om mulig afsendelse', async () => {
+  const s = opsaet({ noter: [KLAR] });
+  await assert.rejects(s.forloeb.bekraeftSendt('a'));
+  assert.equal(s.lager.kort.has('a'), true);
+});
+
 test('genstart fjerner en optagelse uden lyd', async () => {
   const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4' }] });
   s.lager.hentLyd = async () => new Blob([]);

@@ -18,9 +18,49 @@ function falskMsal({ konti = [KONTO], tilstille = async () => ({ accessToken: 'b
   return f;
 }
 
-function lav(f) {
-  return lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/' });
+function falskHukommelse() {
+  const gemt = {};
+  return { getItem: (k) => gemt[k] ?? null, setItem: (k, v) => { gemt[k] = v; } };
 }
+
+function lav(f, hukommelse = falskHukommelse()) {
+  return lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/', hukommelse });
+}
+
+test('husker tidligere login, selvom kontoen er væk efter koldstart', async () => {
+  const hukommelse = falskHukommelse();
+  const foer = lav(falskMsal(), hukommelse);
+  assert.equal(foer.harVaeretLoggetInd(), false);
+  await foer.init();
+  assert.equal(foer.harVaeretLoggetInd(), true);
+
+  const efter = lav(falskMsal({ konti: [] }), hukommelse);
+  await efter.init();
+  assert.equal(efter.harKonto(), false);
+  assert.equal(efter.harVaeretLoggetInd(), true);
+});
+
+test('ingen konto er ikke et tidligere login', async () => {
+  const l = lav(falskMsal({ konti: [] }));
+  await l.init();
+  assert.equal(l.harVaeretLoggetInd(), false);
+});
+
+test('manglende MSAL vælter ikke appen', async () => {
+  const l = lav(undefined);
+  await assert.rejects(l.init());
+  assert.equal(l.harKonto(), false);
+  assert.equal(l.brugerMail(), '');
+  await assert.rejects(l.hentBevis('api'), LoginKraevet);
+});
+
+test('fejl fra MSALs lager vælter ikke appen', async () => {
+  const f = falskMsal();
+  f.PublicClientApplication.prototype.getAllAccounts = () => { throw new Error('ikke klar'); };
+  const l = lav(f);
+  await l.init();
+  assert.equal(l.harKonto(), false);
+});
 
 test('init færdiggør et login og bruger localStorage og redirect-adressen', async () => {
   const f = falskMsal();

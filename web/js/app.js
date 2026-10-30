@@ -96,9 +96,12 @@ async function optag() {
 
 async function behandl(id, { aabnBagefter = false } = {}) {
   t.igang.add(id);
-  await opdater();
-  await forloeb.behandl(id);
-  t.igang.delete(id);
+  await opdater().catch(() => {});
+  try {
+    await forloeb.behandl(id);
+  } finally {
+    t.igang.delete(id);
+  }
   const note = await lager.hentNote(id);
   if (aabnBagefter && note?.status === STATUS.TEKST_KLAR && t.visning === 'start') {
     t.visning = 'tekst';
@@ -110,14 +113,25 @@ async function behandl(id, { aabnBagefter = false } = {}) {
 async function sendTilMig(id) {
   t.igang.add(id);
   t.besked = null;
-  await opdater();
-  await forloeb.sendTilMig(id);
-  t.igang.delete(id);
+  await opdater().catch(() => {});
+  try {
+    await forloeb.sendTilMig(id);
+  } finally {
+    t.igang.delete(id);
+  }
   if (!(await lager.hentNote(id))) {
     t.visning = 'start';
     t.aabenNote = null;
     t.besked = { tekst: `Mailen er sendt til ${login.brugerMail()}.`, type: 'ok' };
   }
+  await opdater();
+}
+
+async function bekraeftSendt(id) {
+  await forloeb.bekraeftSendt(id);
+  t.visning = 'start';
+  t.aabenNote = null;
+  t.besked = null;
   await opdater();
 }
 
@@ -180,7 +194,7 @@ function kort(note) {
     ? h('button', { vedTryk: () => logInd({ id: note.id, handling: 'behandl' }) }, 'Log ind og prøv igen')
     : h('button', { vedTryk: () => behandl(note.id, { aabnBagefter: true }) }, 'Prøv igen');
 
-  if (note.status === STATUS.GEMT) {
+  if (note.status === STATUS.GEMT || note.status === STATUS.OPTAGER) {
     return h('section', { klasse: 'kort' }, dato, h('p', {}, note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.'), proevIgen);
   }
 
@@ -215,7 +229,7 @@ function skaermLogin() {
 }
 
 function skaermStart() {
-  const afventer = t.noter.filter((n) => n.status !== STATUS.OPTAGER);
+  const afventer = t.noter.filter((n) => n.id !== optager.aktivId());
   return [
     h('h1', {}, 'Transskribering'),
     beskedElement(),
@@ -255,13 +269,14 @@ function skaermTekst() {
     h('h1', {}, 'Læs teksten'),
     beskedElement(),
     fejl ? h('p', { klasse: 'besked fejl', role: 'alert' }, fejl) : null,
-    note.maaskeSendt && !fejl ? h('p', { klasse: 'besked fejl', role: 'alert' }, BESKEDER.maaskeSendt) : null,
+    note.maaskeSendt ? h('p', { klasse: 'besked fejl', role: 'alert' }, BESKEDER.maaskeSendt) : null,
     h('div', { klasse: 'tekst' }, note.tekst),
     sender
       ? venter('Sender mail …')
       : h(
         'div',
         { klasse: 'knapper' },
+        note.maaskeSendt ? h('button', { vedTryk: () => bekraeftSendt(note.id) }, 'Jeg har fået mailen, slet') : null,
         send,
         h('button', { klasse: 'sekundaer', vedTryk: () => {
           t.visning = 'start';
@@ -277,7 +292,8 @@ function tegn() {
   let indhold;
   if (t.visning === 'optager') indhold = skaermOptager();
   else if (t.visning === 'tekst') indhold = skaermTekst();
-  else if (!login.harKonto() && t.noter.length === 0) indhold = skaermLogin();
+  // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
+  else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
   app.replaceChildren(...indhold.filter(Boolean));
 }
@@ -290,10 +306,14 @@ async function genoptagEfterLogin() {
   localStorage.removeItem(EFTER_LOGIN);
   const { id, handling } = JSON.parse(raa);
   if (handling === 'send') {
+    const note = await lager.hentNote(id);
+    if (!note) return;
     await lager.opdaterNote(id, { fejlType: undefined });
     t.visning = 'tekst';
     t.aabenNote = id;
-    await sendTilMig(id);
+    // En mulig dobbelt mail skal brugeren selv tage stilling til.
+    if (note.maaskeSendt) await opdater();
+    else await sendTilMig(id);
   } else {
     await behandl(id, { aabnBagefter: true });
   }
