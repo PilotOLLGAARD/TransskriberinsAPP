@@ -14,6 +14,7 @@ const { generateKeyPairSync, createSign, randomUUID } = require('node:crypto');
 const { lavHandler } = require('../server/src/handler.js');
 const { lavAdgangsTjek } = require('../server/src/adgang.js');
 const { GeminiFejl } = require('../server/src/gemini.js');
+const pdf = require('../server/src/pdf.js');
 
 const WEB = path.resolve(__dirname, '..', 'web');
 const TENANT = '00000000-0000-0000-0000-00000000000a';
@@ -60,7 +61,7 @@ function lavBeviser() {
 
 function startLokal({ port = 4280 } = {}) {
   const { jwk, bevis } = lavBeviser();
-  const tilstand = { geminiKald: 0, mailKald: 0, sidsteMail: null, naesteFejl: null, modtaget: null };
+  const tilstand = { geminiKald: 0, referatKald: 0, mailKald: 0, sidsteMail: null, naesteFejl: null, modtaget: null, sidsteReferat: null };
 
   const gemini = {
     async transskriber(strom, { bytes, mime }) {
@@ -76,11 +77,30 @@ function startLokal({ port = 4280 } = {}) {
     },
   };
 
+  // Falsk referat. PDF'en er den rigtige.
+  const referat = {
+    async lav({ tekst, titel, varighedSek }) {
+      tilstand.referatKald++;
+      tilstand.sidsteReferat = { titel, varighedSek };
+      if (tilstand.naesteFejl === 'referat') {
+        tilstand.naesteFejl = null;
+        throw new GeminiFejl('tjeneste', 'testfejl');
+      }
+      return {
+        titel: titel || 'Testtitel fra AI', kort: false, opsummering: `Testreferat af: ${tekst}`,
+        hovedpunkter: ['Første punkt', 'Andet punkt med æøå'], beslutninger: [], opgaver: [],
+        fejlOgMangler: [], aabneSpoergsmaal: [], renTekst: '',
+      };
+    },
+  };
+
   const hentNoegler = async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
   const handler = lavHandler({
     konfig: { tilladtOprindelse: `http://localhost:${port}`, maxBytes: 157286400 },
     tjekAdgang: lavAdgangsTjek({ tenantId: TENANT, clientId: CLIENT, hent: hentNoegler }),
     gemini,
+    referat,
+    pdf,
     log: () => {},
   });
 
@@ -98,6 +118,8 @@ function startLokal({ port = 4280 } = {}) {
     if (url.pathname === '/test/tal') {
       return json(200, {
         geminiKald: tilstand.geminiKald,
+        referatKald: tilstand.referatKald,
+        sidsteReferat: tilstand.sidsteReferat,
         mailKald: tilstand.mailKald,
         sidsteMail: tilstand.sidsteMail,
         modtaget: tilstand.modtaget,

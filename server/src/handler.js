@@ -4,6 +4,34 @@ const { Transform, pipeline } = require('node:stream');
 const { GeminiFejl } = require('./gemini.js');
 
 const FORMATER = new Set(['audio/mp4', 'audio/webm']);
+const MAX_TITEL = 120;
+const MAX_VARIGHED_SEK = 3600;
+const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
+const DAG_MS = 24 * 60 * 60 * 1000;
+
+/** Brugerens navn på optagelsen. Telefonen sender det URL-kodet, da headere kun må indeholde ASCII. */
+function laesTitel(raa) {
+  if (!raa) return '';
+  let titel;
+  try {
+    titel = decodeURIComponent(String(raa));
+  } catch {
+    return '';
+  }
+  return [...titel.replace(/[\u0000-\u001f\u007f]/g, '').trim()].slice(0, MAX_TITEL).join('').trim();
+}
+
+function laesVarighed(raa) {
+  if (raa === undefined || raa === '') return null;
+  const n = Number(raa);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_VARIGHED_SEK ? n : null;
+}
+
+function laesTidspunkt(raa) {
+  const n = Number(raa);
+  const nu = Date.now();
+  return Number.isSafeInteger(n) && n >= TIDLIGSTE_TIDSPUNKT && n <= nu + DAG_MS ? n : nu;
+}
 const ADGANG_FEJL = { 401: 'login-kraeves', 403: 'ingen-adgang' };
 
 function standardLog(o) {
@@ -31,7 +59,7 @@ function lavBytevagt(maks) {
  * POST /transskriber. Virker med både node:http og node:http2 compat.
  * Adgangstjekket er det første, der sker, før lyden læses.
  */
-function lavHandler({ konfig, tjekAdgang, gemini, log = standardLog }) {
+function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLog }) {
   function sendJson(res, cors, status, krop) {
     res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(krop));
@@ -48,7 +76,7 @@ function lavHandler({ konfig, tjekAdgang, gemini, log = standardLog }) {
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-varighed, x-optaget',
         'access-control-max-age': '600',
       });
       res.end();
@@ -88,7 +116,21 @@ function lavHandler({ konfig, tjekAdgang, gemini, log = standardLog }) {
     log({ haendelse: 'gemini-kald' });
     try {
       const { tekst } = await gemini.transskriber(vagt, { bytes, mime, signal: afbryd.signal });
-      sendJson(res, cors, 200, { tekst });
+      if (!tekst) return sendJson(res, cors, 200, { tekst });
+
+      const titel = laesTitel(req.headers['x-titel']);
+      const varighedSek = laesVarighed(req.headers['x-varighed']);
+      const tidspunkt = laesTidspunkt(req.headers['x-optaget']);
+      log({ haendelse: 'referat-kald' });
+      const r = await referat.lav({ tekst, titel, varighedSek, signal: afbryd.signal });
+      const fil = await pdf.lavPdf({ titel: r.titel, tidspunkt, varighedSek, referat: r, tekst });
+      sendJson(res, cors, 200, {
+        tekst,
+        titel: r.titel,
+        referat: r,
+        pdf: fil.toString('base64'),
+        filnavn: pdf.filnavn({ titel: r.titel, tidspunkt }),
+      });
     } catch (e) {
       if (vagt.overskredet) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
       const kode = e instanceof GeminiFejl ? e.kode : 'tjeneste';

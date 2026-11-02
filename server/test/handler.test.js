@@ -37,10 +37,31 @@ function falskGemini(svar = async () => ({ tekst: 'Hej' })) {
 
 const adgangOk = async () => ({ ok: true });
 
-async function start({ konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini() } = {}) {
+const REFERAT = {
+  titel: 'AI-titel', kort: false, opsummering: 'HEMMELIGT-REFERAT', hovedpunkter: [], beslutninger: [],
+  opgaver: [], fejlOgMangler: [], aabneSpoergsmaal: [], renTekst: '',
+};
+
+function falskReferat(svar = async (v) => ({ ...REFERAT, titel: v.titel || REFERAT.titel })) {
+  const r = { kald: 0, async lav(valg) { r.kald++; r.valg = valg; return svar(valg); } };
+  return r;
+}
+
+function falskPdf() {
+  const p = {
+    kald: 0,
+    async lavPdf(valg) { p.kald++; p.valg = valg; return Buffer.from('%PDF-falsk'); },
+    filnavn: ({ titel, tidspunkt }) => `${new Date(tidspunkt).toISOString().slice(0, 10)} ${titel}.pdf`,
+  };
+  return p;
+}
+
+async function start({
+  konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini(), referat = falskReferat(), pdf = falskPdf(),
+} = {}) {
   const logs = [];
   const laest = [];
-  const handler = lavHandler({ konfig, tjekAdgang, gemini, log: (o) => logs.push(JSON.stringify(o)) });
+  const handler = lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log: (o) => logs.push(JSON.stringify(o)) });
   const server = http.createServer((req, res) => {
     const slut = res.end.bind(res);
     // Node tømmer selv en ulæst krop efter svaret, så det måles, idet svaret sendes.
@@ -50,7 +71,7 @@ async function start({ konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGem
   servere.push(server);
   await new Promise((ok) => server.listen(0, ok));
   const adresse = `http://localhost:${server.address().port}`;
-  return { adresse, gemini, logs, laest };
+  return { adresse, gemini, referat, pdf, logs, laest };
 }
 
 function post(adresse, { headers = {}, krop = Buffer.from('lyd'), sti = '/transskriber' } = {}) {
@@ -68,6 +89,8 @@ for (const [navn, status, grund] of AFVISNINGER) {
     assert.equal(svar.status, status);
     assert.deepEqual(await svar.json(), { fejl: status === 401 ? 'login-kraeves' : 'ingen-adgang' });
     assert.equal(s.gemini.kald, 0);
+    assert.equal(s.referat.kald, 0);
+    assert.equal(s.pdf.kald, 0);
     assert.deepEqual(s.laest, [false]);
   });
 }
@@ -157,6 +180,9 @@ test('preflight svarer uden Gemini', async () => {
   assert.equal(svar.status, 204);
   assert.equal(svar.headers.get('access-control-allow-origin'), OPRINDELSE);
   assert.match(svar.headers.get('access-control-allow-headers'), /authorization/i);
+  for (const h of ['x-titel', 'x-varighed', 'x-optaget']) {
+    assert.ok(svar.headers.get('access-control-allow-headers').includes(h), h);
+  }
   assert.equal(s.gemini.kald, 0);
 });
 
@@ -194,8 +220,10 @@ test('klient afbryder stopper Gemini', async () => {
 
 test('log indeholder hverken bevis eller tekst', async () => {
   const s = await start({ gemini: falskGemini(async () => ({ tekst: 'HEMMELIG-TEKST' })) });
-  await post(s.adresse, { headers: { authorization: 'Bearer HEMMELIGT-BEVIS' } });
+  await post(s.adresse, { headers: { authorization: 'Bearer HEMMELIGT-BEVIS', 'x-titel': 'HEMMELIG-TITEL' } });
   const alt = s.logs.join('\n');
+  assert.ok(!alt.includes('HEMMELIG-TITEL'));
+  assert.ok(!alt.includes('HEMMELIGT-REFERAT'));
   assert.ok(!alt.includes('HEMMELIG-TEKST'));
   assert.ok(!alt.includes('HEMMELIGT-BEVIS'));
   assert.ok(alt.includes('gemini-kald'));
@@ -234,15 +262,97 @@ test('medarbejder får tekst, og lyden sendes uændret', async () => {
   const krop = Buffer.from([0, 1, 2, 255, 254]);
   const svar = await post(s.adresse, { krop, headers: { 'content-type': 'audio/webm;codecs=opus' } });
   assert.equal(svar.status, 200);
-  assert.deepEqual(await svar.json(), { tekst: 'Hej' });
+  assert.equal((await svar.json()).tekst, 'Hej');
   assert.deepEqual(s.gemini.modtaget, krop);
   assert.equal(s.gemini.valg.bytes, 5);
   assert.equal(s.gemini.valg.mime, 'audio/webm;codecs=opus');
 });
 
-test('tom tekst gives videre', async () => {
+test('tom tekst gives videre og kalder ikke referat', async () => {
   const s = await start({ gemini: falskGemini(async () => ({ tekst: '' })) });
   assert.deepEqual(await (await post(s.adresse)).json(), { tekst: '' });
+  assert.equal(s.referat.kald, 0);
+  assert.equal(s.pdf.kald, 0);
+});
+
+const TID = Date.UTC(2026, 10, 2, 12, 5);
+const kodet = (t) => encodeURIComponent(t);
+
+test('svar indeholder titel, referat, pdf og filnavn', async () => {
+  const s = await start();
+  const svar = await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-varighed': '252', 'x-optaget': String(TID) } });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.equal(j.tekst, 'Hej');
+  assert.equal(j.titel, 'Møde om tag');
+  assert.equal(j.referat.opsummering, 'HEMMELIGT-REFERAT');
+  assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
+  assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+  assert.equal(s.referat.valg.tekst, 'Hej');
+  assert.equal(s.referat.valg.varighedSek, 252);
+  assert.ok(s.referat.valg.signal instanceof AbortSignal);
+  assert.equal(s.pdf.valg.tidspunkt, TID);
+  assert.equal(s.pdf.valg.titel, 'Møde om tag');
+  assert.equal(s.pdf.valg.varighedSek, 252);
+  assert.equal(s.pdf.valg.tekst, 'Hej');
+});
+
+test('tom titel giver AI-titel', async () => {
+  const s = await start();
+  const j = await (await post(s.adresse)).json();
+  assert.equal(s.referat.valg.titel, '');
+  assert.equal(j.titel, 'AI-titel');
+});
+
+test('titel med specialtegn', async () => {
+  const s = await start();
+  const titel = 'Byggenotat E/F Nørrehus 🏗️ "tag" æøå';
+  await post(s.adresse, { headers: { 'x-titel': kodet(titel) } });
+  assert.equal(s.referat.valg.titel, titel);
+});
+
+test('for lang titel afkortes til 120 tegn', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-titel': kodet('å'.repeat(300)) } });
+  assert.equal(s.referat.valg.titel.length, 120);
+});
+
+test('ugyldig titel og kontroltegn ignoreres', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-titel': '%E0%A4%A' } });
+  assert.equal(s.referat.valg.titel, '');
+  await post(s.adresse, { headers: { 'x-titel': kodet('a\nb\tc') } });
+  assert.equal(s.referat.valg.titel, 'abc');
+});
+
+for (const v of ['abc', '-5', '99999', '']) {
+  test(`ugyldig varighed ignoreres: "${v}"`, async () => {
+    const s = await start();
+    await post(s.adresse, { headers: { 'x-varighed': v } });
+    assert.equal(s.referat.valg.varighedSek, null);
+  });
+}
+
+test('ugyldigt tidspunkt giver nu', async () => {
+  const s = await start();
+  const foer = Date.now();
+  await post(s.adresse, { headers: { 'x-optaget': 'vrøvl' } });
+  assert.ok(s.pdf.valg.tidspunkt >= foer && s.pdf.valg.tidspunkt <= Date.now());
+});
+
+test('referat-fejl giver 502 og ingen PDF', async () => {
+  const s = await start({ referat: falskReferat(async () => { throw new GeminiFejl('tjeneste', 'x'); }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 502);
+  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
+  assert.equal(s.pdf.kald, 0);
+});
+
+test('PDF-fejl giver 502', async () => {
+  const pdf = falskPdf();
+  pdf.lavPdf = async () => { throw new Error('pdf'); };
+  const s = await start({ pdf });
+  assert.equal((await post(s.adresse)).status, 502);
 });
 
 test('anden sti giver 404', async () => {

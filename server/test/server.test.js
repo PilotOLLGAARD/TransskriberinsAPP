@@ -57,6 +57,8 @@ test('h2c-klient kan sende 33 MiB', async () => {
     konfig: { tilladtOprindelse: 'https://x', maxBytes: STOERRELSE },
     tjekAdgang: async () => ({ ok: true }),
     gemini,
+    referat: { lav: async () => ({ titel: 'T', kort: true, renTekst: 'x', opsummering: '', hovedpunkter: [], beslutninger: [], opgaver: [], fejlOgMangler: [], aabneSpoergsmaal: [] }) },
+    pdf: { lavPdf: async () => Buffer.from('%PDF'), filnavn: () => 'x.pdf' },
     log: () => {},
   });
   const server = lavServer(handler);
@@ -82,7 +84,7 @@ test('h2c-klient kan sende 33 MiB', async () => {
       r.end(Buffer.alloc(STOERRELSE));
     });
     assert.equal(svar.status, 200);
-    assert.deepEqual(JSON.parse(svar.krop), { tekst: 'Hej' });
+    assert.equal(JSON.parse(svar.krop).tekst, 'Hej');
     assert.equal(modtaget, STOERRELSE);
   } finally {
     klient.close();
