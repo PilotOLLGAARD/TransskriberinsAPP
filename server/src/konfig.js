@@ -25,6 +25,7 @@ function hentKonfig(env) {
     clientId,
     tilladtOprindelse,
     model: env.GEMINI_MODEL || 'gemini-3.5-transcribe',
+    referatModel: env.REFERAT_MODEL || 'gemini-3.8-flash',
     sprog: env.SPROG || 'da-DK',
     tilstand: env.TRANSSKRIPTION_TILSTAND === 'verbatim' ? 'verbatim' : 'smart',
     maxBytes: tal(env.MAX_LYD_BYTES, STANDARD_MAX_BYTES),

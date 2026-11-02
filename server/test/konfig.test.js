@@ -29,3 +29,8 @@ test('ukendt tilstand bliver smart', () => {
   assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'x' }).tilstand, 'smart');
   assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'verbatim' }).tilstand, 'verbatim');
 });
+
+test('referatets model har standard og kan ændres', () => {
+  assert.equal(hentKonfig(FULD).referatModel, 'gemini-3.8-flash');
+  assert.equal(hentKonfig({ ...FULD, REFERAT_MODEL: 'gemini-3.5-flash-lite' }).referatModel, 'gemini-3.5-flash-lite');
+});

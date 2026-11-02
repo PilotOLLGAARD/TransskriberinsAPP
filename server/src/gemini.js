@@ -171,4 +171,4 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
   };
 }
 
-module.exports = { lavGemini, GeminiFejl, geminiMime, hentUdenGraense };
+module.exports = { lavGemini, GeminiFejl, geminiMime, hentUdenGraense, httpFejl, udtraekTekst, BASE };
