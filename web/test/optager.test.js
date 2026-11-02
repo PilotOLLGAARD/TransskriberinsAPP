@@ -409,3 +409,11 @@ test('intet format giver kanIkkeOptage', async () => {
   const s = opsaet({ understoettet: () => false });
   await assert.rejects(s.optager.start(), (e) => e.type === 'kanIkkeOptage');
 });
+
+test('gemmer varighed ved afslutning', async () => {
+  const s = opsaet();
+  const id = await s.optager.start();
+  s.skridMedLyd(12000);
+  await s.optager.stop();
+  assert.equal(s.lager.noter.get(id).varighedMs, 12000);
+});

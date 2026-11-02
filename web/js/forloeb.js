@@ -28,7 +28,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
     }
   }
 
-  return {
+  const forloeb = {
     behandl: (id) => eneAdgang(id, async () => {
       const note = await lager.hentNote(id);
       if (!note || !KAN_BEHANDLES.has(note.status)) return;
@@ -36,9 +36,14 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined });
         const bevis = await login.hentBevis('api');
         const lyd = await lager.hentLyd(id);
-        const { tekst } = await sendLyd(lyd, note.mime, bevis);
-        if (tekst) await lager.opdaterNote(id, { status: STATUS.TEKST_KLAR, tekst });
-        else await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
+        const svar = await sendLyd(lyd, note.mime, bevis, { titel: note.titel, varighedMs: note.varighedMs, oprettet: note.oprettet });
+        if (!svar.tekst) {
+          await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
+          return;
+        }
+        const felter = { status: STATUS.TEKST_KLAR, tekst: svar.tekst };
+        for (const k of ['titel', 'referat', 'pdf', 'filnavn']) if (svar[k] !== undefined) felter[k] = svar[k];
+        await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: e?.type || 'tjeneste' });
       }
@@ -50,7 +55,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER_MAIL, fejlType: undefined });
         const bevis = await login.hentBevis('mail');
-        await sendMail({ tekst: note.tekst, til: login.brugerMail(), oprettet: note.oprettet, bevis });
+        await sendMail({ note, til: login.brugerMail(), bevis });
       } catch (e) {
         if (e?.type === 'mailUkendt') {
           // Mailen kan være sendt. Brugeren tjekker indbakken i stedet for at få en dobbelt mail.
@@ -69,6 +74,20 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
         // Noten står som sender-mail og får advarslen om mulig afsendelse ved næste start.
       }
     }),
+
+    /** Laver referatet, hvis det mangler, og sender det derefter selv. Bruges også af Prøv igen. */
+    async behandlOgSend(id) {
+      await forloeb.behandl(id);
+      const note = await lager.hentNote(id);
+      // En mulig dobbelt mail skal brugeren selv tage stilling til.
+      if (note?.status === STATUS.TEKST_KLAR && !note.maaskeSendt) await forloeb.sendTilMig(id);
+    },
+
+    /** Gemmer navnet, før noget sendes, så det overlever netværksfejl og genforsøg. */
+    async navngivOgSend(id, titel) {
+      await lager.opdaterNote(id, { titel: String(titel || '').trim().slice(0, 120), navngivet: true });
+      await forloeb.behandlOgSend(id);
+    },
 
     /** Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv. */
     async genoptag(aktiveAndetSted = new Set()) {
@@ -105,4 +124,5 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
       await lager.sletNote(id);
     },
   };
+  return forloeb;
 }

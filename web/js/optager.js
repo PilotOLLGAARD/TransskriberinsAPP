@@ -132,7 +132,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         else if (ingenPlads) endelig = 'pladsTom';
       } else {
         const afbrudt = endelig === 'afbrudt' || endelig === 'plads';
-        await lager.opdaterNote(o.id, { status: STATUS.GEMT, ...(afbrudt ? { afbrudt: true } : {}) });
+        await lager.opdaterNote(o.id, { status: STATUS.GEMT, varighedMs: o.varighedMs, ...(afbrudt ? { afbrudt: true } : {}) });
       }
     } catch {
       // Noten står som optager og rettes ved næste start. Lyden er gemt.
@@ -144,6 +144,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
   function afslut(o, grund) {
     if (o.afslutter) return o.afslutter;
     o.grund = grund;
+    o.varighedMs = ur.nu() - o.startet;
     o.afslutter = Promise.resolve().then(() => fuldfoer(o));
     return o.afslutter;
   }
@@ -182,7 +183,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         throw new OptageFejl('kanIkkeOptage');
       }
 
-      const o = { id, stream, recorder, naesteNr: 0, gemte: 0, kaede: Promise.resolve(), sidsteStykke: ur.nu(), fuld: false };
+      const o = { id, stream, recorder, naesteNr: 0, gemte: 0, kaede: Promise.resolve(), sidsteStykke: ur.nu(), startet: ur.nu(), fuld: false };
 
       recorder.addEventListener('dataavailable', (e) => gemData(o, e.data));
       recorder.addEventListener('error', () => afslut(o, 'afbrudt'));

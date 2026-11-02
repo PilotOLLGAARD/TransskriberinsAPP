@@ -129,7 +129,10 @@ test('202 sletter note og lyd', async () => {
 test('mail går kun til brugeren selv', async () => {
   const s = opsaet({ noter: [KLAR] });
   await s.forloeb.sendTilMig('a');
-  assert.deepEqual(s.t.mailKald, [{ tekst: 'Min note', til: 'a@ollgaard.dk', oprettet: 7, bevis: 'bevis-mail' }]);
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.t.mailKald[0].til, 'a@ollgaard.dk');
+  assert.equal(s.t.mailKald[0].bevis, 'bevis-mail');
+  assert.equal(s.t.mailKald[0].note.tekst, 'Min note');
 });
 
 test('andet svar end 202 beholder alt', async () => {
@@ -266,4 +269,88 @@ test('slet kræver fejl-status', async () => {
     await assert.rejects(s.forloeb.slet('a'));
     assert.equal(s.lager.kort.has('a'), true);
   }
+});
+
+const REFERAT_SVAR = { tekst: 'Fuld tekst', titel: 'AI-titel', referat: { opsummering: 'O' }, pdf: 'JVBERg==', filnavn: 'f.pdf' };
+
+test('behandl sender titel, varighed og tidspunkt med', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 7, titel: 'Tag', varighedMs: 9000 }] });
+  await s.forloeb.behandl('a');
+  assert.deepEqual(s.t.lydArgs[3], { titel: 'Tag', varighedMs: 9000, oprettet: 7 });
+});
+
+test('behandl gemmer referat, pdf og AI-titel', async () => {
+  const s = opsaet({ sendLyd: async () => REFERAT_SVAR });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.TEKST_KLAR);
+  assert.equal(n.titel, 'AI-titel');
+  assert.deepEqual(n.referat, { opsummering: 'O' });
+  assert.equal(n.pdf, 'JVBERg==');
+  assert.equal(n.filnavn, 'f.pdf');
+  assert.equal(n.tekst, 'Fuld tekst');
+});
+
+test('navngivOgSend gemmer titel før afsendelse', async () => {
+  const s = opsaet({ sendLyd: fejl('net') });
+  await s.forloeb.navngivOgSend('a', '  Møde om tag  ');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.titel, 'Møde om tag');
+  assert.equal(n.navngivet, true);
+  assert.equal(s.t.lydArgs[3].titel, 'Møde om tag');
+  assert.equal(n.fejlType, 'net');
+});
+
+test('tomt navn gemmes som navngivet uden titel', async () => {
+  const s = opsaet({ sendLyd: fejl('net') });
+  await s.forloeb.navngivOgSend('a', '   ');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.titel, '');
+  assert.equal(n.navngivet, true);
+});
+
+test('navnet overlever netværksfejl og genforsøg', async () => {
+  let forsoeg = 0;
+  const s = opsaet({ sendLyd: async () => { forsoeg++; if (forsoeg === 1) throw Object.assign(new Error(), { type: 'net' }); return { ...REFERAT_SVAR, titel: 'Møde om tag' }; } });
+  await s.forloeb.navngivOgSend('a', 'Møde om tag');
+  assert.equal(s.lager.kort.get('a').status, STATUS.FEJL);
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydArgs[3].titel, 'Møde om tag');
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.lager.kort.has('a'), false);
+});
+
+test('mail sendes automatisk efter referat', async () => {
+  const s = opsaet({ sendLyd: async () => REFERAT_SVAR });
+  await s.forloeb.navngivOgSend('a', '');
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.t.mailKald[0].note.pdf, 'JVBERg==');
+  assert.equal(s.lager.kort.has('a'), false);
+});
+
+test('ingen mail ved tom tekst', async () => {
+  const s = opsaet({ sendLyd: async () => ({ tekst: '' }) });
+  await s.forloeb.navngivOgSend('a', 'x');
+  assert.equal(s.t.mailKald.length, 0);
+  assert.equal(s.lager.kort.get('a').fejlType, 'ingenTale');
+});
+
+test('mailfejl efter referat sender igen uden nyt referat', async () => {
+  let mailForsoeg = 0;
+  const s = opsaet({
+    sendLyd: async () => REFERAT_SVAR,
+    sendMail: async () => { mailForsoeg++; if (mailForsoeg === 1) throw Object.assign(new Error(), { type: 'mailFejl' }); },
+  });
+  await s.forloeb.navngivOgSend('a', 'x');
+  assert.equal(s.lager.kort.get('a').fejlType, 'mailFejl');
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 1);
+  assert.equal(s.t.mailKald.length, 2);
+  assert.equal(s.lager.kort.has('a'), false);
+});
+
+test('behandlOgSend sender ikke, når mailen måske er sendt', async () => {
+  const s = opsaet({ noter: [{ ...KLAR, maaskeSendt: true }] });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.mailKald.length, 0);
 });

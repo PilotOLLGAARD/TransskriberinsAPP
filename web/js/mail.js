@@ -2,14 +2,62 @@ import { GRAPH_URL } from './konfig.js';
 import { SendFejl } from './transskribering.js';
 
 const TIDSGRAENSE_MS = 30 * 1000;
+const TIDSZONE = 'Europe/Copenhagen';
 
-function emne(oprettet) {
-  const dato = new Date(oprettet).toLocaleString('da-DK', { dateStyle: 'short', timeStyle: 'short' });
-  return `Transskription ${dato}`;
+function escape(tekst) {
+  return String(tekst)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-/** Sender teksten fra brugerens egen konto til brugeren selv. Kun 202 er succes. */
-export async function sendMail({ tekst, til, oprettet, bevis, hent = (...a) => fetch(...a) }) {
+function langDato(tidspunkt) {
+  return new Date(tidspunkt).toLocaleDateString('da-DK', { timeZone: TIDSZONE, day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function kortDato(tidspunkt) {
+  return new Date(tidspunkt).toLocaleString('da-DK', { timeZone: TIDSZONE, dateStyle: 'short', timeStyle: 'short' });
+}
+
+function html(note) {
+  const r = note.referat;
+  const stil = 'font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#282828;font-size:16px;line-height:1.5';
+  const dele = [`<div style="${stil}">`, `<h2 style="margin:0 0 8px">${escape(note.titel || r.titel)}</h2>`];
+  if (r.kort) {
+    dele.push(`<p style="white-space:pre-wrap">${escape(r.renTekst)}</p>`);
+  } else {
+    if (r.opsummering) dele.push(`<p>${escape(r.opsummering)}</p>`);
+    if (r.hovedpunkter?.length) {
+      dele.push('<h3 style="color:#0e5aa3;margin:16px 0 4px">Hovedpunkter</h3>');
+      dele.push(`<ul>${r.hovedpunkter.map((p) => `<li>${escape(p)}</li>`).join('')}</ul>`);
+    }
+  }
+  dele.push('<p style="color:#5b6470;font-size:14px">Hele referatet og den fulde transskription ligger i den vedhæftede PDF.</p>');
+  dele.push('</div>');
+  return dele.join('\n');
+}
+
+/** Mailens emne, tekst og bilag. Noter fra før referaterne sendes som ren tekst. */
+export function lavBesked(note) {
+  if (!note.referat || !note.pdf) {
+    return { subject: `Transskription ${kortDato(note.oprettet)}`, body: { contentType: 'Text', content: note.tekst } };
+  }
+  return {
+    subject: `Referat: ${note.titel || note.referat.titel} – ${langDato(note.oprettet)}`,
+    body: { contentType: 'HTML', content: html(note) },
+    attachments: [{
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: note.filnavn,
+      contentType: 'application/pdf',
+      contentBytes: note.pdf,
+    }],
+  };
+}
+
+/** Sender noten fra brugerens egen konto til brugeren selv. Kun 202 er succes. */
+export async function sendMail({ note, til, bevis, hent = (...a) => fetch(...a) }) {
   let svar;
   try {
     svar = await hent(`${GRAPH_URL}/me/sendMail`, {
@@ -17,11 +65,7 @@ export async function sendMail({ tekst, til, oprettet, bevis, hent = (...a) => f
       signal: AbortSignal.timeout(TIDSGRAENSE_MS),
       headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        message: {
-          subject: emne(oprettet),
-          body: { contentType: 'Text', content: tekst },
-          toRecipients: [{ emailAddress: { address: til } }],
-        },
+        message: { ...lavBesked(note), toRecipients: [{ emailAddress: { address: til } }] },
         saveToSentItems: true,
       }),
     });

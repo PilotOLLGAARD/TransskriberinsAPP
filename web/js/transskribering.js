@@ -12,13 +12,25 @@ export class SendFejl extends Error {
   }
 }
 
-/** Sender originallyden. Kaster SendFejl med typen, appen skal vise. */
-export async function sendLyd(lyd, mime, bevis, hent = (...a) => fetch(...a)) {
+function metaHeadere({ titel, varighedMs, oprettet } = {}) {
+  const h = {};
+  // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
+  if (typeof titel === 'string' && titel.trim()) h['x-titel'] = encodeURIComponent(titel.trim());
+  if (Number.isFinite(varighedMs)) h['x-varighed'] = String(Math.round(varighedMs / 1000));
+  if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
+  return h;
+}
+
+/**
+ * Sender originallyden. Svaret er { tekst } og, når der var tale, også titel, referat, pdf og filnavn.
+ * Kaster SendFejl med typen, appen skal vise.
+ */
+export async function sendLyd(lyd, mime, bevis, meta = {}, hent = (...a) => fetch(...a)) {
   let svar;
   try {
     svar = await hent(API_URL, {
       method: 'POST',
-      headers: { authorization: `Bearer ${bevis}`, 'content-type': mime },
+      headers: { authorization: `Bearer ${bevis}`, 'content-type': mime, ...metaHeadere(meta) },
       body: lyd,
       signal: AbortSignal.timeout(TIDSGRAENSE_MS),
     });
@@ -27,8 +39,8 @@ export async function sendLyd(lyd, mime, bevis, hent = (...a) => fetch(...a)) {
   }
   if (!svar.ok) throw new SendFejl(FEJLTYPER[svar.status] || 'tjeneste');
   try {
-    const { tekst } = await svar.json();
-    if (typeof tekst === 'string') return { tekst };
+    const krop = await svar.json();
+    if (typeof krop.tekst === 'string') return krop;
   } catch { /* Et ulæseligt svar behandles som en fejl hos tjenesten. */ }
   throw new SendFejl('tjeneste');
 }
