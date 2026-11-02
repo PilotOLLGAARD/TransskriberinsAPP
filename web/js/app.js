@@ -9,9 +9,27 @@ import { sendMail } from './mail.js';
 import { browserMedier, lavOptager } from './optager.js';
 import { STATUS } from './tilstand.js';
 import { sendLyd } from './transskribering.js';
+import { STANDARD_TYPE, TYPER } from './typer.js';
 
 const EFTER_LOGIN = 'efterLogin';
 const LAAS = 'optag-';
+const SKJUL_FORKLARING = 'skjulForklaring';
+
+// Lageret kan være slået fra i privat tilstand. Så vises forklaringen bare igen.
+function husk(noegle, vaerdi) {
+  try {
+    if (vaerdi) localStorage.setItem(noegle, vaerdi);
+    else localStorage.removeItem(noegle);
+  } catch { /* Kun en bekvemmelighed. */ }
+}
+
+function huskes(noegle) {
+  try {
+    return Boolean(localStorage.getItem(noegle));
+  } catch {
+    return false;
+  }
+}
 
 const login = LOKAL
   ? lavLokalLogin()
@@ -28,6 +46,10 @@ const t = {
   aabenNote: null,
   navnNote: null,
   navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
+  navnType: null, // typen valgt på navneskærmen; null betyder den, der blev valgt før optagelsen
+  valgtNavn: '', // navn og type valgt på startskærmen, til optagelsen er startet
+  valgtType: STANDARD_TYPE,
+  forklaringSkjult: huskes(SKJUL_FORKLARING),
   besked: null, // { tekst, type: 'fejl' | 'ok' }
   igang: new Set(),
   startTid: 0,
@@ -134,9 +156,12 @@ async function optag() {
   t.besked = null;
   tegn();
   try {
-    const id = await optager.start();
+    const id = await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType });
     holdLaas(id);
     maerkbar();
+    // Valget gælder kun denne optagelse. Det ligger nu på noten.
+    t.valgtNavn = '';
+    t.valgtType = STANDARD_TYPE;
     if (optager.erAktiv()) {
       t.visning = 'optager';
       t.startTid = Date.now();
@@ -174,15 +199,16 @@ async function behandlOgSend(id) {
   await efterAfsendelse(id);
 }
 
-async function navngivOgSend(id, titel) {
+async function navngivOgSend(id, titel, type) {
   t.visning = 'start';
   t.navnNote = null;
   t.navnUdkast = null;
+  t.navnType = null;
   t.besked = null;
   t.igang.add(id);
   await opdater().catch(() => {});
   try {
-    await forloeb.navngivOgSend(id, titel);
+    await forloeb.navngivOgSend(id, titel, type);
   } finally {
     t.igang.delete(id);
   }
@@ -194,6 +220,13 @@ function aabnNavn(id) {
   t.visning = 'navn';
   t.navnNote = id;
   t.navnUdkast = null;
+  t.navnType = null;
+  tegn();
+}
+
+function visForklaring(vis) {
+  t.forklaringSkjult = !vis;
+  husk(SKJUL_FORKLARING, vis ? null : '1');
   tegn();
 }
 
@@ -266,6 +299,7 @@ optager.naarAfsluttet(({ id, grund }) => {
   t.visning = 'navn';
   t.navnNote = id;
   t.navnUdkast = null;
+  t.navnType = null;
   opdater();
 });
 
@@ -302,6 +336,64 @@ function venter(tekst) {
 
 function knap(tekst, vedTryk, { klasse, ikonNavn } = {}) {
   return h('button', { klasse, vedTryk }, ikonNavn ? ikon(ikonNavn) : null, tekst);
+}
+
+/**
+ * De fem typer som én valggruppe. Valget skifter på stedet uden ny tegning, så tastaturet
+ * og det skrevne navn bliver, hvor de er.
+ */
+function typeVaelger(valgt, vedValg) {
+  const gruppe = h('div', { klasse: 'typer', role: 'radiogroup', 'aria-label': 'Type' });
+  for (const { noegle, navn } of TYPER) {
+    const valg = h('button', { type: 'button', role: 'radio', 'aria-checked': String(noegle === valgt) }, ikon('tjek'), navn);
+    valg.addEventListener('click', () => {
+      for (const andet of gruppe.children) andet.setAttribute('aria-checked', String(andet === valg));
+      vedValg(noegle);
+    });
+    gruppe.append(valg);
+  }
+  return gruppe;
+}
+
+function forklaring() {
+  if (t.forklaringSkjult) return null;
+  return h(
+    'section',
+    { klasse: 'forklaring-kort', 'aria-labelledby': 'forklaring-titel' },
+    h('h2', { id: 'forklaring-titel' }, 'Sådan gør du'),
+    h(
+      'ol',
+      { klasse: 'trin' },
+      h('li', {}, 'Vælg type, og skriv evt. et navn.'),
+      h('li', {}, 'Tryk Optag, og læg telefonen med skærmen opad.'),
+      h('li', {}, 'Tryk Stop. Du får et referat på mail.'),
+    ),
+    h(
+      'dl',
+      { klasse: 'typeliste' },
+      ...TYPER.filter((x) => x.noegle !== STANDARD_TYPE).flatMap(({ navn, forklaring: tekst }) => [h('dt', {}, navn), h('dd', {}, tekst)]),
+    ),
+    h('p', { klasse: 'lille' }, 'Vælger du Automatisk, finder appen selv typen.'),
+    knap('Skjul forklaringen', () => visForklaring(false), { klasse: 'hvid' }),
+  );
+}
+
+function startNavn() {
+  const felt = h('input', {
+    id: 'startnavn',
+    klasse: 'navnefelt',
+    type: 'text',
+    maxlength: '120',
+    enterkeyhint: 'done',
+    autocomplete: 'off',
+    autocapitalize: 'sentences',
+    placeholder: 'Fx Møde omkring SAS Lounge',
+  });
+  felt.value = t.valgtNavn;
+  felt.addEventListener('input', () => { t.valgtNavn = felt.value; });
+  // Enter lukker tastaturet. Optagelsen startes kun med Optag.
+  felt.addEventListener('keydown', (e) => { if (e.key === 'Enter') felt.blur(); });
+  return h('div', { klasse: 'felt' }, h('label', { for: 'startnavn', klasse: 'felt-titel' }, 'Navn (valgfrit)'), felt);
 }
 
 function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
@@ -392,7 +484,7 @@ function skaermLogin() {
         { klasse: 'login-midte' },
         ordmaerke(),
         h('h1', {}, 'Transskribering'),
-        h('p', { klasse: 'undertitel' }, 'Indtal noter på byggepladsen. Teksten sendes til din egen mail.'),
+        h('p', { klasse: 'undertitel' }, 'Indtal en note på byggepladsen. Du får et referat på din egen mail.'),
         beskedElement(),
       ),
       h(
@@ -412,14 +504,23 @@ function skaermStart() {
     h('header', { klasse: 'top' }, ordmaerke()),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
+    forklaring(),
+    h(
+      'div',
+      { klasse: 'valg' },
+      h('p', { klasse: 'felt-titel', 'aria-hidden': 'true' }, 'Type'),
+      typeVaelger(t.valgtType, (type) => { t.valgtType = type; }),
+      startNavn(),
+    ),
     h(
       'div',
       { klasse: 'scene' },
       h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter }, ikon('mikrofon'), 'Optag'),
-      h('p', { klasse: 'hjaelpetekst' }, 'Tryk for at indtale en note'),
+      h('p', { klasse: 'hjaelpetekst' }, 'Du får et referat på mail'),
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
+    t.forklaringSkjult ? knap('Vis forklaring', () => visForklaring(true), { klasse: 'hvid' }) : null,
     hjaelpTilHjemmeskaerm(),
   ];
 }
@@ -435,7 +536,7 @@ function skaermOptager() {
         { klasse: 'ur-felt' },
         h('div', { klasse: 'ur', id: 'ur' }, formaterTid(Date.now() - t.startTid)),
         t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, BESKEDER.snartSlut) : null,
-        h('p', {}, 'Hold skærmen tændt, og bliv i appen, mens du optager.'),
+        h('p', {}, 'Lad skærmen være tændt — læg telefonen med skærmen opad'),
       ),
       h('button', { klasse: 'stop', vedTryk: stop }, h('span', { klasse: 'firkant', 'aria-hidden': 'true' }), 'Stop'),
     ),
@@ -479,11 +580,13 @@ function skaermNavn() {
     h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
     felt,
     h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel.'),
+    h('p', { klasse: 'felt-titel', 'aria-hidden': 'true' }, 'Type'),
+    typeVaelger(t.navnType ?? note.type ?? STANDARD_TYPE, (type) => { t.navnType = type; }),
     h('button', { type: 'submit' }, ikon('send'), 'Send'),
   );
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    navngivOgSend(note.id, felt.value);
+    navngivOgSend(note.id, felt.value, t.navnType ?? note.type);
   });
   return [h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
 }
@@ -535,9 +638,20 @@ function tegn() {
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
   temaFarve?.setAttribute('content', t.visning === 'optager' ? '#0f1a26' : '#f3f5f8');
+  // En note, der bliver færdig i baggrunden, tegner skærmen på ny. Skriver brugeren, skal feltet beholde fokus.
+  const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
+  const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
   app.replaceChildren(...indhold.filter(Boolean));
   // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
   if (t.visning === 'navn') document.getElementById('titel')?.focus();
+  else if (markering) {
+    const [id, fra, til] = markering;
+    const felt = document.getElementById(id);
+    if (felt) {
+      felt.focus();
+      felt.setSelectionRange(fra, til);
+    }
+  }
 }
 
 // Start

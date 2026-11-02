@@ -86,7 +86,7 @@ p { margin: 0; font-size: 19px; }
 
 .ordmaerke { display: block; height: 28px; width: auto; }
 
-.titel { margin: 18px 0 6px; }
+.titel { margin: 18px 0 6px; overflow-wrap: anywhere; }
 .undertitel { color: var(--graa); }
 
 /* Knapper: feedback ved tryk, ikke ved slip */
@@ -194,7 +194,7 @@ button svg { width: 26px; height: 26px; }
 .status-ikon.fejl { color: var(--fejl-tekst); background: var(--fejl-bund); }
 .status-ikon.venter { color: var(--graa); background: var(--flade); }
 
-.kort .dato { font-weight: 600; }
+.kort .dato { font-weight: 600; overflow-wrap: anywhere; }
 .kort .forklaring { color: var(--graa); font-size: 18px; }
 .kort.fejl .forklaring { color: var(--fejl-tekst); }
 
@@ -423,3 +423,59 @@ button svg { width: 26px; height: 26px; }
 .tekst li { margin: 4px 0; }
 
 .kort .tid { color: var(--graa); font-size: 18px; }
+
+/* Valg før optagelsen: type og navn */
+
+.valg { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.felt { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.felt-titel { color: var(--graa); font-size: 18px; font-weight: 600; }
+
+/* Fem typer i to kolonner. Automatisk står alene øverst som standard. */
+.typer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.typer > :first-child { grid-column: 1 / -1; }
+
+.typer [role="radio"] {
+  gap: 8px;
+  min-height: 60px;
+  padding: 10px 12px;
+  color: var(--blaek);
+  background: var(--kort);
+  box-shadow: inset 0 0 0 1.5px var(--linje);
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.typer [role="radio"] svg { display: none; width: 22px; height: 22px; }
+
+/* Valgt: fyldt blå og et flueben, så valget ikke kun vises med farve i sollys. */
+.typer [role="radio"][aria-checked="true"] { color: #fff; background: var(--blaa-dyb); box-shadow: none; }
+.typer [role="radio"][aria-checked="true"] svg { display: block; }
+
+.navn .typer { margin-bottom: 4px; }
+
+/* Forklaring på startskærmen */
+
+.forklaring-kort {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: var(--radius-stor);
+  background: var(--kort);
+  box-shadow: var(--skygge);
+}
+
+.trin { margin: 0; padding-left: 26px; font-size: 19px; }
+.trin li { margin: 4px 0; padding-left: 4px; }
+.trin li::marker { color: var(--blaa-dyb); font-weight: 700; }
+
+.typeliste { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 18px; }
+.typeliste dt { font-weight: 650; }
+.typeliste dd { margin: 0; color: var(--graa); }
+.forklaring-kort .lille { color: var(--graa); font-size: 18px; }
+
+@media (prefers-contrast: more) {
+  .forklaring-kort { box-shadow: inset 0 0 0 2px var(--blaek); }
+  .typer [role="radio"] { box-shadow: inset 0 0 0 2px var(--blaek); }
+}

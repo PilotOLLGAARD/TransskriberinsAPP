@@ -86,7 +86,7 @@ test('navneskærmen har fokus i feltet, én Send-knap og Enter sender', async ()
   await stopOptagelse(side);
   await side.getByLabel(FELT).waitFor();
   assert.equal(await side.evaluate(() => document.activeElement?.id), 'titel');
-  assert.deepEqual(await side.locator('button').allTextContents(), ['Send']);
+  assert.deepEqual(await side.getByRole('button').allTextContents(), ['Send']);
   await side.getByLabel(FELT).fill('Kort');
   await side.getByLabel(FELT).press('Enter');
   await vis(side, SENDT);
@@ -439,12 +439,15 @@ test('kan betjenes på 360 px', async () => {
   async function tjek(navn) {
     const m = await side.evaluate(() => ({
       bred: document.documentElement.scrollWidth,
-      knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, b.getBoundingClientRect().height]),
+      knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, b.getBoundingClientRect().height, b.getAttribute('role'), b.getBoundingClientRect().right]),
       lille: [...document.querySelectorAll('button, p, h1, h2, input')].map((e) => parseFloat(getComputedStyle(e).fontSize)),
     }));
     assert.ok(m.bred <= 360, `${navn}: vandret rulning, ${m.bred}`);
     assert.ok(m.knapper.length > 0, navn);
-    for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `${navn}: "${tekst}" er ${hoejde} px`);
+    for (const [tekst, hoejde, rolle, hoejre] of m.knapper) {
+      assert.ok(Math.round(hoejde) >= (rolle === 'radio' ? 56 : 72), `${navn}: "${tekst}" er ${hoejde} px`);
+      assert.ok(hoejre <= 360, `${navn}: "${tekst}" går ud over kanten`);
+    }
     for (const stoerrelse of m.lille) assert.ok(stoerrelse >= 18, `${navn}: tekst på ${stoerrelse} px`);
   }
 
@@ -463,5 +466,111 @@ test('kan betjenes på 360 px', async () => {
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
   await tjek('sendt');
+  await kontekst.close();
+});
+
+// Typer og navn før optagelsen
+
+const radio = (side, navn) => side.getByRole('radio', { name: navn, exact: true });
+const STARTNAVN = 'Navn (valgfrit)';
+
+test('navn og type før optagelse følger med til navneskærmen og mailen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'true');
+  await radio(side, 'Møde').click();
+  assert.equal(await radio(side, 'Møde').getAttribute('aria-checked'), 'true');
+  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'false');
+  await side.getByLabel(STARTNAVN).fill('Tagrenovering');
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).waitFor();
+  assert.equal(await side.getByLabel(FELT).inputValue(), 'Tagrenovering');
+  assert.equal(await radio(side, 'Møde').getAttribute('aria-checked'), 'true');
+  await knap(side, 'Send').click();
+  await vis(side, SENDT);
+  const t = await tal(miljoe);
+  assert.equal(t.sidsteReferat.type, 'moede');
+  assert.equal(t.sidsteReferat.titel, 'Tagrenovering');
+  assert.match(t.sidsteMail.message.subject, /^Møde: Tagrenovering – \d{1,2}\. \S+ \d{4}$/);
+  await kontekst.close();
+});
+
+test('type kan skiftes på navneskærmen uden at miste det skrevne navn', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).fill('Ring til VVS');
+  await radio(side, 'Påmindelse').click();
+  assert.equal(await side.getByLabel(FELT).inputValue(), 'Ring til VVS');
+  await knap(side, 'Send').click();
+  await vis(side, SENDT);
+  assert.match((await tal(miljoe)).sidsteMail.message.subject, /^Påmindelse: Ring til VVS – /);
+  await kontekst.close();
+});
+
+test('navn og type nulstilles, når optagelsen er startet', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await radio(side, 'Byggenotat').click();
+  await side.getByLabel(STARTNAVN).fill('Gåtur');
+  await optag(side, { titel: 'Gåtur' });
+  await vis(side, SENDT);
+  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'true');
+  assert.equal(await side.getByLabel(STARTNAVN).inputValue(), '');
+  await kontekst.close();
+});
+
+test('navnet på startskærmen bevares, når en note bliver færdig i baggrunden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Første' });
+  await side.getByLabel(STARTNAVN).fill('Næste no');
+  await vis(side, SENDT);
+  assert.equal(await side.getByLabel(STARTNAVN).inputValue(), 'Næste no');
+  assert.equal(await side.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.id), 'startnavn');
+  await kontekst.close();
+});
+
+test('forklaringen kan skjules og forbliver skjult efter genindlæsning', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await vis(side, 'Sådan gør du');
+  await vis(side, 'Du får et referat på mail.');
+  for (const navn of ['Byggenotat', 'Møde', 'Påmindelse', 'Andet']) {
+    assert.ok(await side.locator('.forklaring-kort').getByText(navn, { exact: true }).count(), navn);
+  }
+  await knap(side, 'Skjul forklaringen').click();
+  await side.reload();
+  await knap(side, 'Optag').waitFor();
+  assert.equal(await side.getByText('Sådan gør du').count(), 0);
+  await knap(side, 'Vis forklaring').click();
+  await vis(side, 'Sådan gør du');
+  await kontekst.close();
+});
+
+test('optageskærmen beder om at lade skærmen være tændt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Optag').click();
+  await vis(side, 'Lad skærmen være tændt — læg telefonen med skærmen opad');
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await navngiv(side);
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
+test('langt navn uden mellemrum giver ingen vandret rulning på 360 px', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await side.getByLabel(STARTNAVN).fill(`Byggepladsgennemgang${'x'.repeat(100)}`);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await stopOptagelse(side);
+  await knap(side, 'Send').click();
+  await vis(side, 'Transskriptionen mislykkedes');
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
+  await knap(side, 'Prøv igen').click();
+  await vis(side, SENDT);
   await kontekst.close();
 });
