@@ -10,9 +10,10 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 - Data må ikke bruges til træning eller gives videre: kun betalt Gemini API, `store: false`, filer slettes hos Google efter brug.
 - En fremmed må aldrig kunne koste penge: adgangstjekket er det første, serveren gør på `POST /transskriber`, før lyden læses. Fejler lukket.
-- Serveren kræver gyldig signatur, `iss`, `aud`, `exp`, `tid`, scope `access_as_user`, rollen `Transskribering.Bruger` og `acct = 0`. Mailadressen afgør aldrig adgang.
+- Alle ansatte i ØLLGAARDs tenant har adgang, gæster har ikke. Serveren kræver gyldig signatur, `iss` og `aud` (v1 eller v2), `exp`, `tid`, scope `access_as_user` og `acct = 0`. Mailadressen afgør aldrig adgang.
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
+- Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
 - Ingen hemmeligheder i git, i `web/` eller i logs. Læs aldrig `.env*`.
 - Brug aldrig rigtige byggepladsnoter i udvikling eller test.
 

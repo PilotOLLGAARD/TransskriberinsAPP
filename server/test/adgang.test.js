@@ -30,7 +30,6 @@ function medarbejder(ekstra = {}) {
     aud: CLIENT,
     tid: TENANT,
     scp: 'access_as_user',
-    roles: ['Transskribering.Bruger'],
     acct: 0,
     exp: sekunder + 3600,
     nbf: sekunder - 60,
@@ -60,7 +59,7 @@ async function forventAfvist(autorisation, status) {
   assert.equal(typeof svar.grund, 'string');
 }
 
-test('medarbejder med rolle får adgang', async () => {
+test('medarbejder får adgang', async () => {
   assert.deepEqual(await lavTjek().tjek(bevis(medarbejder())), { ok: true });
 });
 
@@ -75,7 +74,7 @@ test('401 ved forkert signatur', async () => {
 
 test('401 ved ændret indhold', async () => {
   const [hoved, , signatur] = bevis(medarbejder()).slice(7).split('.');
-  await forventAfvist(`Bearer ${hoved}.${b64(medarbejder({ roles: ['Admin'] }))}.${signatur}`, 401);
+  await forventAfvist(`Bearer ${hoved}.${b64(medarbejder({ tid: ANDEN_TENANT }))}.${signatur}`, 401);
 });
 
 test('401 ved alg none', () => {
@@ -108,17 +107,33 @@ test('403 ved rigtig tid, men forkert udsteder', () => forventAfvist(bevis(medar
   iss: `https://login.microsoftonline.com/${ANDEN_TENANT}/v2.0`,
 })), 403));
 
-test('403 ved v1-bevis', () => forventAfvist(bevis(medarbejder({ iss: `https://sts.windows.net/${TENANT}/` })), 403));
+test('v1-bevis fra egen tenant godtages', async () => {
+  const v1 = medarbejder({ iss: `https://sts.windows.net/${TENANT}/`, aud: `api://${CLIENT}` });
+  assert.deepEqual(await lavTjek().tjek(bevis(v1)), { ok: true });
+});
+test('403 ved v1-bevis fra anden tenant', () => forventAfvist(bevis(medarbejder({
+  iss: `https://sts.windows.net/${ANDEN_TENANT}/`, tid: ANDEN_TENANT, aud: `api://${CLIENT}`,
+})), 403));
+test('403 ved blandet udsteder og modtager', () => forventAfvist(bevis(medarbejder({ aud: `api://${CLIENT}` })), 403));
 test('403 ved forkert aud', () => forventAfvist(bevis(medarbejder({ aud: 'anden-app' })), 403));
 test('403 når scope mangler', () => forventAfvist(bevis(medarbejder({ scp: 'User.Read' })), 403));
 test('403 for app-bevis uden scp', () => forventAfvist(bevis(medarbejder({ scp: undefined })), 403));
-test('403 når rolle mangler', () => forventAfvist(bevis(medarbejder({ roles: undefined })), 403));
-test('403 ved anden rolle', () => forventAfvist(bevis(medarbejder({ roles: ['Andet'] })), 403));
-test('403 for gæst (acct=1)', () => forventAfvist(bevis(medarbejder({ acct: 1 })), 403));
-test('403 når acct mangler', () => forventAfvist(bevis(medarbejder({ acct: undefined })), 403));
+test('alle medarbejdere har adgang, også uden rolle', async () => {
+  assert.deepEqual(await lavTjek().tjek(bevis(medarbejder({ roles: undefined }))), { ok: true });
+});
 
-test('mailadresse giver ikke adgang', () => forventAfvist(bevis(medarbejder({
-  roles: undefined,
+test('acct som tekst godtages', async () => {
+  assert.deepEqual(await lavTjek().tjek(bevis(medarbejder({ acct: '0' }))), { ok: true });
+});
+
+test('403 for gæst (acct=1)', () => forventAfvist(bevis(medarbejder({ acct: 1 })), 403));
+test('403 for gæst (acct som tekst)', () => forventAfvist(bevis(medarbejder({ acct: '1' })), 403));
+test('403 når acct mangler', () => forventAfvist(bevis(medarbejder({ acct: undefined })), 403));
+test('403 når acct er null', () => forventAfvist(bevis(medarbejder({ acct: null })), 403));
+
+test('mailadresse giver ikke adgang fra en anden tenant', () => forventAfvist(bevis(medarbejder({
+  iss: `https://login.microsoftonline.com/${ANDEN_TENANT}/v2.0`,
+  tid: ANDEN_TENANT,
   preferred_username: 'x@ollgaard.dk',
 })), 403));
 

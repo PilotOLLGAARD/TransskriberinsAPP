@@ -142,6 +142,16 @@ test('andet svar end 202 beholder alt', async () => {
   assert.ok(await s.lager.hentLyd('a'));
 });
 
+test('ukendt udfald af mail giver advarsel, ikke en påstand om at den ikke er sendt', async () => {
+  const s = opsaet({ noter: [KLAR], sendMail: fejl('mailUkendt') });
+  await s.forloeb.sendTilMig('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.TEKST_KLAR);
+  assert.equal(n.maaskeSendt, true);
+  assert.equal(n.fejlType, undefined);
+  assert.ok(await s.lager.hentLyd('a'));
+});
+
 test('udløbet login under mail beholder alt', async () => {
   const s = opsaet({ noter: [KLAR], hentBevis: async () => { throw new LoginKraevet(); } });
   await s.forloeb.sendTilMig('a');
@@ -221,6 +231,14 @@ test('bekræftelse afvises uden advarsel om mulig afsendelse', async () => {
   const s = opsaet({ noter: [KLAR] });
   await assert.rejects(s.forloeb.bekraeftSendt('a'));
   assert.equal(s.lager.kort.has('a'), true);
+});
+
+test('genstart rører ikke en optagelse, der kører i en anden fane', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4' }] });
+  s.lager.hentLyd = async () => new Blob([]);
+  const noter = await s.forloeb.genoptag(new Set(['a']));
+  assert.deepEqual(noter, []);
+  assert.equal(s.lager.kort.get('a').status, STATUS.OPTAGER);
 });
 
 test('genstart fjerner en optagelse uden lyd', async () => {

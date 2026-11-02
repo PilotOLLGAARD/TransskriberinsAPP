@@ -32,7 +32,14 @@ test('401 kræver login', async () => {
   await assert.rejects(sendMail({ ...VALG, hent }), (e) => e.type === 'login');
 });
 
-test('netværksfejl giver mailFejl', async () => {
+test('netværksfejl giver mailUkendt, for Microsoft kan have modtaget mailen', async () => {
   const hent = async () => { throw new TypeError('Failed to fetch'); };
-  await assert.rejects(sendMail({ ...VALG, hent }), (e) => e.type === 'mailFejl');
+  await assert.rejects(sendMail({ ...VALG, hent }), (e) => e.type === 'mailUkendt');
+});
+
+test('kaldet har en tidsgrænse', async () => {
+  let signal;
+  const hent = async (_url, v) => { signal = v.signal; return new Response(null, { status: 202 }); };
+  await sendMail({ ...VALG, hent });
+  assert.ok(signal instanceof AbortSignal);
 });

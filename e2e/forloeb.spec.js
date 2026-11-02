@@ -98,7 +98,7 @@ test('optagelse overlever netværksfejl', async () => {
   await kontekst.close();
 });
 
-for (const type of ['fremmed', 'gaest', 'uden-rolle']) {
+for (const type of ['fremmed', 'gaest']) {
   test(`fremmed koster ikke penge: ${type}`, async () => {
     const { kontekst, side } = await nyTelefon(miljoe);
     const foer = await tal(miljoe);
@@ -205,6 +205,21 @@ test('måske sendt og udløbet login sender ikke automatisk efter login', async 
   await vis(side, 'Mailen er måske allerede sendt.');
   assert.equal((await tal(miljoe)).mailKald, foer.mailKald);
   assert.equal(await antalNoter(side), 1);
+  await kontekst.close();
+});
+
+test('login uden net giver en besked og forlader ikke appen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side, 'udloebet');
+  await side.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await optag(side);
+  await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+  await side.evaluate(() => localStorage.setItem('testNaesteType', 'medarbejder'));
+  await kontekst.setOffline(true);
+  await knap(side, 'Log ind og prøv igen').click();
+  await vis(side, 'Du skal have net for at logge ind.');
+  assert.equal(await side.evaluate(() => localStorage.getItem('testType')), 'udloebet');
+  await kontekst.setOffline(false);
   await kontekst.close();
 });
 

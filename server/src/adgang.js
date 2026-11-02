@@ -15,7 +15,6 @@ const MIN_MS_EFTER_FEJL = 30 * 1000;
 const UR_SKEW_S = 60;
 const MAX_BEVIS_LAENGDE = 16 * 1024;
 const SCOPE = 'access_as_user';
-const ROLLE = 'Transskribering.Bruger';
 
 function afvist(status, grund) {
   return { ok: false, status, grund };
@@ -85,7 +84,12 @@ function lavAdgangsTjek({ tenantId, clientId, hent = (...a) => fetch(...a), nu =
   if (!tid || !app) return async () => afvist(401, 'mangler-konfiguration');
 
   const noegle = lavNoegleHenter(tid, hent, nu);
-  const udsteder = `https://login.microsoftonline.com/${tid}/v2.0`;
+  // v2-beviser har client ID som modtager, v1-beviser har appens API-adresse. Begge godtages, så IT
+  // ikke skal rette manifestet. Udsteder og modtager skal passe sammen.
+  const gyldigePar = new Map([
+    [`https://login.microsoftonline.com/${tid}/v2.0`, app],
+    [`https://sts.windows.net/${tid}/`, `api://${app}`],
+  ]);
 
   return async function tjek(autorisation) {
     try {
@@ -113,12 +117,12 @@ function lavAdgangsTjek({ tenantId, clientId, hent = (...a) => fetch(...a), nu =
       if (!Number.isFinite(c.exp) || c.exp < sekunder - UR_SKEW_S) return afvist(401, 'udloebet');
       if (Number.isFinite(c.nbf) && c.nbf > sekunder + UR_SKEW_S) return afvist(401, 'ikke-gyldigt-endnu');
 
-      if (c.iss !== udsteder || String(c.tid).toLowerCase() !== tid) return afvist(403, 'forkert-tenant');
-      if (String(c.aud).toLowerCase() !== app) return afvist(403, 'forkert-app');
+      if (!gyldigePar.has(c.iss) || String(c.tid).toLowerCase() !== tid) return afvist(403, 'forkert-tenant');
+      if (String(c.aud).toLowerCase() !== gyldigePar.get(c.iss)) return afvist(403, 'forkert-app');
       // Kun beviser på vegne af en bruger. App-til-app-beviser har ikke scp.
       if (!String(c.scp || '').split(' ').includes(SCOPE)) return afvist(403, 'mangler-scope');
-      if (!Array.isArray(c.roles) || !c.roles.includes(ROLLE)) return afvist(403, 'mangler-rolle');
-      if (c.acct !== 0) return afvist(403, 'ikke-medarbejder');
+      // Alle ansatte i ØLLGAARDs tenant har adgang. Gæster (acct = 1) har ikke.
+      if (c.acct === undefined || c.acct === null || String(c.acct) !== '0') return afvist(403, 'ikke-medarbejder');
 
       return { ok: true };
     } catch {

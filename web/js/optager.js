@@ -129,6 +129,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       if (ingenLyd || ingenPlads) {
         await lager.sletNote(o.id);
         if (ingenLyd && endelig !== 'plads') endelig = 'tom';
+        else if (ingenPlads) endelig = 'pladsTom';
       } else {
         const afbrudt = endelig === 'afbrudt' || endelig === 'plads';
         await lager.opdaterNote(o.id, { status: STATUS.GEMT, ...(afbrudt ? { afbrudt: true } : {}) });

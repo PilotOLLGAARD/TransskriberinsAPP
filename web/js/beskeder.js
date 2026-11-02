@@ -10,6 +10,8 @@ export const BESKEDER = {
   afbrudt: 'Optagelsen blev afbrudt, fordi telefonen låste eller skiftede app. Det indtalte er gemt.',
   tomOptagelse: 'Der blev ikke optaget noget lyd. Prøv igen.',
   pladsMangler: 'Telefonen er løbet tør for plads. Det indtalte indtil nu er gemt.',
+  pladsTom: 'Telefonen er løbet tør for plads, så intet blev gemt. Frigør plads, og prøv igen.',
+  loginKraeverNet: 'Du skal have net for at logge ind. Optagelsen er gemt.',
   snartSlut: 'Optagelsen stopper om 4 minutter.',
   maksNaaet: 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.',
   mailFejl: 'Mailen blev ikke sendt. Teksten er gemt. Prøv igen.',

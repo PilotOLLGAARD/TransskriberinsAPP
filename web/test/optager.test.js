@@ -241,6 +241,14 @@ test('afslutter når lageret er fuldt', async () => {
   assert.equal(s.lager.noter.get(id).status, 'gemt');
 });
 
+test('fuldt lager før noget er gemt melder pladsTom og sletter noten', async () => {
+  const s = opsaet({ lager: falskLager({ fejlFraStykke: 0 }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'pladsTom' });
+  assert.equal(s.lager.noter.has(id), false);
+});
+
 test('advarer ved 55 minutter', async () => {
   const s = opsaet();
   await s.optager.start();

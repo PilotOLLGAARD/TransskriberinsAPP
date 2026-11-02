@@ -25,6 +25,7 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
 };
 
 function lavBeviser() {
@@ -40,7 +41,6 @@ function lavBeviser() {
       aud: CLIENT,
       tid: TENANT,
       scp: 'access_as_user',
-      roles: ['Transskribering.Bruger'],
       acct: 0,
       exp: nu + 3600,
       nbf: nu - 60,
@@ -49,7 +49,6 @@ function lavBeviser() {
       indhold.tid = ANDEN_TENANT;
       indhold.iss = `https://login.microsoftonline.com/${ANDEN_TENANT}/v2.0`;
     }
-    if (type === 'uden-rolle') delete indhold.roles;
     if (type === 'gaest') indhold.acct = 1;
     if (type === 'udloebet') indhold.exp = nu - 3600;
     const krop = `${b64({ alg: 'RS256', kid })}.${b64(indhold)}`;

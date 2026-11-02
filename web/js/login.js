@@ -2,7 +2,13 @@
 // Redirect, ikke popup. Login startes kun, når brugeren trykker, så det aldrig afbryder en optagelse.
 
 const MAIL_SCOPE = 'https://graph.microsoft.com/Mail.Send';
-const NET_KODER = new Set(['no_network_connectivity', 'post_request_failed', 'endpoints_resolution_error', 'network_error']);
+const NET_KODER = new Set([
+  'no_network_connectivity',
+  'post_request_failed',
+  'get_request_failed',
+  'endpoints_resolution_error',
+  'network_error',
+]);
 
 export class LoginKraevet extends Error {
   constructor() {
@@ -27,7 +33,7 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
   // MSAL krypterer sit lager med en sessions-cookie, så kontoen kan være væk, efter telefonen har lukket appen.
   const konto = () => {
     try {
-      return app?.getAllAccounts()[0] ?? null;
+      return app?.getActiveAccount() ?? app?.getAllAccounts()[0] ?? null;
     } catch {
       return null;
     }
@@ -46,7 +52,9 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
       });
       await app.initialize();
       try {
-        await app.handleRedirectPromise();
+        // Efter et nyt login er det den konto, der skal bruges, også hvis en gammel ligger i lageret.
+        const svar = await app.handleRedirectPromise();
+        if (svar?.account) app.setActiveAccount(svar.account);
       } catch {
         // Et mislykket login må ikke forhindre appen i at starte. Optagelser skal kunne nås.
       }
@@ -65,6 +73,9 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
         const { accessToken } = await app.acquireTokenSilent({
           scopes: [omraade === 'mail' ? MAIL_SCOPE : apiScope],
           account,
+          // Ingen skjult login-ramme: den blokeres af Safari og af appens sikkerhedsregler.
+          // Kan beviset ikke fornyes, beder appen om login, når brugeren trykker.
+          cacheLookupPolicy: msal.CacheLookupPolicy?.AccessTokenAndRefreshToken ?? 2,
         });
         return accessToken;
       } catch (e) {

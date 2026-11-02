@@ -5,13 +5,15 @@ import { lavLogin, lavLokalLogin, LoginKraevet } from '../js/login.js';
 const ENTRA = { tenantId: 't', clientId: 'c' };
 const KONTO = { username: 'a@ollgaard.dk' };
 
-function falskMsal({ konti = [KONTO], tilstille = async () => ({ accessToken: 'bevis' }) } = {}) {
-  const f = { kald: [], omdirigeret: [] };
+function falskMsal({ konti = [KONTO], tilstille = async () => ({ accessToken: 'bevis' }), retur = null } = {}) {
+  const f = { kald: [], omdirigeret: [], CacheLookupPolicy: { AccessTokenAndRefreshToken: 2 } };
   f.PublicClientApplication = class {
     constructor(opsaetning) { f.opsaetning = opsaetning; }
     async initialize() { f.initialiseret = true; }
-    async handleRedirectPromise() { f.haandteret = true; return null; }
+    async handleRedirectPromise() { f.haandteret = true; return retur; }
     getAllAccounts() { return konti; }
+    setActiveAccount(konto) { f.aktiv = konto; }
+    getActiveAccount() { return f.aktiv ?? null; }
     async acquireTokenSilent(valg) { f.kald.push(valg); return tilstille(valg); }
     async loginRedirect(valg) { f.omdirigeret.push(valg); }
   };
@@ -100,6 +102,33 @@ test('api-bevis bruger appens scope', async () => {
   assert.equal(await l.hentBevis('api'), 'bevis');
   assert.deepEqual(f.kald[0].scopes, ['api://c/access_as_user']);
   assert.equal(f.kald[0].account, KONTO);
+});
+
+test('konto fra et nyt login bruges frem for en gammel', async () => {
+  const ny = { username: 'ny@ollgaard.dk' };
+  const f = falskMsal({ konti: [KONTO, ny], retur: { account: ny } });
+  const l = lav(f);
+  await l.init();
+  assert.equal(l.brugerMail(), 'ny@ollgaard.dk');
+  await l.hentBevis('api');
+  assert.equal(f.kald[0].account, ny);
+});
+
+test('beviser hentes uden skjult login-vindue', async () => {
+  const f = falskMsal();
+  const l = lav(f);
+  await l.init();
+  await l.hentBevis('api');
+  assert.equal(f.kald[0].cacheLookupPolicy, 2);
+});
+
+test('fejlet netværkskald under fornyelse giver net', async () => {
+  for (const errorCode of ['get_request_failed', 'post_request_failed']) {
+    const fejl = Object.assign(new Error('x'), { errorCode });
+    const l = lav(falskMsal({ tilstille: async () => { throw fejl; } }));
+    await l.init();
+    await assert.rejects(l.hentBevis('api'), (e) => e.type === 'net', errorCode);
+  }
 });
 
 test('mail-bevis bruger Mail.Send', async () => {

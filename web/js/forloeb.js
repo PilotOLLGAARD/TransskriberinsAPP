@@ -52,6 +52,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
         const bevis = await login.hentBevis('mail');
         await sendMail({ tekst: note.tekst, til: login.brugerMail(), oprettet: note.oprettet, bevis });
       } catch (e) {
+        if (e?.type === 'mailUkendt') {
+          // Mailen kan være sendt. Brugeren tjekker indbakken i stedet for at få en dobbelt mail.
+          await opdaterTrygt(id, { status: STATUS.TEKST_KLAR, maaskeSendt: true });
+          return;
+        }
         await opdaterTrygt(id, {
           status: STATUS.TEKST_KLAR,
           fejlType: e?.type === 'login' ? 'login' : 'mailFejl',
@@ -66,9 +71,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
     }),
 
     /** Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv. */
-    async genoptag() {
+    async genoptag(aktiveAndetSted = new Set()) {
       const vist = [];
       for (const note of await lager.alleNoter()) {
+        // En optagelse, der stadig kører i en anden fane eller i den installerede app, er ikke vores.
+        if (aktiveAndetSted.has(note.id)) continue;
         try {
           // Lukket før første stykke blev gemt: Der er intet at gemme.
           if (note.status === STATUS.OPTAGER && (await lager.hentLyd(note.id)).size === 0) {
