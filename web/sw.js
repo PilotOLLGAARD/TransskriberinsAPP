@@ -1,13 +1,18 @@
 // Gør, at appen kan åbnes uden net, så gemte optagelser altid kan nås.
 // Kun appens egne filer caches. Kald til serveren, Microsoft og Graph røres ikke.
-// En ny udgave hentes i baggrunden og bruges næste gang, appen åbnes.
+//
+// Hver udgave hentes samlet i sit eget cache, så gamle og nye filer aldrig blandes.
+// VERSION sættes til commit-nummeret, når appen udgives (.github/workflows/web.yml).
 
-const VERSION = 'v1';
+const VERSION = 'udvikling';
+const UDVIKLING = ['localhost', '127.0.0.1'].includes(self.location.hostname);
 const FILER = [
   './',
   'index.html',
   'styles.css',
   'manifest.webmanifest',
+  'ordmaerke.svg',
+  'maerke.svg',
   'icon-192.png',
   'icon-512.png',
   'apple-touch-icon.png',
@@ -25,7 +30,11 @@ const FILER = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILER)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const cache = await caches.open(VERSION);
+    await cache.addAll(FILER.map((f) => new Request(f, { cache: 'reload' })));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
@@ -42,21 +51,19 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const omfang = new URL(self.registration.scope).pathname;
   const sti = url.pathname.slice(omfang.length);
-  const kendt = e.request.mode === 'navigate' || FILER.includes(sti);
-  if (!kendt) return;
+  if (e.request.mode !== 'navigate' && !FILER.includes(sti)) return;
+  const noegle = e.request.mode === 'navigate' ? './' : e.request;
 
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
-    const noegle = e.request.mode === 'navigate' ? './' : e.request;
-    const gemt = await cache.match(noegle, { ignoreSearch: true });
-    const hentet = fetch(e.request).then((svar) => {
-      if (svar.ok) cache.put(noegle, svar.clone());
-      return svar;
-    });
-    if (gemt) {
-      e.waitUntil(hentet.catch(() => {}));
-      return gemt;
+    // Under udvikling hentes filerne altid friske. Cachen bruges kun uden net.
+    if (UDVIKLING) {
+      try {
+        return await fetch(e.request);
+      } catch {
+        return (await cache.match(noegle, { ignoreSearch: true })) || Response.error();
+      }
     }
-    return hentet;
+    return (await cache.match(noegle, { ignoreSearch: true })) || fetch(e.request);
   })());
 });
