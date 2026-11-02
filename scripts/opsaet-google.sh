@@ -34,7 +34,7 @@ echo "Projekt: $PROJEKT ($NUMMER), region $REGION"
 
 echo "1/7 Slår tjenesterne til"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com iamcredentials.googleapis.com sts.googleapis.com generativelanguage.googleapis.com
+  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com generativelanguage.googleapis.com
 
 echo "2/7 Gemmer Gemini-nøglen i Secret Manager"
 if gcloud secrets describe gemini-api-key >/dev/null 2>&1; then
@@ -54,6 +54,11 @@ gcloud secrets add-iam-policy-binding gemini-api-key \
   --member="serviceAccount:$SERVER_KONTO" --role=roles/secretmanager.secretAccessor >/dev/null
 
 echo "4/7 Giver bygningen af serveren de rettigheder, den skal bruge"
+# Google opretter byggekontoen, når Cloud Run slås til. Det kan tage et øjeblik.
+for i in $(seq 1 30); do
+  gcloud iam service-accounts describe "$BYG_KONTO" >/dev/null 2>&1 && break
+  echo "    Venter på, at Google opretter byggekontoen ..."; sleep 10
+done
 gcloud projects add-iam-policy-binding "$PROJEKT" \
   --member="serviceAccount:$BYG_KONTO" --role=roles/run.builder --condition=None >/dev/null
 
@@ -77,6 +82,9 @@ gcloud iam workload-identity-pools providers describe "$UDBYDER" --location=glob
     --attribute-condition="assertion.repository=='$REPO'"
 gcloud iam service-accounts add-iam-policy-binding "$GITHUB_KONTO" --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/$NUMMER/locations/global/workloadIdentityPools/$POOL/attribute.repository/$REPO" >/dev/null
+
+echo "    Venter 90 sekunder, så de nye rettigheder slår igennem hos Google"
+sleep 90
 
 echo "6/7 Udgiver serveren første gang (tager et par minutter)"
 gcloud run deploy "$TJENESTE" --source server --region "$REGION" \
