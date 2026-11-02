@@ -7,6 +7,7 @@ const { GeminiFejl } = require('../src/gemini.js');
 const NOEGLE = 'hemmelig-testnoegle';
 const FULDT = {
   titel: 'Møde om tag',
+  type: 'moede',
   opsummering: 'Der blev aftalt nyt tag.',
   hovedpunkter: ['Taget udskiftes'],
   beslutninger: ['Tagpap vælges'],
@@ -90,7 +91,7 @@ test('AI-titel bruges ved tom titel', async () => {
 
 test('ufuldstændigt referat udfyldes', async () => {
   const { hent } = falskHent(() => modelSvar({ opsummering: 42, hovedpunkter: ['a', '', 7, ' b '], opgaver: [{ hvad: 'x' }, { hvem: 'y' }, 'z'] }));
-  const r = await lav(hent).lav({ ...INPUT, signal: signal() });
+  const r = await lav(hent).lav({ ...INPUT, type: 'moede', signal: signal() });
   assert.equal(r.titel, 'Optagelse');
   assert.equal(r.opsummering, '');
   assert.deepEqual(r.hovedpunkter, ['a', 'b']);
@@ -145,4 +146,117 @@ test('nøglen indgår aldrig i en fejlbesked', async () => {
 test('400 fra referat-modellen er tjeneste-fejl, ikke en ødelagt optagelse', async () => {
   const { hent } = falskHent(() => svar(400, {}));
   await assert.rejects(lav(hent).lav({ ...INPUT, signal: signal() }), (e) => e.kode === 'tjeneste');
+});
+
+// Referat efter type
+
+const skema = (k) => k.krop.response_format.schema;
+const prompt = (k) => k.krop.input[0].text;
+
+test('fast type: skemaet har kun typens felter og ingen type', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ titel: 'x', opsummering: 'y', hovedpunkter: [], fejlOgMangler: [], maalOgMaengder: [], opgaver: [] }));
+  await lav(hent).lav({ ...INPUT, type: 'byggenotat', signal: signal() });
+  const felter = Object.keys(skema(kald[0]).properties).sort();
+  assert.deepEqual(felter, ['fejlOgMangler', 'hovedpunkter', 'maalOgMaengder', 'opgaver', 'opsummering', 'titel']);
+  assert.deepEqual([...skema(kald[0]).required].sort(), felter);
+  assert.ok(prompt(kald[0]).includes('Byggenotat'));
+  assert.ok(prompt(kald[0]).includes('maalOgMaengder'));
+  assert.ok(!prompt(kald[0]).includes('beslutninger'));
+});
+
+test('automatisk: skemaet kræver en type blandt de fire', async () => {
+  const { hent, kald } = falskHent();
+  const r = await lav(hent).lav({ ...INPUT, type: 'automatisk', signal: signal() });
+  const s = skema(kald[0]);
+  assert.deepEqual(s.properties.type.enum, ['byggenotat', 'moede', 'paamindelse', 'andet']);
+  assert.ok(s.required.includes('type'));
+  for (const f of ['hovedpunkter', 'beslutninger', 'opgaver', 'fejlOgMangler', 'maalOgMaengder', 'huskeliste', 'aabneSpoergsmaal']) {
+    assert.ok(s.properties[f], f);
+  }
+  assert.equal(r.type, 'moede');
+});
+
+test('uden type er det automatisk', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent).lav({ ...INPUT, signal: signal() });
+  assert.ok(skema(kald[0]).properties.type);
+});
+
+test('automatisk: ugyldig type fra modellen bliver andet', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, type: 'referat' }));
+  const r = await lav(hent).lav({ ...INPUT, signal: signal() });
+  assert.equal(r.type, 'andet');
+  assert.deepEqual(r.hovedpunkter, ['Taget udskiftes']);
+  assert.deepEqual(r.beslutninger, []);
+  assert.deepEqual(r.opgaver, []);
+});
+
+test('fast type vinder over modellens type', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, type: 'andet' }));
+  const r = await lav(hent).lav({ ...INPUT, type: 'moede', signal: signal() });
+  assert.equal(r.type, 'moede');
+});
+
+test('felter uden for typen tømmes, selvom modellen udfylder dem', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, fejlOgMangler: ['Revne'], maalOgMaengder: ['12 m²'], huskeliste: ['søm'] }));
+  const r = await lav(hent).lav({ ...INPUT, type: 'moede', signal: signal() });
+  assert.deepEqual(r.fejlOgMangler, []);
+  assert.deepEqual(r.maalOgMaengder, []);
+  assert.deepEqual(r.huskeliste, []);
+  assert.deepEqual(r.beslutninger, ['Tagpap vælges']);
+});
+
+test('byggenotat beholder mål og mængder præcis som sagt', async () => {
+  const { hent } = falskHent(() => modelSvar({ titel: 'Gåtur', opsummering: 'o', hovedpunkter: [], fejlOgMangler: ['Revne i væg'], maalOgMaengder: ['12,5 m² gips', '40 stk. søm'], opgaver: [] }));
+  const r = await lav(hent).lav({ ...INPUT, type: 'byggenotat', signal: signal() });
+  assert.deepEqual(r.maalOgMaengder, ['12,5 m² gips', '40 stk. søm']);
+  assert.deepEqual(r.fejlOgMangler, ['Revne i væg']);
+});
+
+test('referatet har altid alle felter', async () => {
+  const { hent } = falskHent(() => modelSvar({ titel: 'P', opsummering: 'o', huskeliste: ['Ring til VVS'] }));
+  const r = await lav(hent).lav({ ...INPUT, type: 'paamindelse', signal: signal() });
+  assert.deepEqual(Object.keys(r).sort(), ['aabneSpoergsmaal', 'beslutninger', 'fejlOgMangler', 'hovedpunkter', 'huskeliste', 'kort', 'maalOgMaengder', 'opgaver', 'opsummering', 'renTekst', 'titel', 'type']);
+  assert.deepEqual(r.huskeliste, ['Ring til VVS']);
+  assert.deepEqual(r.hovedpunkter, []);
+});
+
+test('kort påmindelse får huskeliste og renTekst', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ titel: 'VVS', renTekst: 'Husk at ringe til VVS.', huskeliste: ['Ring til VVS'] }));
+  const r = await lav(hent).lav({ tekst: 'øh husk at ringe til vvs', titel: '', type: 'paamindelse', varighedSek: 10, signal: signal() });
+  assert.deepEqual(Object.keys(skema(kald[0]).properties).sort(), ['huskeliste', 'renTekst', 'titel']);
+  assert.equal(r.kort, true);
+  assert.equal(r.type, 'paamindelse');
+  assert.equal(r.renTekst, 'Husk at ringe til VVS.');
+  assert.deepEqual(r.huskeliste, ['Ring til VVS']);
+});
+
+test('kort note af anden type er uændret: kun renTekst', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ titel: 'Note', renTekst: 'Husk søm.', huskeliste: ['søm'] }));
+  const r = await lav(hent).lav({ tekst: 'øh husk søm', titel: '', type: 'byggenotat', varighedSek: 10, signal: signal() });
+  assert.deepEqual(Object.keys(skema(kald[0]).properties).sort(), ['renTekst', 'titel']);
+  assert.equal(r.type, 'byggenotat');
+  assert.deepEqual(r.huskeliste, []);
+});
+
+test('kort automatisk note: modellen vælger type, og kun påmindelse beholder huskeliste', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ titel: 'VVS', type: 'paamindelse', renTekst: 'Ring til VVS.', huskeliste: ['Ring til VVS'] }));
+  const r = await lav(hent).lav({ tekst: 'ring til vvs', titel: '', varighedSek: 8, signal: signal() });
+  assert.ok(skema(kald[0]).properties.type);
+  assert.ok(skema(kald[0]).properties.huskeliste);
+  assert.equal(r.type, 'paamindelse');
+  assert.deepEqual(r.huskeliste, ['Ring til VVS']);
+
+  const anden = falskHent(() => modelSvar({ titel: 'N', type: 'andet', renTekst: 'Tekst.', huskeliste: ['x'] }));
+  const r2 = await lav(anden.hent).lav({ tekst: 'tekst', titel: '', varighedSek: 8, signal: signal() });
+  assert.equal(r2.type, 'andet');
+  assert.deepEqual(r2.huskeliste, []);
+});
+
+test('prompten bevarer reglerne mod opfundne roller og Mig for alle typer med opgaver', () => {
+  for (const type of ['moede', 'byggenotat', 'automatisk']) {
+    const p = lavPrompt({ tekst: 'x', titel: '', kort: false, type });
+    assert.ok(p.includes('Tilføj ikke roller'), type);
+    assert.ok(p.includes('"Mig"'), type);
+  }
 });

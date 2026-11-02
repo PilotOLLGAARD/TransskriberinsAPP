@@ -4,7 +4,7 @@
  * Prøver referat og PDF mod rigtig Gemini ud fra en tekstfil eller en lydfil. Koster penge og kræver .env.
  * Brug kun selvindtalte eller opdigtede tekster, aldrig rigtige byggepladsnoter.
  *
- * Brug: node --env-file=.env scripts/proev-referat.js <fil.txt|fil.m4a> [--titel "..."] [--varighed 120] [--pdf sti.pdf]
+ * Brug: node --env-file=.env scripts/proev-referat.js <fil.txt|fil.m4a> [--titel "..."] [--type moede] [--varighed 120] [--pdf mappe]
  */
 
 const fs = require('node:fs');
@@ -43,7 +43,7 @@ async function main() {
   };
   const referat = await lavReferat({
     noegle: process.env.GEMINI_API_KEY, model: process.env.REFERAT_MODEL || 'gemini-3.8-flash', timeoutMs: 120000, hent,
-  }).lav({ tekst, titel: valg('titel') || '', varighedSek: varighed === undefined ? null : Number(varighed), signal });
+  }).lav({ tekst, titel: valg('titel') || '', type: valg('type'), varighedSek: varighed === undefined ? null : Number(varighed), signal });
   console.log(`Referat på ${((Date.now() - start) / 1000).toFixed(1)} s:\n${JSON.stringify(referat, null, 2)}`);
   if (forbrug) {
     // Gemini 3.8 Flash, betalt niveau, til 31. december 2026: 0,75 USD pr. mio. tokens ind og 3,75 ud. Tænkning tæller som ud.
