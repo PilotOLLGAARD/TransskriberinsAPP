@@ -2,6 +2,7 @@
 
 /**
  * Laver appens ikoner ud fra ØLLGAARDs Ø-mærke (web/maerke.svg): blåt mærke på hvid flade.
+ * Laver også ordmærket som PNG til PDF'erne (server/assets/ordmaerke.png).
  * Brug: node scripts/lav-ikoner.js
  */
 
@@ -29,6 +30,12 @@ async function main() {
       await side.close();
       console.log(`${navn}: ${str}x${str}`);
     }
+    const ord = fs.readFileSync(path.join(WEB, 'ordmaerke.svg'), 'utf8');
+    const side = await browser.newPage({ viewport: { width: 1200, height: 240 } });
+    await side.setContent(`<!doctype html><style>html,body{margin:0;background:transparent}svg{display:block;width:1200px;height:auto}</style>${ord}`);
+    const ud = path.resolve(__dirname, '..', 'server', 'assets', 'ordmaerke.png');
+    await side.locator('svg').screenshot({ path: ud, omitBackground: true });
+    console.log(`ordmaerke.png: ${ud}`);
   } finally {
     await browser.close();
   }

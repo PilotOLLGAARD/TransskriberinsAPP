@@ -19,7 +19,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 ## Arkitektur
 
-iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24 uden afhængigheder, Google Cloud Run) → Gemini 3.5 Transcribe. Mailen sendes fra telefonen via Microsoft Graph. Azure bruges ikke.
+iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run) → Gemini 3.5 Transcribe. Mailen sendes fra telefonen via Microsoft Graph. Azure bruges ikke.
 
 ## Kommandoer
 
