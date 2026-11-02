@@ -8,6 +8,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const PDFDocument = require('pdfkit');
+const { AFSNIT, ETIKET, FELTER } = require('./typer.js');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 const LATO = fs.readFileSync(path.join(ASSETS, 'Lato-Regular.ttf'));
@@ -59,16 +60,32 @@ function formaterOpgave({ hvem, hvad, hvornaar }) {
   return `${hvem ? `${hvem}: ` : ''}${hvad}${hvornaar ? ` (frist: ${hvornaar})` : ''}`;
 }
 
-/** Afsnittene i den rækkefølge, de vises. Tomme afsnit udelades. */
+// Uden kendt type vises alle afsnit, der har indhold.
+const ALLE_FELTER = ['hovedpunkter', 'beslutninger', 'opgaver', 'fejlOgMangler', 'maalOgMaengder', 'huskeliste', 'aabneSpoergsmaal'];
+
+function punkterAf(referat, felt) {
+  const punkter = referat[felt] || [];
+  return felt === 'opgaver' ? punkter.map(formaterOpgave) : punkter;
+}
+
+/** Afsnittene i den rækkefølge, typen bestemmer. Tomme afsnit udelades. */
 function lavAfsnit(referat) {
-  if (referat.kort) return [{ overskrift: 'Note', tekst: referat.renTekst }];
-  return [
-    { overskrift: 'Hovedpunkter', punkter: referat.hovedpunkter },
-    { overskrift: 'Beslutninger', punkter: referat.beslutninger },
-    { overskrift: 'Opgaver og aftaler', punkter: referat.opgaver.map(formaterOpgave) },
-    { overskrift: 'Fejl og mangler', punkter: referat.fejlOgMangler },
-    { overskrift: 'Åbne spørgsmål', punkter: referat.aabneSpoergsmaal },
-  ].filter((a) => a.punkter.length);
+  const huskeliste = { overskrift: FELTER.huskeliste.overskrift, punkter: referat.huskeliste || [] };
+  if (referat.kort) {
+    return [huskeliste, { overskrift: 'Note', tekst: referat.renTekst }].filter((a) => a.tekst !== undefined || a.punkter.length);
+  }
+  const felter = AFSNIT[referat.type]?.map((a) => a.felt) ?? ALLE_FELTER;
+  return felter
+    .map((felt) => ({ overskrift: FELTER[felt].overskrift, punkter: punkterAf(referat, felt) }))
+    .filter((a) => a.punkter.length);
+}
+
+/** Linjen under titlen: type, tidspunkt og varighed. */
+function lavMeta({ type, tidspunkt, varighedSek }) {
+  const varighed = formaterVarighed(varighedSek);
+  return [AFSNIT[type] && ETIKET[type], formaterTidspunkt(tidspunkt), varighed && `Varighed ${varighed}`]
+    .filter(Boolean)
+    .join('  ·  ');
 }
 
 function overskrift(doc, tekst) {
@@ -98,10 +115,7 @@ function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst }) {
       doc.image(LOGO, MARGEN, MARGEN - 8, { width: 150 });
       doc.y = MARGEN + 46;
       doc.font('fed').fontSize(20).fillColor(BLAEK).text(titel, { lineGap: 2 });
-      const meta = [formaterTidspunkt(tidspunkt), formaterVarighed(varighedSek) && `Varighed ${formaterVarighed(varighedSek)}`]
-        .filter(Boolean)
-        .join('  ·  ');
-      doc.moveDown(0.2).font('normal').fontSize(10.5).fillColor(GRAA).text(meta);
+      doc.moveDown(0.2).font('normal').fontSize(10.5).fillColor(GRAA).text(lavMeta({ type: referat.type, tidspunkt, varighedSek }));
       const y = doc.y + 10;
       doc.moveTo(MARGEN, y).lineTo(doc.page.width - MARGEN, y).lineWidth(1.5).strokeColor(BLAA).stroke();
       doc.y = y + 4;
@@ -132,4 +146,4 @@ function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst }) {
   });
 }
 
-module.exports = { lavPdf, filnavn, lavAfsnit, formaterVarighed, formaterTidspunkt };
+module.exports = { lavPdf, filnavn, lavAfsnit, lavMeta, formaterVarighed, formaterTidspunkt };
