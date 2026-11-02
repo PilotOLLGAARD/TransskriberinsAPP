@@ -84,3 +84,8 @@ test('varighed', () => {
   assert.equal(formaterVarighed(120), '2 min');
   assert.equal(formaterVarighed(null), null);
 });
+
+test('filnavn deler aldrig en emoji', () => {
+  const navn = filnavn({ titel: `${'a'.repeat(99)}🏗️`, tidspunkt: TIDSPUNKT });
+  assert.equal(navn, navn.toWellFormed());
+});

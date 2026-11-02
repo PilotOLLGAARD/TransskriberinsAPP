@@ -85,7 +85,9 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
 
     /** Gemmer navnet, før noget sendes, så det overlever netværksfejl og genforsøg. */
     async navngivOgSend(id, titel) {
-      await lager.opdaterNote(id, { titel: String(titel || '').trim().slice(0, 120), navngivet: true });
+      // Afkortes i hele tegn, så en emoji aldrig deles.
+      const ren = [...String(titel || '').trim()].slice(0, 120).join('').trim();
+      await lager.opdaterNote(id, { titel: ren, navngivet: true });
       await forloeb.behandlOgSend(id);
     },
 

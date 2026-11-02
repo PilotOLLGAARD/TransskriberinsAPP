@@ -93,6 +93,18 @@ test('navneskærmen har fokus i feltet, én Send-knap og Enter sender', async ()
   await kontekst.close();
 });
 
+test('navnet bevares, når en anden note bliver færdig i baggrunden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Første note' });
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).fill('Anden no');
+  await vis(side, SENDT);
+  assert.equal(await side.getByLabel(FELT).inputValue(), 'Anden no');
+  await kontekst.close();
+});
+
 test('tomt navn giver AI-titel', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);

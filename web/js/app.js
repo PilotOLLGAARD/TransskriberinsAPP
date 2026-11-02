@@ -27,6 +27,7 @@ const t = {
   noter: [],
   aabenNote: null,
   navnNote: null,
+  navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
   besked: null, // { tekst, type: 'fejl' | 'ok' }
   igang: new Set(),
   startTid: 0,
@@ -176,6 +177,7 @@ async function behandlOgSend(id) {
 async function navngivOgSend(id, titel) {
   t.visning = 'start';
   t.navnNote = null;
+  t.navnUdkast = null;
   t.besked = null;
   t.igang.add(id);
   await opdater().catch(() => {});
@@ -191,6 +193,7 @@ function aabnNavn(id) {
   t.besked = null;
   t.visning = 'navn';
   t.navnNote = id;
+  t.navnUdkast = null;
   tegn();
 }
 
@@ -262,6 +265,7 @@ optager.naarAfsluttet(({ id, grund }) => {
   // Lyden er gemt. Nu får optagelsen et navn, før den sendes.
   t.visning = 'navn';
   t.navnNote = id;
+  t.navnUdkast = null;
   opdater();
 });
 
@@ -467,7 +471,8 @@ function skaermNavn() {
     autocapitalize: 'sentences',
     placeholder: 'Fx Møde omkring SAS Lounge',
   });
-  felt.value = note.titel || '';
+  felt.value = t.navnUdkast ?? note.titel ?? '';
+  felt.addEventListener('input', () => { t.navnUdkast = felt.value; });
   const form = h(
     'form',
     { klasse: 'navn' },

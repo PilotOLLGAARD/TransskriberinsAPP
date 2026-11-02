@@ -141,3 +141,8 @@ test('nøglen indgår aldrig i en fejlbesked', async () => {
     return e.kode === 'tjeneste';
   });
 });
+
+test('400 fra referat-modellen er tjeneste-fejl, ikke en ødelagt optagelse', async () => {
+  const { hent } = falskHent(() => svar(400, {}));
+  await assert.rejects(lav(hent).lav({ ...INPUT, signal: signal() }), (e) => e.kode === 'tjeneste');
+});

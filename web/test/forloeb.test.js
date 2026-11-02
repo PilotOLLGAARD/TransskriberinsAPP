@@ -354,3 +354,11 @@ test('behandlOgSend sender ikke, når mailen måske er sendt', async () => {
   await s.forloeb.behandlOgSend('a');
   assert.equal(s.t.mailKald.length, 0);
 });
+
+test('titel afkortes uden at dele en emoji', async () => {
+  const s = opsaet({ sendLyd: fejl('net') });
+  await s.forloeb.navngivOgSend('a', `${'a'.repeat(119)}🏗️`);
+  const titel = s.lager.kort.get('a').titel;
+  assert.equal(titel, titel.toWellFormed());
+  assert.ok([...titel].length <= 120);
+});

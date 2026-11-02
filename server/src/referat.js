@@ -144,7 +144,8 @@ function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense }) {
             store: false,
           }),
         });
-        if (!svar.ok) throw httpFejl(svar.status, 'referat');
+        // Optagelsen var i orden, når referatet fejler. Derfor aldrig 'format', som ville få brugeren til at slette den.
+        if (!svar.ok) throw new GeminiFejl(httpFejl(svar.status, 'referat').kode === 'noegle' ? 'noegle' : 'tjeneste', `referat: status ${svar.status}`);
         const krop = await svar.json();
         if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `referat: status ${krop.status}`);
         let raa;

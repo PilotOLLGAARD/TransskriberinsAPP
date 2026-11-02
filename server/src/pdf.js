@@ -50,9 +50,9 @@ function filnavn({ titel, tidspunkt }) {
     .replace(/[:*?"<>|\u0000-\u001f]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 100)
     .trim();
-  return `${year}-${month}-${day} ${ren || 'Optagelse'}.pdf`;
+  const kort = [...ren].slice(0, 100).join('').trim();
+  return `${year}-${month}-${day} ${kort || 'Optagelse'}.pdf`;
 }
 
 function formaterOpgave({ hvem, hvad, hvornaar }) {

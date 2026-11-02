@@ -15,7 +15,11 @@ export class SendFejl extends Error {
 function metaHeadere({ titel, varighedMs, oprettet } = {}) {
   const h = {};
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
-  if (typeof titel === 'string' && titel.trim()) h['x-titel'] = encodeURIComponent(titel.trim());
+  if (typeof titel === 'string' && titel.trim()) {
+    // Et halvt tegn må aldrig stoppe afsendelsen. Det erstattes, så encodeURIComponent ikke kaster.
+    const hel = titel.trim();
+    h['x-titel'] = encodeURIComponent(typeof hel.toWellFormed === 'function' ? hel.toWellFormed() : hel);
+  }
   if (Number.isFinite(varighedMs)) h['x-varighed'] = String(Math.round(varighedMs / 1000));
   if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
   return h;

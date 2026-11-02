@@ -70,10 +70,11 @@ function startLokal({ port = 4280 } = {}) {
       for await (const d of strom) dele.push(d);
       tilstand.modtaget = { bytes: Buffer.concat(dele).length, mime };
       // Kun transskriptionens egne fejl bruges her. Fejl i referat og mail venter på deres tur.
-      const fejl = ['tjeneste', 'format', 'tom'].includes(tilstand.naesteFejl) ? tilstand.naesteFejl : null;
+      const fejl = ['tjeneste', 'format', 'tom', 'langsom'].includes(tilstand.naesteFejl) ? tilstand.naesteFejl : null;
       if (fejl) tilstand.naesteFejl = null;
       if (fejl === 'tjeneste' || fejl === 'format') throw new GeminiFejl(fejl, 'testfejl');
       if (fejl === 'tom') return { tekst: '' };
+      if (fejl === 'langsom') await new Promise((ok) => setTimeout(ok, 5000));
       return { tekst: `Testtekst fra lokal server. Modtog ${bytes} bytes.` };
     },
   };

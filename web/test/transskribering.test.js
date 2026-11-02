@@ -81,3 +81,10 @@ test('returnerer referat, pdf og filnavn', async () => {
   const krop = { tekst: 'Hej', titel: 'T', referat: { opsummering: 'O' }, pdf: 'JVBERg==', filnavn: 'f.pdf' };
   assert.deepEqual(await sendLyd(LYD, 'audio/mp4', 'b', {}, svarMed(200, krop)), krop);
 });
+
+test('en ødelagt titel stopper ikke afsendelsen', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
+  assert.deepEqual(await sendLyd(LYD, 'audio/mp4', 'b', { titel: 'Tag \uD83C' }, hent), { tekst: 'Hej' });
+  assert.ok(decodeURIComponent(kald.headers['x-titel']).startsWith('Tag'));
+});

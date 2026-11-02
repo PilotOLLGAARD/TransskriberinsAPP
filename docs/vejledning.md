@@ -111,6 +111,7 @@ Serverens adresse sættes ind i appen af GitHub, når den udgives. Den skal ikke
 3. GitHub udgiver selv det, der er ændret. Følg det under Actions.
 4. Telefonerne henter en ny udgave af appen, næste gang den åbnes, og bruger den gangen efter. Versionsnummeret sættes af GitHub.
 5. Ændringer i `server/` udgives først, når testene er bestået.
+6. **Serveren skal ud før appen,** når en ændring rører begge, fx nye headere. Læg serverens ændring på `main` først, og vent, til "Udgiv serveren" er grøn under Actions. Læg derefter appens ændring på. Ellers kan den nye app i nogle minutter tale med den gamle server, og afsendelser fejler med "Ingen forbindelse". Lyden bevares, og Prøv igen virker bagefter.
 
 ## Skift af Gemini-nøglen
 
