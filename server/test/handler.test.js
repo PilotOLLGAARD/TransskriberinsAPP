@@ -38,7 +38,7 @@ function falskGemini(svar = async () => ({ tekst: 'Hej' })) {
 const adgangOk = async () => ({ ok: true });
 
 const REFERAT = {
-  titel: 'AI-titel', kort: false, opsummering: 'HEMMELIGT-REFERAT', hovedpunkter: [], beslutninger: [],
+  titel: 'AI-titel', type: 'moede', kort: false, opsummering: 'HEMMELIGT-REFERAT', hovedpunkter: [], beslutninger: [],
   opgaver: [], fejlOgMangler: [], aabneSpoergsmaal: [], renTekst: '',
 };
 
@@ -180,7 +180,7 @@ test('preflight svarer uden Gemini', async () => {
   assert.equal(svar.status, 204);
   assert.equal(svar.headers.get('access-control-allow-origin'), OPRINDELSE);
   assert.match(svar.headers.get('access-control-allow-headers'), /authorization/i);
-  for (const h of ['x-titel', 'x-varighed', 'x-optaget']) {
+  for (const h of ['x-titel', 'x-varighed', 'x-optaget', 'x-type']) {
     assert.ok(svar.headers.get('access-control-allow-headers').includes(h), h);
   }
   assert.equal(s.gemini.kald, 0);
@@ -365,4 +365,22 @@ test('GET giver 405', async () => {
   const s = await start();
   assert.equal((await fetch(`${s.adresse}/transskriber`)).status, 405);
   assert.equal(s.gemini.kald, 0);
+});
+
+test('x-type sendes til referatet, ukendt bliver automatisk', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-type': 'byggenotat' } });
+  assert.equal(s.referat.valg.type, 'byggenotat');
+  await post(s.adresse, { headers: { 'x-type': 'ond' } });
+  assert.equal(s.referat.valg.type, 'automatisk');
+  await post(s.adresse);
+  assert.equal(s.referat.valg.type, 'automatisk');
+});
+
+test('svaret har type, emne og html', async () => {
+  const s = await start();
+  const j = await (await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-optaget': String(TID) } })).json();
+  assert.equal(j.type, 'moede');
+  assert.equal(j.emne, 'Møde: Møde om tag – 2. nov. 2026');
+  assert.ok(j.html.includes('HEMMELIGT-REFERAT'));
 });

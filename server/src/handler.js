@@ -2,6 +2,8 @@
 
 const { Transform, pipeline } = require('node:stream');
 const { GeminiFejl } = require('./gemini.js');
+const { laesType } = require('./typer.js');
+const { lavEmne, lavHtml } = require('./besked.js');
 
 const FORMATER = new Set(['audio/mp4', 'audio/webm']);
 const MAX_TITEL = 120;
@@ -76,7 +78,7 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-varighed, x-optaget',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget',
         'access-control-max-age': '600',
       });
       res.end();
@@ -121,15 +123,19 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
       const titel = laesTitel(req.headers['x-titel']);
       const varighedSek = laesVarighed(req.headers['x-varighed']);
       const tidspunkt = laesTidspunkt(req.headers['x-optaget']);
+      const type = laesType(req.headers['x-type']);
       log({ haendelse: 'referat-kald' });
-      const r = await referat.lav({ tekst, titel, varighedSek, signal: afbryd.signal });
+      const r = await referat.lav({ tekst, titel, type, varighedSek, signal: afbryd.signal });
       const fil = await pdf.lavPdf({ titel: r.titel, tidspunkt, varighedSek, referat: r, tekst });
       sendJson(res, cors, 200, {
         tekst,
         titel: r.titel,
+        type: r.type,
         referat: r,
         pdf: fil.toString('base64'),
         filnavn: pdf.filnavn({ titel: r.titel, tidspunkt }),
+        emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
+        html: lavHtml({ titel: r.titel, referat: r }),
       });
     } catch (e) {
       if (vagt.overskredet) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });

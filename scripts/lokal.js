@@ -81,17 +81,19 @@ function startLokal({ port = 4280 } = {}) {
 
   // Falsk referat. PDF'en er den rigtige.
   const referat = {
-    async lav({ tekst, titel, varighedSek }) {
+    async lav({ tekst, titel, type, varighedSek }) {
       tilstand.referatKald++;
-      tilstand.sidsteReferat = { titel, varighedSek };
+      tilstand.sidsteReferat = { titel, type, varighedSek };
       if (tilstand.naesteFejl === 'referat') {
         tilstand.naesteFejl = null;
         throw new GeminiFejl('tjeneste', 'testfejl');
       }
       return {
-        titel: titel || 'Testtitel fra AI', kort: false, opsummering: `Testreferat af: ${tekst}`,
-        hovedpunkter: ['Første punkt', 'Andet punkt med æøå'], beslutninger: [], opgaver: [],
-        fejlOgMangler: [], aabneSpoergsmaal: [], renTekst: '',
+        // Automatisk bliver til Andet, som når modellen ikke kan vælge.
+        titel: titel || 'Testtitel fra AI', type: !type || type === 'automatisk' ? 'andet' : type, kort: false,
+        opsummering: `Testreferat af: ${tekst}`, hovedpunkter: ['Første punkt', 'Andet punkt med æøå'], beslutninger: [],
+        opgaver: [], fejlOgMangler: [], maalOgMaengder: [], huskeliste: type === 'paamindelse' ? ['Huskepunkt'] : [],
+        aabneSpoergsmaal: [], renTekst: '',
       };
     },
   };
