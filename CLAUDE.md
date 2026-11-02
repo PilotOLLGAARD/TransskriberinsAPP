@@ -13,6 +13,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - Alle ansatte i ØLLGAARDs tenant har adgang, gæster har ikke. Serveren kræver gyldig signatur, `iss` og `aud` (v1 eller v2), `exp`, `tid`, scope `access_as_user` og `acct = 0`. Mailadressen afgør aldrig adgang.
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
+- Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i PDF'en.
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
 - Ingen hemmeligheder i git, i `web/` eller i logs. Læs aldrig `.env*`.
 - Brug aldrig rigtige byggepladsnoter i udvikling eller test.

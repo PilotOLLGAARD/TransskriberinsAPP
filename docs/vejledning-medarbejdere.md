@@ -14,12 +14,15 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 ## Sådan gør du
 
 1. Log ind med din ØLLGAARD-konto.
-2. Tryk på **Optag**. Skærmen bliver rød, og uret tæller.
+2. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
 3. **Hold skærmen tændt, og bliv i appen.** Låser du telefonen eller skifter app, kan optagelsen stoppe. Det, du har indtalt indtil da, er gemt.
-4. Tryk på **Stop**. Teksten kommer efter lidt tid.
-5. Læs teksten, og tryk på **Send til mig**. Du får den som mail, og den ligger også i din Sendt post.
+4. Tryk på **Stop**.
+5. Skriv, hvad optagelsen handler om, fx "Møde omkring SAS Lounge", og tryk **Send**. Feltet er valgfrit. Er det tomt, finder appen selv på en titel.
+6. Efter lidt tid får du en mail med emnet "Referat: <titel> – <dato>". Mailen viser en kort opsummering og hovedpunkterne. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
 
-Når mailen er sendt, slettes lyd og tekst fra telefonen. Mailen er din kopi. Vil du rette noget i teksten, så gør det i mailen.
+Referatet laves af en AI ud fra det, du sagde. Det skriver "[uklart]", hvor noget ikke var til at forstå. Tjek altid vigtige tal og aftaler mod transskriptionen bagerst i PDF'en.
+
+Når mailen er sendt, slettes lyd og tekst fra telefonen. Mailen er din kopi.
 
 ## Hvis noget går galt
 
@@ -31,7 +34,8 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 | Du skal logge ind igen | Tryk på Log ind og prøv igen |
 | Appen må ikke bruge mikrofonen | Giv appen tilladelse i telefonens indstillinger |
 | Din konto har ikke adgang | Kontakt IT |
-| Transskriptionen mislykkedes | Tryk på Prøv igen |
+| Transskriptionen mislykkedes | Tryk på Prøv igen. Navnet er gemt |
+| Mailen blev ikke sendt | Tryk på Send igen |
 | Optagelsen kunne ikke behandles | Kontakt IT, hvis det sker igen |
 | Mailen er måske allerede sendt | Tjek din indbakke, før du sender igen |
 

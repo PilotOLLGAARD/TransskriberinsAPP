@@ -123,6 +123,18 @@ gcloud secrets versions add gemini-api-key --data-file=-
 2. Kør "Udgiv serveren" under Actions på GitHub. Serveren bruger altid den nyeste nøgle.
 3. Slet den gamle nøgle i Google AI Studio.
 
+## Referat og PDF
+
+Efter transskriptionen laver serveren et referat med Gemini 3.8 Flash og en PDF med ØLLGAARD-logo, skriften Lato og hele transskriptionen som bilag. Intet gemmes på serveren eller hos Google (`store: false`). Et referat koster ca. 2 øre for 5 minutters tale.
+
+- Modellen kan skiftes med miljøvariablen `REFERAT_MODEL` på serveren, fx `gemini-3.5-flash-lite`.
+- Reglerne for referatet står i `server/src/referat.js`.
+- Prøv et referat og en PDF på din computer (koster penge, brug kun opdigtede tekster):
+
+```bash
+node --env-file=.env scripts/proev-referat.js testlyd/note.txt --titel "Test" --varighed 120 --pdf .
+```
+
 ## Rette ordlisten med fagudtryk
 
 Ret `server/src/ordliste.js`, og læg ændringen på `main`. Bedst med højst 100 ord, kun egennavne og fagudtryk.
