@@ -79,57 +79,38 @@ Der er ingen `local.settings.json`, da projektet ikke bruger Azure Functions.
 
 ## Opsætning af Google Cloud
 
-Gøres kun én gang. Kommandoerne kører du i Google Cloud Shell eller med `gcloud` på din computer. Tjek rollerne, når det gøres første gang, da de ikke er afprøvet endnu.
+Gøres kun én gang. Scriptet er skrevet, men endnu ikke kørt mod Google, så læs det, det skriver.
 
-1. **Opret projektet.** Opret et Google Cloud-projekt, og tilknyt en aktiv betalingskonto. Det er det, der gør Gemini til betalt niveau, hvor Google ikke bruger data til at forbedre produkter.
-2. **Opret nøglen.** Opret en Gemini-nøgle til projektet i Google AI Studio, og begræns den til Gemini API'et.
-3. **Sæt et forbrugsloft.** Under Fakturering > Budgetter oprettes et loft for hver tjeneste, Gemini API og Cloud Run. Et almindeligt budget advarer kun, så vælg typen med loft. Når loftet nås, stopper tjenesten resten af måneden, og alle optagelser bliver liggende på telefonerne.
-4. **Slå tjenesterne til:**
-
-```bash
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com iamcredentials.googleapis.com
-```
-
-5. **Læg nøglen i Secret Manager.** Kommandoen læser nøglen uden at gemme den i din historik. Indsæt nøglen, tryk Enter og derefter Ctrl+D:
+1. **Opret projektet.** Opret et Google Cloud-projekt på https://console.cloud.google.com, og tilknyt en aktiv betalingskonto. Det er det, der gør Gemini til betalt niveau, hvor Google ikke bruger data til at forbedre produkter.
+2. **Opret nøglen.** Opret en Gemini-nøgle til samme projekt på https://aistudio.google.com/apikey. Sæt den også ind i `.env` på din computer.
+3. **Kør opsætningen.** Åbn Cloud Shell (ikonet `>_` øverst i Google Cloud Console), vælg projektet, og kør de tre kommandoer herunder. Scriptet beder om nøglen og viser den ikke på skærmen.
 
 ```bash
-gcloud secrets create gemini-api-key --data-file=-
+git clone https://github.com/PilotOLLGAARD/TransskriberinsAPP.git
 ```
-
-6. **Giv serveren adgang til nøglen.** Rollen `roles/secretmanager.secretAccessor` gives til serverens tjenestekonto.
-7. **Giv GitHub adgang uden fast nøgle.** Opret en Workload Identity Federation-pool, der kun tillader dit repo, og en tjenestekonto med rollerne `roles/run.admin`, `roles/cloudbuild.builds.editor`, `roles/artifactregistry.admin`, `roles/storage.admin` og `roles/iam.serviceAccountUser`. Vejledning: [google-github-actions/auth](https://github.com/google-github-actions/auth).
-8. **Sæt variabler på GitHub** under Settings > Secrets and variables > Actions > Variables. De er ikke hemmelige:
-
-| Navn | Eksempel |
-|---|---|
-| `GCP_WIF_PROVIDER` | `projects/123/locations/global/workloadIdentityPools/github/providers/repo` |
-| `GCP_SERVICE_ACCOUNT` | `github-udgivelse@projekt.iam.gserviceaccount.com` |
-| `TILLADT_OPRINDELSE` | `https://pilotollgaard.github.io` (uden sti) |
-| `GEMINI_NOEGLE_VERSION` | `1` |
-
-9. **Slå GitHub Pages til** under Settings > Pages > Source: GitHub Actions.
-10. **Første udgivelse af serveren.** Kør workflowet "Udgiv serveren", og åbn derefter serveren for kald. Adgangen afgøres af Entra-beviset i vores egen kode, ikke af Googles login:
 
 ```bash
-gcloud run services add-iam-policy-binding transskribering --region=europe-north2 --member=allUsers --role=roles/run.invoker
+cd TransskriberinsAPP
 ```
-
-11. **Indsæt serverens adresse** i `web/js/konfig.js` (`SERVER_ADRESSE`) og i `Content-Security-Policy` i `web/index.html`. Adressen er ikke hemmelig. En test fejler, hvis de to ikke er ens.
-12. **Send appens adresse til IT** som Redirect URI.
-13. **Tjek afvisningen:**
 
 ```bash
-node scripts/test-adgang.js https://serverens-adresse
+bash scripts/opsaet-google.sh
 ```
 
-Alle tre forsøg skal give 401.
+   Scriptet slår tjenesterne til, gemmer nøglen i Secret Manager, giver GitHub adgang uden fast nøgle (kun fra dette repo), udgiver serveren i Stockholm og tjekker, at fremmede afvises.
+4. **Sæt de fire variabler på GitHub,** som scriptet skriver til sidst, under Settings > Secrets and variables > Actions > Variables. De er ikke hemmelige.
+5. **Kør "Udgiv appen"** under Actions på GitHub, så appen får serverens adresse.
+6. **Sæt et forbrugsloft.** Under Fakturering > Budgetter oprettes et loft for Gemini API og for Cloud Run. Et almindeligt budget advarer kun, så vælg typen med loft. Når loftet nås, stopper tjenesten resten af måneden, og optagelserne bliver liggende på telefonerne.
+
+Serverens adresse sættes ind i appen af GitHub, når den udgives. Den skal ikke rettes i koden.
 
 ## Udgiv en ny udgave
 
 1. Lav ændringen på en branch, og kør `npm test` og `npm run e2e`.
 2. Læg ændringen på GitHub, og flet den ind i `main`.
 3. GitHub udgiver selv det, der er ændret. Følg det under Actions.
-4. Er appens filer ændret, så skift `VERSION` i `web/sw.js`. Telefonerne henter den nye udgave næste gang appen åbnes, og bruger den gangen efter.
+4. Telefonerne henter en ny udgave af appen, næste gang den åbnes, og bruger den gangen efter. Versionsnummeret sættes af GitHub.
+5. Ændringer i `server/` udgives først, når testene er bestået.
 
 ## Skift af Gemini-nøglen
 
@@ -139,7 +120,7 @@ Alle tre forsøg skal give 401.
 gcloud secrets versions add gemini-api-key --data-file=-
 ```
 
-2. Ret `GEMINI_NOEGLE_VERSION` på GitHub, og kør "Udgiv serveren".
+2. Kør "Udgiv serveren" under Actions på GitHub. Serveren bruger altid den nyeste nøgle.
 3. Slet den gamle nøgle i Google AI Studio.
 
 ## Rette ordlisten med fagudtryk
@@ -150,8 +131,8 @@ Ret `server/src/ordliste.js`, og læg ændringen på `main`. Bedst med højst 10
 
 | Det ser du | Sandsynlig årsag |
 |---|---|
-| Alle får "Din konto har ikke adgang" | Rollen er ikke tildelt, `acct` er ikke sat op, eller `requestedAccessTokenVersion` er ikke 2. Se `docs/it-opsaetning.md`. Serverens log viser grunden som `adgang-afvist` |
+| Alle får "Din konto har ikke adgang" | Den valgfri claim `acct` er ikke sat op i Entra ID. Se `docs/it-opsaetning.md`. Serverens log viser grunden som `adgang-afvist` |
 | Alle får "Transskriptionen mislykkedes" | Nøglen, forbrugsloftet eller Google. Serverens log viser `gemini-fejl` med en kode. `server-ikke-klar` betyder, at en indstilling mangler |
-| Appen svarer "Ingen forbindelse" trods net | `SERVER_ADRESSE` eller `TILLADT_OPRINDELSE` er forkert |
+| Appen svarer "Ingen forbindelse" trods net | Variablen `SERVER_ADRESSE` på GitHub mangler eller er forkert, eller "Udgiv appen" er ikke kørt efter den blev sat |
 
 Serverens log findes i Google Cloud Console under Cloud Run > transskribering > Logs. Den indeholder aldrig tekst, lyd eller hvem der har kaldt.

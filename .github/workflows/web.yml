@@ -16,15 +16,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tjek:
+    uses: ./.github/workflows/tjek.yml
+
   udgiv:
+    needs: tjek
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.udgivelse.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
+      - name: Saml appens filer uden test
+        env:
+          SERVER_ADRESSE: ${{ vars.SERVER_ADRESSE }}
+        run: |
+          mkdir _site
+          cp -r web/. _site/
+          rm -rf _site/test _site/package.json
+          # Hver udgivelse får sin egen version, så telefonerne henter den nye udgave samlet.
+          sed -i "s/const VERSION = 'udvikling';/const VERSION = '${GITHUB_SHA}';/" _site/sw.js
+          grep -q "${GITHUB_SHA}" _site/sw.js
+          # Serverens adresse er ikke hemmelig. Den sættes som variabel på GitHub.
+          if [ -n "$SERVER_ADRESSE" ]; then
+            sed -i "s#https://SERVER-ADRESSE-SAETTES-VED-UDRULNING.invalid#${SERVER_ADRESSE%/}#g" _site/js/konfig.js _site/index.html
+          fi
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: web
+          path: _site
       - id: udgivelse
         uses: actions/deploy-pages@v4

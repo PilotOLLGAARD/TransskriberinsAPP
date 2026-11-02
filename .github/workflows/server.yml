@@ -11,7 +11,11 @@ permissions:
   id-token: write # Login hos Google uden fast nøgle (Workload Identity Federation).
 
 jobs:
+  tjek:
+    uses: ./.github/workflows/tjek.yml
+
   udgiv:
+    needs: tjek
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -24,13 +28,13 @@ jobs:
           service: transskribering
           source: server
           region: europe-north2
-          flags: --use-http2 --timeout=900 --max-instances=3 --min-instances=0 --memory=512Mi
+          flags: --use-http2 --timeout=900 --max-instances=3 --min-instances=0 --memory=512Mi --service-account=${{ vars.GCP_SERVER_KONTO }}
           env_vars: |-
             ENTRA_TENANT_ID=0aefac4e-4313-4168-9865-27d269eaeff8
             ENTRA_CLIENT_ID=792bac2e-d895-4c24-9a58-7466eb8d03a3
-            TILLADT_OPRINDELSE=${{ vars.TILLADT_OPRINDELSE }}
+            TILLADT_OPRINDELSE=https://pilotollgaard.github.io
             GEMINI_MODEL=gemini-3.5-transcribe
             SPROG=da-DK
             TRANSSKRIPTION_TILSTAND=smart
           secrets: |-
-            GEMINI_API_KEY=gemini-api-key:${{ vars.GEMINI_NOEGLE_VERSION }}
+            GEMINI_API_KEY=gemini-api-key:latest
