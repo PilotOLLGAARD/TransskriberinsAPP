@@ -39,14 +39,18 @@ function html(note) {
   return dele.join('\n');
 }
 
-/** Mailens emne, tekst og bilag. Noter fra før referaterne sendes som ren tekst. */
+/**
+ * Mailens emne, tekst og bilag. Emne og tekst laves af serveren (server/src/besked.js).
+ * Noter fra før det bruger den gamle opbygning, og noter fra før referaterne sendes som ren tekst.
+ */
 export function lavBesked(note) {
   if (!note.referat || !note.pdf) {
     return { subject: `Transskription ${kortDato(note.oprettet)}`, body: { contentType: 'Text', content: note.tekst } };
   }
+  const fraServeren = typeof note.emne === 'string' && typeof note.html === 'string';
   return {
-    subject: `Referat: ${note.titel || note.referat.titel} – ${langDato(note.oprettet)}`,
-    body: { contentType: 'HTML', content: html(note) },
+    subject: fraServeren ? note.emne : `Referat: ${note.titel || note.referat.titel} – ${langDato(note.oprettet)}`,
+    body: { contentType: 'HTML', content: fraServeren ? note.html : html(note) },
     attachments: [{
       '@odata.type': '#microsoft.graph.fileAttachment',
       name: note.filnavn,

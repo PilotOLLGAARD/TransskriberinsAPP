@@ -72,7 +72,7 @@ test('hele forløbet med navn', async () => {
   assert.equal(efter.mailKald - foer.mailKald, 1);
   const besked = efter.sidsteMail.message;
   assert.deepEqual(besked.toRecipients, [{ emailAddress: { address: 'test@ollgaard.dk' } }]);
-  assert.match(besked.subject, /^Referat: Møde omkring SAS Lounge – \d{1,2}\. \S+ \d{4}$/);
+  assert.match(besked.subject, /^Andet: Møde omkring SAS Lounge – \d{1,2}\. \S+ \d{4}$/);
   assert.match(besked.body.content, /Testreferat af/);
   assert.match(besked.attachments[0].name, /^\d{4}-\d{2}-\d{2} Møde omkring SAS Lounge\.pdf$/);
   assert.equal(Buffer.from(besked.attachments[0].contentBytes, 'base64').subarray(0, 5).toString(), '%PDF-');
@@ -110,7 +110,7 @@ test('tomt navn giver AI-titel', async () => {
   await logInd(side);
   await optag(side, { titel: '' });
   await vis(side, SENDT);
-  assert.match((await tal(miljoe)).sidsteMail.message.subject, /^Referat: Testtitel fra AI – /);
+  assert.match((await tal(miljoe)).sidsteMail.message.subject, /^Andet: Testtitel fra AI – /);
   await kontekst.close();
 });
 
@@ -153,7 +153,7 @@ test('navnet overlever netværksfejl', async () => {
   assert.equal(efter.geminiKald - foer.geminiKald, 1);
   assert.equal(efter.modtaget.bytes, bytes);
   assert.equal(efter.sidsteReferat.titel, 'Gåtur Nørrehus');
-  assert.match(efter.sidsteMail.message.subject, /^Referat: Gåtur Nørrehus – /);
+  assert.match(efter.sidsteMail.message.subject, /^Andet: Gåtur Nørrehus – /);
   await kontekst.close();
 });
 

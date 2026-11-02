@@ -88,3 +88,14 @@ test('en ødelagt titel stopper ikke afsendelsen', async () => {
   assert.deepEqual(await sendLyd(LYD, 'audio/mp4', 'b', { titel: 'Tag \uD83C' }, hent), { tekst: 'Hej' });
   assert.ok(decodeURIComponent(kald.headers['x-titel']).startsWith('Tag'));
 });
+
+test('x-type sendes, når typen er kendt', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: '' }), { status: 200 }); };
+  await sendLyd(LYD, 'audio/mp4', 'b', { type: 'byggenotat' }, hent);
+  assert.equal(kald.headers['x-type'], 'byggenotat');
+  await sendLyd(LYD, 'audio/mp4', 'b', { type: 'ond\nheader' }, hent);
+  assert.equal(kald.headers['x-type'], undefined);
+  await sendLyd(LYD, 'audio/mp4', 'b', {}, hent);
+  assert.equal(kald.headers['x-type'], undefined);
+});

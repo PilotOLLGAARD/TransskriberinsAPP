@@ -80,3 +80,15 @@ test('opdaterNote fletter felter', async () => {
   assert.equal(note.tekst, 'x');
   await kontekst.close();
 });
+
+test('opretNote gemmer titel og type', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const note = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    return l.hentNote(await l.opretNote({ mime: 'audio/mp4', titel: 'Tagrenovering', type: 'moede' }));
+  });
+  assert.equal(note.titel, 'Tagrenovering');
+  assert.equal(note.type, 'moede');
+  await kontekst.close();
+});

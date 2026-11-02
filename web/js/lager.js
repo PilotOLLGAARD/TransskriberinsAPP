@@ -1,4 +1,5 @@
 import { STATUS } from './tilstand.js';
+import { STANDARD_TYPE } from './typer.js';
 
 // Lyd gemmes som rå bytes, ikke som Blob: iOS Safari kan miste adgangen til Blobs i IndexedDB.
 const DB_NAVN = 'transskribering';
@@ -55,9 +56,9 @@ function alleStykkerInterval(id) {
   return IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]);
 }
 
-export async function opretNote({ mime }) {
+export async function opretNote({ mime, titel = '', type = STANDARD_TYPE }) {
   const id = crypto.randomUUID();
-  const note = { id, mime, status: STATUS.OPTAGER, oprettet: Date.now() };
+  const note = { id, mime, titel, type, status: STATUS.OPTAGER, oprettet: Date.now() };
   await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
   return id;
 }

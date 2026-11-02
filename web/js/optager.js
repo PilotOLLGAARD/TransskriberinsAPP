@@ -1,4 +1,5 @@
 import { STATUS } from './tilstand.js';
+import { STANDARD_TYPE } from './typer.js';
 
 // AAC først: det er iPhones eget format. Chrome kan lægge Opus i mp4, så webm går før uspecificeret mp4.
 const FORMATER = ['audio/mp4;codecs=mp4a.40.2', 'audio/webm;codecs=opus', 'audio/mp4'];
@@ -161,7 +162,8 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
     naarAfsluttet(fn) { vedAfsluttet = fn; },
     naarAdvaret(fn) { vedAdvaret = fn; },
 
-    async start() {
+    /** Navn og type valgt før optagelsen gemmes på noten med det samme. */
+    async start({ titel = '', type = STANDARD_TYPE } = {}) {
       if (aktiv) return aktiv.id;
       const mime = vaelgFormat(medier.erUnderstoettet);
       if (!mime) throw new OptageFejl('kanIkkeOptage');
@@ -177,7 +179,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       let id;
       try {
         recorder = medier.lavRecorder(stream, { mimeType: mime, audioBitsPerSecond: BITRATE });
-        id = await lager.opretNote({ mime: recorder.mimeType || mime });
+        id = await lager.opretNote({ mime: recorder.mimeType || mime, titel, type });
       } catch {
         stopSpor(stream);
         throw new OptageFejl('kanIkkeOptage');

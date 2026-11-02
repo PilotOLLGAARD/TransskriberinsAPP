@@ -274,9 +274,9 @@ test('slet kræver fejl-status', async () => {
 const REFERAT_SVAR = { tekst: 'Fuld tekst', titel: 'AI-titel', referat: { opsummering: 'O' }, pdf: 'JVBERg==', filnavn: 'f.pdf' };
 
 test('behandl sender titel, varighed og tidspunkt med', async () => {
-  const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 7, titel: 'Tag', varighedMs: 9000 }] });
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 7, titel: 'Tag', type: 'moede', varighedMs: 9000 }] });
   await s.forloeb.behandl('a');
-  assert.deepEqual(s.t.lydArgs[3], { titel: 'Tag', varighedMs: 9000, oprettet: 7 });
+  assert.deepEqual(s.t.lydArgs[3], { titel: 'Tag', type: 'moede', varighedMs: 9000, oprettet: 7 });
 });
 
 test('behandl gemmer referat, pdf og AI-titel', async () => {
@@ -361,4 +361,28 @@ test('titel afkortes uden at dele en emoji', async () => {
   const titel = s.lager.kort.get('a').titel;
   assert.equal(titel, titel.toWellFormed());
   assert.ok([...titel].length <= 120);
+});
+
+test('svarets type, emne og html gemmes', async () => {
+  const s = opsaet({ sendLyd: async () => ({ ...REFERAT_SVAR, type: 'moede', emne: 'Møde: AI-titel – 2. nov. 2026', html: '<p>x</p>' }) });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.type, 'moede');
+  assert.equal(n.emne, 'Møde: AI-titel – 2. nov. 2026');
+  assert.equal(n.html, '<p>x</p>');
+});
+
+test('navngivOgSend gemmer type og sender den med', async () => {
+  const s = opsaet({ sendLyd: fejl('net') });
+  await s.forloeb.navngivOgSend('a', 'Tag', 'byggenotat');
+  assert.equal(s.lager.kort.get('a').type, 'byggenotat');
+  assert.equal(s.t.lydArgs[3].type, 'byggenotat');
+});
+
+test('navngivOgSend uden type beholder notens type, og ukendt type bliver automatisk', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1, type: 'moede' }], sendLyd: fejl('net') });
+  await s.forloeb.navngivOgSend('a', 'Tag');
+  assert.equal(s.lager.kort.get('a').type, 'moede');
+  await s.forloeb.navngivOgSend('a', 'Tag', 'ond');
+  assert.equal(s.lager.kort.get('a').type, 'automatisk');
 });

@@ -26,6 +26,7 @@ const FILER = [
   'js/optager.js',
   'js/tilstand.js',
   'js/transskribering.js',
+  'js/typer.js',
   'js/vendor/msal-browser.min.js',
 ];
 

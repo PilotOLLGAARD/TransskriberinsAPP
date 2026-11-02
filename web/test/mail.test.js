@@ -87,3 +87,10 @@ test('kaldet har en tidsgrænse', async () => {
   await sendMail({ note: NY, til: 'a@ollgaard.dk', bevis: 'b', hent });
   assert.ok(kald[0].v.signal instanceof AbortSignal);
 });
+
+test('lavBesked bruger serverens emne og html', () => {
+  const b = lavBesked({ ...NY, emne: 'Møde: Tag – 2. nov. 2026', html: '<p>Fra serveren</p>' });
+  assert.equal(b.subject, 'Møde: Tag – 2. nov. 2026');
+  assert.deepEqual(b.body, { contentType: 'HTML', content: '<p>Fra serveren</p>' });
+  assert.equal(b.attachments[0].contentBytes, 'JVBERi0xLjM=');
+});

@@ -1,4 +1,5 @@
 import { STATUS, efterGenstart } from './tilstand.js';
+import { rensType } from './typer.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
 const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.SENDER]);
@@ -36,13 +37,15 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined });
         const bevis = await login.hentBevis('api');
         const lyd = await lager.hentLyd(id);
-        const svar = await sendLyd(lyd, note.mime, bevis, { titel: note.titel, varighedMs: note.varighedMs, oprettet: note.oprettet });
+        const svar = await sendLyd(lyd, note.mime, bevis, {
+          titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
+        });
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;
         }
         const felter = { status: STATUS.TEKST_KLAR, tekst: svar.tekst };
-        for (const k of ['titel', 'referat', 'pdf', 'filnavn']) if (svar[k] !== undefined) felter[k] = svar[k];
+        for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'emne', 'html']) if (svar[k] !== undefined) felter[k] = svar[k];
         await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: e?.type || 'tjeneste' });
@@ -84,10 +87,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
     },
 
     /** Gemmer navnet, før noget sendes, så det overlever netværksfejl og genforsøg. */
-    async navngivOgSend(id, titel) {
+    async navngivOgSend(id, titel, type) {
       // Afkortes i hele tegn, så en emoji aldrig deles.
       const ren = [...String(titel || '').trim()].slice(0, 120).join('').trim();
-      await lager.opdaterNote(id, { titel: ren, navngivet: true });
+      // Uden ny type beholdes den, der blev valgt før optagelsen.
+      await lager.opdaterNote(id, { titel: ren, navngivet: true, ...(type === undefined ? {} : { type: rensType(type) }) });
       await forloeb.behandlOgSend(id);
     },
 

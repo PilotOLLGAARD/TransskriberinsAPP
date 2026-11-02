@@ -1,4 +1,5 @@
 import { API_URL } from './konfig.js';
+import { TYPER } from './typer.js';
 
 // Lidt over serverens egen grænse på 900 s, så serverens svar når frem først.
 const TIDSGRAENSE_MS = 16 * 60 * 1000;
@@ -12,7 +13,7 @@ export class SendFejl extends Error {
   }
 }
 
-function metaHeadere({ titel, varighedMs, oprettet } = {}) {
+function metaHeadere({ titel, type, varighedMs, oprettet } = {}) {
   const h = {};
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
   if (typeof titel === 'string' && titel.trim()) {
@@ -20,6 +21,8 @@ function metaHeadere({ titel, varighedMs, oprettet } = {}) {
     const hel = titel.trim();
     h['x-titel'] = encodeURIComponent(typeof hel.toWellFormed === 'function' ? hel.toWellFormed() : hel);
   }
+  // Kun kendte typer, så headeren aldrig kan indeholde andet end en nøgle.
+  if (TYPER.some((t) => t.noegle === type)) h['x-type'] = type;
   if (Number.isFinite(varighedMs)) h['x-varighed'] = String(Math.round(varighedMs / 1000));
   if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
   return h;

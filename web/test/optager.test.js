@@ -8,9 +8,9 @@ function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}
   const l = {
     noter: new Map(),
     stykker: [],
-    async opretNote({ mime }) {
+    async opretNote({ mime, titel, type }) {
       const id = `note-${l.noter.size + 1}`;
-      l.noter.set(id, { id, mime, status: 'optager' });
+      l.noter.set(id, { id, mime, titel, type, status: 'optager' });
       return id;
     },
     async gemStykke(id, nr, bytes) {
@@ -416,4 +416,18 @@ test('gemmer varighed ved afslutning', async () => {
   s.skridMedLyd(12000);
   await s.optager.stop();
   assert.equal(s.lager.noter.get(id).varighedMs, 12000);
+});
+
+test('start gemmer valgt navn og type på noten', async () => {
+  const s = opsaet();
+  const id = await s.optager.start({ titel: 'Tagrenovering', type: 'moede' });
+  assert.equal(s.lager.noter.get(id).titel, 'Tagrenovering');
+  assert.equal(s.lager.noter.get(id).type, 'moede');
+});
+
+test('start uden valg giver tomt navn og Automatisk', async () => {
+  const s = opsaet();
+  const id = await s.optager.start();
+  assert.equal(s.lager.noter.get(id).titel, '');
+  assert.equal(s.lager.noter.get(id).type, 'automatisk');
 });
