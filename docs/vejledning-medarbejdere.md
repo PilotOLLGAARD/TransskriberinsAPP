@@ -1,6 +1,6 @@
 # Sådan bruger du transskriberingsappen
 
-Indtal dine noter på byggepladsen, læs teksten, og send den til dig selv som mail.
+Indtal en note på byggepladsen, og få et referat med PDF på din egen mail.
 
 ## Læg appen på hjemmeskærmen
 
@@ -14,11 +14,26 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 ## Sådan gør du
 
 1. Log ind med din ØLLGAARD-konto.
-2. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
-3. **Hold skærmen tændt, og bliv i appen.** Låser du telefonen eller skifter app, kan optagelsen stoppe. Det, du har indtalt indtil da, er gemt.
-4. Tryk på **Stop**.
-5. Skriv, hvad optagelsen handler om, fx "Møde omkring SAS Lounge", og tryk **Send**. Feltet er valgfrit. Er det tomt, finder appen selv på en titel.
-6. Efter lidt tid får du en mail med emnet "Referat: <titel> – <dato>". Mailen viser en kort opsummering og hovedpunkterne. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
+2. Vælg typen, og skriv evt. et navn, fx "Møde omkring SAS Lounge". Begge dele er valgfrie og kan også vælges efter optagelsen.
+3. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
+4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen eller skifter app, kan optagelsen stoppe. Det, du har indtalt indtil da, er gemt.
+5. Tryk på **Stop**.
+6. Ret navnet og typen, hvis du vil, og tryk **Send**. Er navnet tomt, finder appen selv på en titel.
+7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
+
+Forklaringen øverst på startskærmen kan skjules med **Skjul forklaringen** og vises igen med **Vis forklaring** nederst.
+
+## Typer
+
+| Type | Referatet indeholder |
+|---|---|
+| Automatisk | Appen vælger selv en af de fire typer ud fra indholdet. Standard |
+| Byggenotat | Hovedpunkter, fejl og mangler, mål og mængder, opgaver og aftaler |
+| Møde | Hovedpunkter, beslutninger, opgaver og aftaler, åbne spørgsmål |
+| Påmindelse | En huskeliste |
+| Andet | Hovedpunkter |
+
+Alle referater begynder med en kort opsummering. Afsnit uden indhold udelades. En note under 30 sekunder bliver kun renskrevet, men en påmindelse får altid sin huskeliste.
 
 Referatet laves af en AI ud fra det, du sagde. Det skriver "[uklart]", hvor noget ikke var til at forstå. Tjek altid vigtige tal og aftaler mod transskriptionen bagerst i PDF'en.
 
