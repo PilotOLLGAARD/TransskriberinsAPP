@@ -42,6 +42,7 @@ const SKEMA_KORT = {
 
 const REGLER = [
   'Intet må opfindes. Medtag kun det, der faktisk blev sagt i transskriptionen.',
+  'Tilføj ikke roller, titler, årsager eller sammenhænge, der ikke blev sagt.',
   'Er noget uklart eller utydeligt, så skriv "[uklart]" i stedet for at gætte.',
   'Gengiv tal, mål, mængder, datoer, frister, adresser, navne og fagudtryk præcist, som de blev sagt.',
   'Tilføj ingen egne vurderinger, anbefalinger eller konklusioner.',
@@ -64,6 +65,7 @@ function lavPrompt({ tekst, titel, kort }) {
       '- hovedpunkter: kun de værdifulde og nødvendige oplysninger.',
       '- beslutninger: beslutninger, der blev truffet.',
       '- opgaver: opgaver og aftaler med hvem, hvad og hvornår. Udelad hvem eller hvornår, hvis det ikke blev sagt.',
+      '  Skal den, der taler, selv gøre noget, så skriv "Mig" som hvem.',
       '- fejlOgMangler: fejl og mangler, der blev observeret.',
       '- aabneSpoergsmaal: spørgsmål, der stadig er åbne.',
       'Lad en liste være tom, hvis der ikke er noget til den.',
