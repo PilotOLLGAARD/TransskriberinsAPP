@@ -14,6 +14,6 @@ export const BESKEDER = {
   loginKraeverNet: 'Du skal have net for at logge ind. Optagelsen er gemt.',
   snartSlut: 'Optagelsen stopper om 4 minutter.',
   maksNaaet: 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.',
-  mailFejl: 'Mailen blev ikke sendt. Teksten er gemt. Prøv igen.',
+  mailFejl: 'Mailen blev ikke sendt. Referatet er gemt. Prøv igen.',
   maaskeSendt: 'Mailen er måske allerede sendt. Tjek din indbakke, før du sender igen.',
 };

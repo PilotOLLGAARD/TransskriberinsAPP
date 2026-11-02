@@ -23,9 +23,10 @@ const app = document.getElementById('app');
 const temaFarve = document.querySelector('meta[name="theme-color"]');
 
 const t = {
-  visning: 'start', // start | optager | tekst
+  visning: 'start', // start | optager | navn | tekst
   noter: [],
   aabenNote: null,
+  navnNote: null,
   besked: null, // { tekst, type: 'fejl' | 'ok' }
   igang: new Set(),
   startTid: 0,
@@ -154,20 +155,43 @@ async function stop() {
   await optager.stop();
 }
 
-async function behandl(id, { aabnBagefter = false } = {}) {
+async function efterAfsendelse(id) {
+  if (!(await lager.hentNote(id))) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
+  await opdater();
+}
+
+/** Laver referatet, hvis det mangler, og mailer det. Bruges af Prøv igen og Send igen. */
+async function behandlOgSend(id) {
   t.igang.add(id);
+  t.besked = null;
   await opdater().catch(() => {});
   try {
-    await forloeb.behandl(id);
+    await forloeb.behandlOgSend(id);
   } finally {
     t.igang.delete(id);
   }
-  const note = await lager.hentNote(id);
-  if (aabnBagefter && note?.status === STATUS.TEKST_KLAR && t.visning === 'start') {
-    t.visning = 'tekst';
-    t.aabenNote = id;
+  await efterAfsendelse(id);
+}
+
+async function navngivOgSend(id, titel) {
+  t.visning = 'start';
+  t.navnNote = null;
+  t.besked = null;
+  t.igang.add(id);
+  await opdater().catch(() => {});
+  try {
+    await forloeb.navngivOgSend(id, titel);
+  } finally {
+    t.igang.delete(id);
   }
-  await opdater();
+  await efterAfsendelse(id);
+}
+
+function aabnNavn(id) {
+  t.besked = null;
+  t.visning = 'navn';
+  t.navnNote = id;
+  tegn();
 }
 
 async function sendTilMig(id) {
@@ -182,7 +206,7 @@ async function sendTilMig(id) {
   if (!(await lager.hentNote(id))) {
     t.visning = 'start';
     t.aabenNote = null;
-    t.besked = { tekst: `Mailen er sendt til ${login.brugerMail()}.`, type: 'ok' };
+    t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   }
   await opdater();
 }
@@ -231,8 +255,14 @@ optager.naarAfsluttet(({ id, grund }) => {
   frigivLaas.delete(id);
   t.visning = 'start';
   if (AFSLUT_BESKEDER[grund]) visFejl(AFSLUT_BESKEDER[grund]);
-  if (grund === 'tom' || grund === 'pladsTom') opdater();
-  else behandl(id, { aabnBagefter: true });
+  if (grund === 'tom' || grund === 'pladsTom') {
+    opdater();
+    return;
+  }
+  // Lyden er gemt. Nu får optagelsen et navn, før den sendes.
+  t.visning = 'navn';
+  t.navnNote = id;
+  opdater();
 });
 
 optager.naarAdvaret(() => {
@@ -275,31 +305,51 @@ function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
     'div',
     { klasse: 'kort-hoved' },
     h('span', { klasse: `status-ikon ${ikonKlasse}` }, ikonNavn === 'spinner' ? h('span', { klasse: 'spinner' }) : ikon(ikonNavn)),
-    h('div', {}, h('p', { klasse: 'dato' }, formaterDato(note.oprettet)), h('p', { klasse: 'forklaring' }, forklaring)),
+    h(
+      'div',
+      {},
+      h('p', { klasse: 'dato' }, note.titel || formaterDato(note.oprettet)),
+      note.titel ? h('p', { klasse: 'tid' }, formaterDato(note.oprettet)) : null,
+      h('p', { klasse: 'forklaring' }, forklaring),
+    ),
   );
 }
 
 function kort(note) {
-  if (t.igang.has(note.id) || note.status === STATUS.SENDER) {
-    return h('section', { klasse: 'kort' }, kortHoved(note, 'spinner', 'venter', 'Transskriberer …'));
+  if (t.igang.has(note.id) || note.status === STATUS.SENDER || note.status === STATUS.SENDER_MAIL) {
+    return h('section', { klasse: 'kort' }, kortHoved(note, 'spinner', 'venter', 'Laver referat …'));
   }
 
   if (note.status === STATUS.TEKST_KLAR) {
+    if (note.maaskeSendt) {
+      return h(
+        'section',
+        { klasse: 'kort fejl' },
+        kortHoved(note, 'advarsel', 'fejl', BESKEDER.maaskeSendt),
+        knap('Læs og send', () => aabnTekst(note.id)),
+      );
+    }
+    const forklaring = note.fejlType === 'mailFejl' ? BESKEDER.mailFejl
+      : note.fejlType === 'login' ? BESKEDER.login : 'Referatet er klar.';
+    const send = note.fejlType === 'login'
+      ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'send' }), { ikonNavn: 'person' })
+      : knap('Send igen', () => behandlOgSend(note.id), { ikonNavn: 'send' });
     return h(
       'section',
-      { klasse: 'kort' },
-      kortHoved(note, 'tekst', '', 'Teksten er klar.'),
-      knap('Læs og send', () => aabnTekst(note.id)),
+      { klasse: note.fejlType ? 'kort fejl' : 'kort' },
+      kortHoved(note, note.fejlType ? 'advarsel' : 'tekst', note.fejlType ? 'fejl' : '', forklaring),
+      h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' })),
     );
   }
 
   const proevIgen = note.fejlType === 'login'
     ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'behandl' }), { ikonNavn: 'person' })
-    : knap('Prøv igen', () => behandl(note.id, { aabnBagefter: true }), { ikonNavn: 'igen' });
+    : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
 
   if (note.status === STATUS.GEMT || note.status === STATUS.OPTAGER) {
     const forklaring = note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.';
-    return h('section', { klasse: 'kort' }, kortHoved(note, 'ur', 'venter', forklaring), proevIgen);
+    const handling = note.navngivet ? proevIgen : knap('Navngiv og send', () => aabnNavn(note.id), { ikonNavn: 'send' });
+    return h('section', { klasse: 'kort' }, kortHoved(note, 'ur', 'venter', forklaring), handling);
   }
 
   return h(
@@ -388,6 +438,51 @@ function skaermOptager() {
   ];
 }
 
+/** Referatet, som det står i mailen. Noter fra før referaterne viser den rå tekst. */
+function referatVisning(note) {
+  const r = note.referat;
+  if (!r) return h('div', { klasse: 'tekst' }, note.tekst);
+  if (r.kort) return h('div', { klasse: 'tekst' }, r.renTekst);
+  return h(
+    'div',
+    { klasse: 'tekst' },
+    r.opsummering ? h('p', {}, r.opsummering) : null,
+    r.hovedpunkter?.length ? h('ul', {}, ...r.hovedpunkter.map((p) => h('li', {}, p))) : null,
+  );
+}
+
+function skaermNavn() {
+  const note = t.noter.find((n) => n.id === t.navnNote);
+  if (!note) {
+    t.visning = 'start';
+    return skaermStart();
+  }
+  const felt = h('input', {
+    id: 'titel',
+    klasse: 'navnefelt',
+    type: 'text',
+    maxlength: '120',
+    enterkeyhint: 'send',
+    autocomplete: 'off',
+    autocapitalize: 'sentences',
+    placeholder: 'Fx Møde omkring SAS Lounge',
+  });
+  felt.value = note.titel || '';
+  const form = h(
+    'form',
+    { klasse: 'navn' },
+    h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
+    felt,
+    h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel.'),
+    h('button', { type: 'submit' }, ikon('send'), 'Send'),
+  );
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    navngivOgSend(note.id, felt.value);
+  });
+  return [h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
+}
+
 function skaermTekst() {
   const note = t.noter.find((n) => n.id === t.aabenNote);
   if (!note) {
@@ -405,12 +500,12 @@ function skaermTekst() {
       'div',
       { klasse: 'tekst-skaerm' },
       h('header', { klasse: 'top' }, ordmaerke()),
-      h('h1', { klasse: 'titel' }, 'Teksten'),
+      h('h1', { klasse: 'titel' }, note.titel || 'Teksten'),
       h('p', { klasse: 'undertitel' }, formaterDato(note.oprettet)),
       beskedElement(),
       fejl ? advarsel(fejl) : null,
       note.maaskeSendt ? advarsel(BESKEDER.maaskeSendt) : null,
-      h('div', { klasse: 'tekst' }, note.tekst),
+      referatVisning(note),
     ),
     h(
       'div',
@@ -430,11 +525,14 @@ function tegn() {
   let indhold;
   if (t.visning === 'optager') indhold = skaermOptager();
   else if (t.visning === 'tekst') indhold = skaermTekst();
+  else if (t.visning === 'navn') indhold = skaermNavn();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
   temaFarve?.setAttribute('content', t.visning === 'optager' ? '#0f1a26' : '#f3f5f8');
   app.replaceChildren(...indhold.filter(Boolean));
+  // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
+  if (t.visning === 'navn') document.getElementById('titel')?.focus();
 }
 
 // Start
@@ -454,7 +552,7 @@ async function genoptagEfterLogin() {
     if (note.maaskeSendt) await opdater();
     else await sendTilMig(id);
   } else {
-    await behandl(id, { aabnBagefter: true });
+    await behandlOgSend(id);
   }
 }
 
