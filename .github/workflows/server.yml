@@ -16,6 +16,8 @@ jobs:
 
   udgiv:
     needs: tjek
+    # Springes over, indtil Google Cloud er sat op med scripts/opsaet-google.sh.
+    if: vars.GCP_WIF_PROVIDER != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
