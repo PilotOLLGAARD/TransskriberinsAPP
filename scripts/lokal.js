@@ -168,7 +168,7 @@ function startLokal({ port = 4280 } = {}) {
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    if (url.pathname === '/transskriber') return handler(req, res);
+    if (url.pathname === '/transskriber' || url.pathname === '/referat') return handler(req, res);
     if (url.pathname.startsWith('/test/')) return testRute(url, req, res);
     return statisk(url, res);
   });

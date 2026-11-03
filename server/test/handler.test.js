@@ -384,3 +384,93 @@ test('svaret har type, emne og html', async () => {
   assert.equal(j.emne, 'Møde: Møde om tag – 2. nov. 2026');
   assert.ok(j.html.includes('HEMMELIGT-REFERAT'));
 });
+
+// Kun tekst og ét referat af flere dele
+
+function postReferat(adresse, krop, { headers = {} } = {}) {
+  const tekst = typeof krop === 'string' ? krop : JSON.stringify(krop);
+  return fetch(`${adresse}/referat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer x', ...headers },
+    body: tekst,
+  });
+}
+
+test('x-kun-tekst giver kun teksten og intet referat', async () => {
+  const s = await start();
+  const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1' } })).json();
+  assert.deepEqual(j, { tekst: 'Hej' });
+  assert.equal(s.referat.kald, 0);
+  assert.equal(s.pdf.kald, 0);
+});
+
+test('/referat kræver adgang, før kroppen læses', async () => {
+  const s = await start({ tjekAdgang: async () => ({ ok: false, status: 401, grund: 'x' }) });
+  const svar = await postReferat(s.adresse, { tekster: ['a'] });
+  assert.equal(svar.status, 401);
+  assert.deepEqual(s.laest, [false]);
+  assert.equal(s.referat.kald, 0);
+});
+
+test('/referat samler teksterne med markøren og laver ét referat', async () => {
+  const s = await start();
+  const svar = await postReferat(s.adresse, { tekster: [' Første del. ', 'Anden del.'], titel: 'Møde om tag', type: 'moede', varighedSek: 600, optaget: TID });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.equal(j.tekst, 'Første del.\n\n[Optagelsen blev afbrudt her]\n\nAnden del.');
+  assert.equal(s.referat.kald, 1);
+  assert.equal(s.referat.valg.tekst, j.tekst);
+  assert.equal(s.referat.valg.titel, 'Møde om tag');
+  assert.equal(s.referat.valg.type, 'moede');
+  assert.equal(s.referat.valg.varighedSek, 600);
+  assert.equal(s.pdf.valg.tidspunkt, TID);
+  assert.equal(s.pdf.valg.tekst, j.tekst);
+  assert.equal(j.emne, 'Møde: Møde om tag – 2. nov. 2026');
+  assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
+  assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+});
+
+test('/referat springer tomme tekster over, og kun tomme giver tom tekst', async () => {
+  const s = await start();
+  const j = await (await postReferat(s.adresse, { tekster: ['', '  ', 'Kun denne.'] })).json();
+  assert.equal(j.tekst, 'Kun denne.');
+  const tom = await (await postReferat(s.adresse, { tekster: ['', ' '] })).json();
+  assert.deepEqual(tom, { tekst: '' });
+  assert.equal(s.referat.kald, 1);
+});
+
+test('/referat afviser forkert format, for stor krop og mere end 20 tekster', async () => {
+  const s = await start();
+  assert.equal((await postReferat(s.adresse, { tekster: ['a'] }, { headers: { 'content-type': 'text/plain' } })).status, 415);
+  assert.equal((await postReferat(s.adresse, 'ikke json')).status, 400);
+  assert.equal((await postReferat(s.adresse, { tekster: 'a' })).status, 400);
+  assert.equal((await postReferat(s.adresse, { tekster: [] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { tekster: [1, 2] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { tekster: Array(21).fill('a') })).status, 400);
+  assert.equal((await postReferat(s.adresse, { tekster: ['x'.repeat(3 * 1024 * 1024)] })).status, 413);
+  assert.equal(s.referat.kald, 0);
+});
+
+test('/referat renser titlen og ignorerer ukendt type', async () => {
+  const s = await start();
+  await postReferat(s.adresse, { tekster: ['a'], titel: `a\nb${'å'.repeat(300)}`, type: 'ond' });
+  assert.equal(s.referat.valg.titel.length, 120);
+  assert.ok(!s.referat.valg.titel.includes('\n'));
+  assert.equal(s.referat.valg.type, 'automatisk');
+});
+
+test('CORS tillader x-kun-tekst', async () => {
+  const s = await start();
+  const svar = await fetch(`${s.adresse}/referat`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.equal(svar.status, 204);
+  assert.ok(svar.headers.get('access-control-allow-headers').includes('x-kun-tekst'));
+});
+
+test('logs indeholder ingen tekst fra /referat', async () => {
+  const s = await start();
+  await postReferat(s.adresse, { tekster: ['HEMMELIG-DELTEKST'], titel: 'HEMMELIG-TITEL' });
+  const alt = s.logs.join('\n');
+  assert.ok(!alt.includes('HEMMELIG-DELTEKST'));
+  assert.ok(!alt.includes('HEMMELIG-TITEL'));
+  assert.ok(alt.includes('referat-kald'));
+});
