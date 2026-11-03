@@ -607,3 +607,102 @@ test('en anden fane uden Web Locks, der åbnes under optagelsen, sletter eller �
   assert.ok(efter.modtaget.bytes > 0);
   await kontekst.close();
 });
+
+// Tidligere optagelser og Send referat igen
+
+const TIDLIGERE = 'Tidligere optagelser';
+
+async function aabnTidligere(side) {
+  await knap(side, TIDLIGERE).click();
+  await side.getByRole('heading', { name: TIDLIGERE }).waitFor();
+}
+
+test('efter afsendelse ligger referatet under Tidligere optagelser med Sendt og Slettes om 7 dage', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Historik' });
+  await vis(side, SENDT);
+  assert.equal(await side.getByRole('heading', { name: 'Afventer' }).count(), 0);
+  await aabnTidligere(side);
+  await vis(side, 'Historik');
+  await vis(side, 'Sendt');
+  await vis(side, 'Slettes om 7 dage');
+  await knap(side, 'Send referat igen').waitFor();
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Optag').waitFor();
+  await kontekst.close();
+});
+
+test('Send referat igen sender samme emne og pdf uden nyt Gemini- eller referatkald', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Igen' });
+  await vis(side, SENDT);
+  const foer = await tal(miljoe);
+  await aabnTidligere(side);
+  await knap(side, 'Send referat igen').click();
+  await vis(side, 'Sendt igen kl.');
+  const efter = await tal(miljoe);
+  assert.equal(efter.geminiKald, foer.geminiKald);
+  assert.equal(efter.referatKald, foer.referatKald);
+  assert.equal(efter.mailKald, foer.mailKald + 1);
+  assert.equal(efter.sidsteMail.message.subject, foer.sidsteMail.message.subject);
+  assert.equal(efter.sidsteMail.message.attachments[0].contentBytes, foer.sidsteMail.message.attachments[0].contentBytes);
+  await kontekst.close();
+});
+
+test('Læs fra Tidligere optagelser kan sende igen og fører tilbage til listen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Læses' });
+  await vis(side, SENDT);
+  await aabnTidligere(side);
+  await knap(side, 'Læs').click();
+  await vis(side, 'Testreferat af');
+  await knap(side, 'Send referat igen').waitFor();
+  await knap(side, 'Tilbage').click();
+  await side.getByRole('heading', { name: TIDLIGERE }).waitFor();
+  await kontekst.close();
+});
+
+test('fejlet optagelse vises som Fejlet med Slettes ikke, før den er sendt, og Prøv igen virker', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Fejler' });
+  await vis(side, 'Transskriptionen mislykkedes');
+  await aabnTidligere(side);
+  await vis(side, 'Fejlet');
+  await vis(side, 'Slettes ikke, før den er sendt');
+  await knap(side, 'Prøv igen').click();
+  await vis(side, 'Slettes om 7 dage');
+  await kontekst.close();
+});
+
+test('tom liste viser Ingen optagelser endnu.', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await aabnTidligere(side);
+  await vis(side, 'Ingen optagelser endnu.');
+  await kontekst.close();
+});
+
+test('Tidligere optagelser kan betjenes på 360 px', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await optag(side, { titel: `Lang${'x'.repeat(100)}` });
+  await vis(side, SENDT);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Fejler på smal skærm' });
+  await vis(side, 'Transskriptionen mislykkedes');
+  await aabnTidligere(side);
+  const m = await side.evaluate(() => ({
+    bred: document.documentElement.scrollWidth,
+    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+    tekst: [...document.querySelectorAll('button, p, h1, h2')].map((e) => parseFloat(getComputedStyle(e).fontSize)),
+  }));
+  assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
+  for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `"${tekst}" er ${hoejde} px`);
+  for (const s of m.tekst) assert.ok(s >= 16, `tekst på ${s} px`);
+  await kontekst.close();
+});

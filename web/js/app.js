@@ -7,7 +7,7 @@ import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, browserMedier, lavOptager } from './optager.js';
-import { STATUS } from './tilstand.js';
+import { STATUS, slettesOm } from './tilstand.js';
 import { sendLyd } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
 
@@ -46,6 +46,7 @@ const t = {
   visning: 'start', // start | optager | navn | tekst
   noter: [],
   aabenNote: null,
+  fraVisning: 'start', // skærmen, Læs vender tilbage til
   navnNote: null,
   navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
   navnType: null, // typen valgt på navneskærmen; null betyder den, der blev valgt før optagelsen
@@ -74,6 +75,7 @@ const IKONER = {
   del: '<path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/>',
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   tilbage: '<path d="M15 5l-7 7 7 7"/>',
+  liste: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
 };
 
 function ikon(navn) {
@@ -242,6 +244,30 @@ async function sendTilMig(id) {
   await opdater();
 }
 
+/** Sender en sendt notes referat igen fra telefonen. */
+async function sendIgen(id) {
+  t.igang.add(id);
+  t.besked = null;
+  await opdater().catch(() => {});
+  const foer = (await lager.hentNote(id))?.sendtIgen;
+  try {
+    await forloeb.sendIgen(id);
+  } finally {
+    t.igang.delete(id);
+  }
+  const note = await lager.hentNote(id);
+  if (note?.sendtIgen && note.sendtIgen !== foer) {
+    t.besked = { tekst: `Referatet er sendt igen til ${login.brugerMail()}.`, type: 'ok' };
+  }
+  await opdater();
+}
+
+function aabnTidligere() {
+  t.besked = null;
+  t.visning = 'tidligere';
+  opdater();
+}
+
 async function bekraeftSendt(id) {
   await forloeb.bekraeftSendt(id);
   t.visning = 'start';
@@ -258,13 +284,14 @@ async function slet(id) {
 
 function aabnTekst(id) {
   t.besked = null;
+  t.fraVisning = t.visning === 'tidligere' ? 'tidligere' : 'start';
   t.visning = 'tekst';
   t.aabenNote = id;
   opdater();
 }
 
 function tilbage() {
-  t.visning = 'start';
+  t.visning = t.visning === 'tekst' ? t.fraVisning : 'start';
   t.aabenNote = null;
   t.besked = null;
   tegn();
@@ -404,31 +431,31 @@ function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
   );
 }
 
-function kort(note) {
+/** Forklaring og knapper for en note, der ikke er sendt. Bruges i Afventer og Tidligere optagelser. */
+function kortIndhold(note) {
   if (t.igang.has(note.id) || note.status === STATUS.SENDER || note.status === STATUS.SENDER_MAIL) {
-    return h('section', { klasse: 'kort' }, kortHoved(note, 'spinner', 'venter', 'Laver referat …'));
+    return { klasse: 'kort', ikonNavn: 'spinner', ikonKlasse: 'venter', forklaring: 'Laver referat …', handling: null };
   }
 
   if (note.status === STATUS.TEKST_KLAR) {
     if (note.maaskeSendt) {
-      return h(
-        'section',
-        { klasse: 'kort fejl' },
-        kortHoved(note, 'advarsel', 'fejl', BESKEDER.maaskeSendt),
-        knap('Læs og send', () => aabnTekst(note.id)),
-      );
+      return {
+        klasse: 'kort fejl', ikonNavn: 'advarsel', ikonKlasse: 'fejl', forklaring: BESKEDER.maaskeSendt,
+        handling: knap('Læs og send', () => aabnTekst(note.id)),
+      };
     }
     const forklaring = note.fejlType === 'mailFejl' ? BESKEDER.mailFejl
       : note.fejlType === 'login' ? BESKEDER.login : 'Referatet er klar.';
     const send = note.fejlType === 'login'
       ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'send' }), { ikonNavn: 'person' })
       : knap('Send igen', () => behandlOgSend(note.id), { ikonNavn: 'send' });
-    return h(
-      'section',
-      { klasse: note.fejlType ? 'kort fejl' : 'kort' },
-      kortHoved(note, note.fejlType ? 'advarsel' : 'tekst', note.fejlType ? 'fejl' : '', forklaring),
-      h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' })),
-    );
+    return {
+      klasse: note.fejlType ? 'kort fejl' : 'kort',
+      ikonNavn: note.fejlType ? 'advarsel' : 'tekst',
+      ikonKlasse: note.fejlType ? 'fejl' : '',
+      forklaring,
+      handling: h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' })),
+    };
   }
 
   const proevIgen = note.fejlType === 'login'
@@ -436,16 +463,79 @@ function kort(note) {
     : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
 
   if (note.status === STATUS.GEMT || note.status === STATUS.OPTAGER) {
-    const forklaring = note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.';
-    const handling = note.navngivet ? proevIgen : knap('Navngiv og send', () => aabnNavn(note.id), { ikonNavn: 'send' });
-    return h('section', { klasse: 'kort' }, kortHoved(note, 'ur', 'venter', forklaring), handling);
+    return {
+      klasse: 'kort', ikonNavn: 'ur', ikonKlasse: 'venter',
+      forklaring: note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.',
+      handling: note.navngivet ? proevIgen : knap('Navngiv og send', () => aabnNavn(note.id), { ikonNavn: 'send' }),
+    };
   }
 
+  return {
+    klasse: 'kort fejl', ikonNavn: 'advarsel', ikonKlasse: 'fejl',
+    forklaring: BESKEDER[note.fejlType] || BESKEDER.tjeneste,
+    handling: h('div', { klasse: 'knapper' }, proevIgen, knap('Slet', () => slet(note.id), { klasse: 'slet', ikonNavn: 'slet' })),
+  };
+}
+
+function kort(note) {
+  const k = kortIndhold(note);
+  return h('section', { klasse: k.klasse }, kortHoved(note, k.ikonNavn, k.ikonKlasse, k.forklaring), k.handling);
+}
+
+function klokken(ms) {
+  return new Date(ms).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }).replace(':', '.');
+}
+
+function formaterVarighed(ms) {
+  if (!Number.isFinite(ms)) return null;
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 60 ? `${s} sek` : `${Math.round(s / 60)} min`;
+}
+
+/** Sendt, Venter eller Fejlet. Ikon og tekst, så status ikke kun vises med farve. */
+function statusFor(note) {
+  if (note.status === STATUS.SENDT) return { tekst: 'Sendt', klasse: 'ok', ikonNavn: 'tjek' };
+  if (note.status === STATUS.FEJL || note.fejlType) return { tekst: 'Fejlet', klasse: 'fejl', ikonNavn: 'advarsel' };
+  return { tekst: 'Venter', klasse: 'venter', ikonNavn: 'ur' };
+}
+
+function sletteTekst(note) {
+  const dage = slettesOm(note, Date.now());
+  if (dage === null) return 'Slettes ikke, før den er sendt';
+  if (dage === 0) return 'Slettes i dag';
+  return dage === 1 ? 'Slettes om 1 dag' : `Slettes om ${dage} dage`;
+}
+
+function sendtKnapper(note) {
+  if (t.igang.has(note.id)) return venter('Sender mail …');
+  const send = note.fejlType === 'login'
+    ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'sendIgen' }), { ikonNavn: 'person' })
+    : knap('Send referat igen', () => sendIgen(note.id), { ikonNavn: 'send' });
+  return h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' }));
+}
+
+function historikKort(note) {
+  const status = statusFor(note);
+  const sendt = note.status === STATUS.SENDT;
+  const indhold = sendt ? null : kortIndhold(note);
+  const advarsel = sendt
+    ? (note.maaskeSendt ? BESKEDER.maaskeSendt : note.fejlType === 'login' ? BESKEDER.login : note.fejlType ? BESKEDER.mailFejl : null)
+    : indhold.forklaring;
+  const type = TYPER.find((x) => x.noegle === note.type)?.navn ?? 'Automatisk';
   return h(
     'section',
-    { klasse: 'kort fejl' },
-    kortHoved(note, 'advarsel', 'fejl', BESKEDER[note.fejlType] || BESKEDER.tjeneste),
-    h('div', { klasse: 'knapper' }, proevIgen, knap('Slet', () => slet(note.id), { klasse: 'slet', ikonNavn: 'slet' })),
+    { klasse: `kort historik${status.klasse === 'fejl' ? ' fejl' : ''}` },
+    h(
+      'div',
+      { klasse: 'historik-top' },
+      h('p', { klasse: 'dato' }, note.titel || formaterDato(note.oprettet)),
+      h('span', { klasse: `status-maerke ${status.klasse}` }, ikon(status.ikonNavn), status.tekst),
+    ),
+    h('p', { klasse: 'meta' }, [type, formaterDato(note.oprettet), formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ')),
+    h('p', { klasse: 'slettes' }, sletteTekst(note)),
+    note.sendtIgen ? h('p', { klasse: 'meta' }, `Sendt igen kl. ${klokken(note.sendtIgen)}`) : null,
+    advarsel ? h('p', { klasse: 'forklaring' }, advarsel) : null,
+    sendt ? sendtKnapper(note) : indhold.handling,
   );
 }
 
@@ -514,8 +604,23 @@ function skaermStart() {
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
+    knap('Tidligere optagelser', aabnTidligere, { klasse: 'hvid', ikonNavn: 'liste' }),
     t.forklaringSkjult ? knap('Vis forklaring', () => visForklaring(true), { klasse: 'hvid' }) : null,
     hjaelpTilHjemmeskaerm(),
+  ];
+}
+
+function skaermTidligere() {
+  const noter = t.noter.filter((n) => n.id !== optager.aktivId());
+  return [
+    h('header', { klasse: 'top' }, ordmaerke()),
+    h('h1', { klasse: 'titel' }, 'Tidligere optagelser'),
+    h('p', { klasse: 'undertitel' }, 'Sendte referater bliver her i 7 dage. Optagelser, der ikke er sendt, bliver, til de er sendt.'),
+    beskedElement(),
+    noter.length
+      ? h('div', { klasse: 'liste historik-liste' }, ...noter.map(historikKort))
+      : h('p', { klasse: 'tom-liste' }, 'Ingen optagelser endnu.'),
+    knap('Tilbage', tilbage, { klasse: 'hvid', ikonNavn: 'tilbage' }),
   ];
 }
 
@@ -593,9 +698,11 @@ function skaermTekst() {
   }
   const sender = t.igang.has(note.id) || note.status === STATUS.SENDER_MAIL;
   const fejl = note.fejlType === 'login' ? BESKEDER.login : note.fejlType === 'mailFejl' ? BESKEDER.mailFejl : null;
+  const sendt = note.status === STATUS.SENDT;
   const send = note.fejlType === 'login'
-    ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'send' }), { ikonNavn: 'person' })
-    : knap('Send til mig', () => sendTilMig(note.id), { ikonNavn: 'send' });
+    ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: sendt ? 'sendIgen' : 'send' }), { ikonNavn: 'person' })
+    : sendt ? knap('Send referat igen', () => sendIgen(note.id), { ikonNavn: 'send' })
+      : knap('Send til mig', () => sendTilMig(note.id), { ikonNavn: 'send' });
   const advarsel = (tekst) => h('p', { klasse: 'besked fejl', role: 'alert' }, ikon('advarsel'), h('span', {}, tekst));
   return [
     h(
@@ -615,7 +722,7 @@ function skaermTekst() {
       ...(sender
         ? [venter('Sender mail …')]
         : [
-          note.maaskeSendt ? knap('Jeg har fået mailen', () => bekraeftSendt(note.id), { klasse: 'tonet', ikonNavn: 'tjek' }) : null,
+          note.maaskeSendt && !sendt ? knap('Jeg har fået mailen', () => bekraeftSendt(note.id), { klasse: 'tonet', ikonNavn: 'tjek' }) : null,
           send,
           knap('Tilbage', tilbage, { klasse: 'hvid', ikonNavn: 'tilbage' }),
         ]),
@@ -628,6 +735,7 @@ function tegn() {
   if (t.visning === 'optager') indhold = skaermOptager();
   else if (t.visning === 'tekst') indhold = skaermTekst();
   else if (t.visning === 'navn') indhold = skaermNavn();
+  else if (t.visning === 'tidligere') indhold = skaermTidligere();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
@@ -655,7 +763,12 @@ async function genoptagEfterLogin() {
   if (!raa || !login.harKonto()) return;
   localStorage.removeItem(EFTER_LOGIN);
   const { id, handling } = JSON.parse(raa);
-  if (handling === 'send') {
+  if (handling === 'sendIgen') {
+    if (!(await lager.hentNote(id))) return;
+    await lager.opdaterNote(id, { fejlType: undefined });
+    t.visning = 'tidligere';
+    await sendIgen(id);
+  } else if (handling === 'send') {
     const note = await lager.hentNote(id);
     if (!note) return;
     await lager.opdaterNote(id, { fejlType: undefined });

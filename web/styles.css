@@ -479,3 +479,39 @@ button svg { width: 26px; height: 26px; }
   .forklaring-kort { box-shadow: inset 0 0 0 2px var(--blaek); }
   .typer [role="radio"] { box-shadow: inset 0 0 0 2px var(--blaek); }
 }
+
+/* Tidligere optagelser */
+
+.historik-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.historik-top .dato { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.historik .meta { color: var(--graa); font-size: 18px; }
+.historik .slettes { font-size: 18px; font-weight: 550; }
+.historik .forklaring { color: var(--graa); font-size: 18px; }
+.historik.fejl .forklaring { color: var(--fejl-tekst); }
+.historik { gap: 8px; }
+.historik > .knapper, .historik > button, .historik > .venter { margin-top: 6px; }
+
+/* Status med ikon og tekst, så den kan læses uden farver og i sollys. */
+.status-maerke {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.status-maerke svg { width: 16px; height: 16px; }
+.status-maerke.ok { color: var(--ok-tekst); background: var(--ok-bund); }
+.status-maerke.fejl { color: var(--fejl-tekst); background: var(--fejl-bund); }
+.status-maerke.venter { color: var(--graa); background: var(--flade); }
+
+.tom-liste { margin: 24px 4px; color: var(--graa); }
+.historik-liste { margin: 16px 0 20px; }
+
+@media (prefers-contrast: more) {
+  .status-maerke { box-shadow: inset 0 0 0 1.5px currentColor; }
+}
