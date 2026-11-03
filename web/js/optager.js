@@ -185,23 +185,39 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       if (aktiv) return aktiv.id;
       const id = crypto.randomUUID();
       return begynd({
-        id, ny: true, del: 0, foersteNr: 0, tidligereMs: 0,
-        klargoer: (mime) => lager.opretNote({ id, mime, titel, type }),
+        id, ny: true,
+        klargoer: async (mime) => {
+          await lager.opretNote({ id, mime, titel, type });
+          return { del: 0, foersteNr: 0, tidligereMs: 0 };
+        },
         fortryd: () => lager.sletNote(id),
       });
     },
 
-    /** Optager en ny del på en gemt, afbrudt note. */
+    /**
+     * Optager en ny del på en gemt, afbrudt note. Noten læses igen, når låsen er taget,
+     * så to faner, der trykker samtidig, aldrig bruger samme del eller stykkenumre.
+     */
     async fortsaet(id) {
       if (aktiv) return aktiv.id;
-      const note = await lager.hentNote(id).catch(() => null);
-      if (!note || note.status !== STATUS.GEMT) throw new OptageFejl('kanIkkeOptage');
-      const del = note.dele ?? 1;
-      const tidligereMs = note.varighedMs ?? 0;
-      if (del >= MAKS_DELE || tidligereMs >= MAKS_MS) throw new OptageFejl('ingenFlereDele');
+      const kanFortsaettes = async () => {
+        const note = await lager.hentNote(id).catch(() => null);
+        if (!note || note.status !== STATUS.GEMT) throw new OptageFejl('kanIkkeOptage');
+        const del = note.dele ?? 1;
+        const tidligereMs = note.varighedMs ?? 0;
+        if (del >= MAKS_DELE || tidligereMs >= MAKS_MS) throw new OptageFejl('ingenFlereDele');
+        return { del, tidligereMs };
+      };
+      await kanFortsaettes();
+      let del;
       return begynd({
-        id, ny: false, del, foersteNr: (await lager.hoejesteNr(id)) + 1, tidligereMs,
-        klargoer: () => lager.opdaterNote(id, { status: STATUS.OPTAGER, dele: del + 1 }),
+        id, ny: false,
+        klargoer: async () => {
+          const frisk = await kanFortsaettes();
+          del = frisk.del;
+          await lager.opdaterNote(id, { status: STATUS.OPTAGER, dele: del + 1 });
+          return { ...frisk, foersteNr: (await lager.hoejesteNr(id)) + 1 };
+        },
         fortryd: () => lager.opdaterNote(id, { status: STATUS.GEMT, dele: del }),
       });
     },
@@ -218,10 +234,10 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
   };
 
   /**
-   * Starter en del. klargoer opretter eller genåbner noten, efter låsen er taget.
-   * fortryd sletter eller genåbner den igen, hvis optageren ikke kan starte.
+   * Starter en del. klargoer opretter eller genåbner noten, efter låsen er taget, og giver
+   * { del, foersteNr, tidligereMs }. fortryd sletter eller genåbner den igen, hvis optageren ikke kan starte.
    */
-  async function begynd({ id, ny, del, foersteNr, tidligereMs, klargoer, fortryd }) {
+  async function begynd({ id, ny, klargoer, fortryd }) {
       const mime = vaelgFormat(medier.erUnderstoettet);
       if (!mime) throw new OptageFejl('kanIkkeOptage');
 
@@ -234,15 +250,18 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
 
       let recorder;
       let frigivLaas = null;
+      let del;
+      let foersteNr;
+      let tidligereMs;
       try {
         recorder = medier.lavRecorder(stream, { mimeType: mime, audioBitsPerSecond: BITRATE });
         // Låsen tages, før noten findes, så en anden fane aldrig ser optagelsen uden lås.
         frigivLaas = (await medier.laas?.(LAAS_PRAEFIKS + id)) ?? null;
-        await klargoer(recorder.mimeType || mime);
-      } catch {
+        ({ del, foersteNr, tidligereMs } = await klargoer(recorder.mimeType || mime));
+      } catch (e) {
         frigivLaas?.();
         stopSpor(stream);
-        throw new OptageFejl('kanIkkeOptage');
+        throw e instanceof OptageFejl ? e : new OptageFejl('kanIkkeOptage');
       }
 
       const o = {

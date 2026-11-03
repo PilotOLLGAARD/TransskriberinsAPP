@@ -566,3 +566,33 @@ test('efter 20 dele eller 59 minutter kan der ikke fortsættes', async () => {
   s.lager.noter.get(id).varighedMs = 59 * MINUT;
   await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
 });
+
+test('to optagere, der fortsætter samme note samtidig, overskriver ikke hinandens lyd', async () => {
+  const a = opsaet();
+  const id = await foersteDel(a);
+  const b = opsaet({ lager: a.lager });
+  // Én fælles lås, som i browseren: den anden venter, til den første er færdig.
+  let koe = Promise.resolve();
+  const laas = async () => {
+    let frigiv;
+    const foer = koe;
+    koe = new Promise((ok) => { frigiv = ok; });
+    await foer;
+    return frigiv;
+  };
+  a.optagerMedier.laas = laas;
+  b.optagerMedier.laas = laas;
+  // Begge læser noten, før nogen har låsen.
+  const foerste = a.optager.fortsaet(id);
+  const anden = b.optager.fortsaet(id);
+  await foerste;
+  a.tilstand.recorder.send('a');
+  await a.optager.stop();
+  await anden;
+  b.tilstand.recorder.send('b');
+  await b.optager.stop();
+  const nr = a.lager.stykker.map((x) => x.nr);
+  assert.equal(new Set(nr).size, nr.length, `samme nummer brugt to gange: ${nr}`);
+  assert.deepEqual([...new Set(a.lager.stykker.map((x) => x.del))], [0, 1, 2]);
+  assert.equal(a.lager.noter.get(id).dele, 3);
+});
