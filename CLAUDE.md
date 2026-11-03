@@ -31,7 +31,7 @@ iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF. Headere `x-titel`, `x-type`, `x-varighed`, `x-optaget`, `x-kun-tekst` (kun teksten). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
 | `server/src/gemini.js` | Upload, transskription og sletning hos Google |
 | `web/js/optager.js` | Optagelse, afbrydelser, varighed |
-| `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, oprydning efter 7 dage. Lyd slettes kun ved 202 |
+| `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
 | `web/js/app.js` | Kun brugerflade |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |
 

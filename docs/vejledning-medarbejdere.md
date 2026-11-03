@@ -16,9 +16,9 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 1. Log ind med din ØLLGAARD-konto.
 2. Vælg typen, og skriv evt. et navn, fx "Møde omkring SAS Lounge". Begge dele er valgfrie og kan også vælges efter optagelsen.
 3. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
-4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele. Har du givet appen lov til notifikationer (den spørger første gang, du trykker Optag), får du beskeden "Optagelsen er stoppet — hold appen åben, mens du optager." Det er afprøvet på iPhone med appen på hjemmeskærmen.
+4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele. Har du givet appen lov til notifikationer (den spørger første gang, du trykker Optag), får du beskeden "Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager." Når du åbner appen igen, står optagelsen klar med Fortsæt optagelsen og Send.
 5. Tryk på **Stop**.
-6. Ret navnet og typen, hvis du vil, og tryk **Send**. Er navnet tomt, finder appen selv på en titel. **Hold appen åben, til der står "Referatet er sendt".** Lukker du den før, bliver referatet først færdigt, når du åbner appen igen og trykker Prøv igen. Har du givet lov til notifikationer, får du en besked, hvis det sker.
+6. Ret navnet og typen, hvis du vil, og tryk **Send**. Skærmen viser trin for trin, hvor langt referatet er, og hvilken mailadresse det sendes til. Er navnet tomt, finder appen selv på en titel. **Hold appen åben, til der står "Referatet er sendt".** Lukker du den før, bliver referatet først færdigt, når du åbner appen igen og trykker Prøv igen. Har du givet lov til notifikationer, får du en besked, hvis det sker.
 7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
 
 Forklaringen øverst på startskærmen kan skjules med **Skjul forklaringen** og vises igen med **Vis forklaring** nederst.
@@ -48,6 +48,8 @@ Tryk **Tidligere** øverst til højre på startskærmen. Du ser titel, type, dat
 | Sendt | Mailen er sendt | Efter 7 dage. Der står, hvor mange dage der er tilbage |
 | Venter | Ikke sendt endnu | Aldrig af sig selv. Tryk Send igen eller Navngiv og send |
 | Fejlet | Noget gik galt | Aldrig af sig selv. Tryk Prøv igen |
+
+Vil du slette en optagelse, så tryk **Slet** på kortet. Du kan fortryde i 7 sekunder. Derefter er lyd, tekst og referat væk fra telefonen. Er optagelsen ikke sendt, bliver den aldrig sendt. En mail, der allerede er sendt, ligger stadig i din Outlook.
 
 ## Hvis noget går galt
 
