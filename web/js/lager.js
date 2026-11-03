@@ -62,10 +62,13 @@ export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', ty
   return id;
 }
 
-/** Gemmer et stykke lyd og stempler noten som aktiv, så andre faner kan se, at optagelsen kører. */
-export async function gemStykke(id, nr, bytes) {
+/**
+ * Gemmer et stykke lyd og stempler noten som aktiv, så andre faner kan se, at optagelsen kører.
+ * del er nummeret på delen, når en afbrudt optagelse fortsættes. Dele sættes aldrig sammen.
+ */
+export async function gemStykke(id, nr, bytes, del = 0) {
   await transaktion([NOTER, STYKKER], 'readwrite', (t) => {
-    t.objectStore(STYKKER).put({ noteId: id, nr, bytes });
+    t.objectStore(STYKKER).put({ noteId: id, nr, bytes, del });
     const noter = t.objectStore(NOTER);
     const r = noter.get(id);
     r.onsuccess = () => {
@@ -81,6 +84,32 @@ export async function hentLyd(id) {
     stykkerR.onsuccess = () => {
       svar(new Blob(stykkerR.result.map((s) => s.bytes), { type: noteR.result?.mime || '' }));
     };
+  });
+}
+
+/** Én Blob pr. del i rækkefølge. Stykker fra før delene fandtes er del 0. */
+export async function hentDele(id) {
+  return transaktion([NOTER, STYKKER], 'readonly', (t, svar) => {
+    const noteR = t.objectStore(NOTER).get(id);
+    const stykkerR = t.objectStore(STYKKER).getAll(alleStykkerInterval(id));
+    stykkerR.onsuccess = () => {
+      const dele = new Map();
+      for (const s of stykkerR.result) {
+        const del = s.del ?? 0;
+        if (!dele.has(del)) dele.set(del, []);
+        dele.get(del).push(s.bytes);
+      }
+      const type = noteR.result?.mime || '';
+      svar([...dele.keys()].sort((a, b) => a - b).map((d) => new Blob(dele.get(d), { type })));
+    };
+  });
+}
+
+/** Det højeste stykkenummer på noten, eller -1 uden stykker. */
+export async function hoejesteNr(id) {
+  return transaktion(STYKKER, 'readonly', (t, svar) => {
+    const r = t.objectStore(STYKKER).getAllKeys(alleStykkerInterval(id));
+    r.onsuccess = () => svar(r.result.reduce((h, [, nr]) => Math.max(h, nr), -1));
   });
 }
 

@@ -15,7 +15,14 @@ function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}
     async gemStykke(id, nr, bytes) {
       if (nr >= fejlFraStykke) throw new DOMException('fuld', 'QuotaExceededError');
       if (nr >= haengFraStykke) await new Promise(() => {});
-      l.stykker.push({ id, nr, bytes });
+      l.stykker.push({ id, nr, bytes, del: arguments[3] ?? 0 });
+    },
+    async hentNote(id) {
+      const n = l.noter.get(id);
+      return n ? { ...n } : null;
+    },
+    async hoejesteNr(id) {
+      return Math.max(-1, ...l.stykker.filter((x) => x.id === id).map((x) => x.nr));
     },
     async opdaterNote(id, felter) {
       Object.assign(l.noter.get(id), felter);
@@ -203,22 +210,23 @@ test('afslutter ved recorder-fejl', async () => {
   assert.equal((await s.venTilAfsluttet()).grund, 'afbrudt');
 });
 
-test('afslutter ved hul i stykker, når appen bliver synlig igen', async () => {
+test('skjult app afslutter delen som afbrudt med det samme', async () => {
   const s = opsaet();
-  await s.optager.start();
+  const id = await s.optager.start();
   s.tilstand.recorder.send('a');
   await new Promise((ok) => setTimeout(ok, 5));
-  s.skrid(16000);
+  s.dokument.visibilityState = 'hidden';
   s.dokument.dispatchEvent(new Event('visibilitychange'));
   assert.equal((await s.venTilAfsluttet()).grund, 'afbrudt');
+  assert.equal(s.lager.noter.get(id).status, 'gemt');
+  assert.equal(s.lager.noter.get(id).afbrudt, true);
 });
 
-test('fortsætter når appen er synlig uden hul', async () => {
+test('synlig app fortsætter optagelsen', async () => {
   const s = opsaet();
   await s.optager.start();
   s.tilstand.recorder.send('a');
   await new Promise((ok) => setTimeout(ok, 5));
-  s.skrid(4000);
   s.dokument.dispatchEvent(new Event('visibilitychange'));
   await new Promise((ok) => setTimeout(ok, 5));
   assert.deepEqual(s.afsluttet, []);
@@ -463,4 +471,98 @@ test('uden låse i browseren kan der stadig optages', async () => {
   s.tilstand.recorder.send('a');
   await s.optager.stop();
   assert.equal(s.lager.noter.get(id).status, 'gemt');
+});
+
+// Fortsæt efter afbrydelse
+
+async function foersteDel(s, ms = 60000) {
+  const id = await s.optager.start();
+  s.skridMedLyd(ms);
+  await s.optager.stop();
+  s.afsluttet.length = 0;
+  return id;
+}
+
+test('fortsaet gemmer stykker i del 1 på samme note og lægger varigheden til', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s, 60000);
+  const sidsteNr = Math.max(...s.lager.stykker.map((x) => x.nr));
+  assert.equal(await s.optager.fortsaet(id), id);
+  assert.equal(s.lager.noter.get(id).status, 'optager');
+  assert.equal(s.lager.noter.get(id).dele, 2);
+  s.skridMedLyd(30000);
+  await s.optager.stop();
+  const nye = s.lager.stykker.filter((x) => x.del === 1);
+  assert.ok(nye.length > 0);
+  assert.equal(Math.min(...nye.map((x) => x.nr)), sidsteNr + 1);
+  const n = s.lager.noter.get(id);
+  assert.equal(n.status, 'gemt');
+  assert.equal(n.varighedMs, 90000);
+  assert.equal(n.dele, 2);
+  assert.equal(n.afbrudt, false);
+});
+
+test('maks og advarsel gælder for alle dele tilsammen', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s, 58 * MINUT);
+  await s.optager.fortsaet(id);
+  s.skrid(0);
+  assert.ok(s.advarsler.length >= 1);
+  s.skridMedLyd(61 * 1000);
+  assert.equal((await s.venTilAfsluttet()).grund, 'maks');
+});
+
+test('en fortsat del, der afbrydes uden lyd, sletter ikke noten', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s);
+  await s.optager.fortsaet(id);
+  // Ingen lyd nåede at komme i den nye del.
+  s.tilstand.recorder.slutStykke = false;
+  s.dokument.visibilityState = 'hidden';
+  s.dokument.dispatchEvent(new Event('visibilitychange'));
+  assert.equal((await s.venTilAfsluttet()).grund, 'afbrudt');
+  const n = s.lager.noter.get(id);
+  assert.ok(n);
+  assert.equal(n.status, 'gemt');
+  assert.equal(n.dele, 1);
+  assert.equal(n.varighedMs, 60000);
+  assert.equal(n.afbrudt, true);
+});
+
+test('en fortsat del, der stoppes uden lyd, sletter ikke noten', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s);
+  await s.optager.fortsaet(id);
+  // Ingen lyd nåede at komme i den nye del.
+  s.tilstand.recorder.slutStykke = false;
+  await s.optager.stop();
+  const n = s.lager.noter.get(id);
+  assert.equal(n.status, 'gemt');
+  assert.equal(n.dele, 1);
+});
+
+test('fortsaet tager låsen og frigiver den bagefter', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s);
+  s.tilstand.haendelser.length = 0;
+  await s.optager.fortsaet(id);
+  assert.deepEqual(s.tilstand.haendelser[0], ['laas', `optag-${id}`]);
+  s.tilstand.recorder.send('b');
+  await s.optager.stop();
+  assert.deepEqual(s.tilstand.haendelser.at(-1), ['frigiv', `optag-${id}`]);
+});
+
+test('fortsaet kan kun bruges på en gemt note', async () => {
+  const s = opsaet();
+  await assert.rejects(s.optager.fortsaet('findes-ikke'), (e) => e.type === 'kanIkkeOptage');
+});
+
+test('efter 20 dele eller 59 minutter kan der ikke fortsættes', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s);
+  s.lager.noter.get(id).dele = 20;
+  await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
+  s.lager.noter.get(id).dele = 1;
+  s.lager.noter.get(id).varighedMs = 59 * MINUT;
+  await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
 });
