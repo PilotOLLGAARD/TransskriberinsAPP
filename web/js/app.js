@@ -660,7 +660,7 @@ function skaermTidligere() {
   return [
     h('header', { klasse: 'top' }, ordmaerke()),
     h('h1', { klasse: 'titel' }, 'Tidligere optagelser'),
-    h('p', { klasse: 'undertitel' }, 'Sendte referater bliver her i 7 dage. Optagelser, der ikke er sendt, bliver, til de er sendt.'),
+    h('p', { klasse: 'undertitel' }, 'Alle dine optagelser fra de sidste 7 dage, sendt eller ej. En optagelse, der ikke er sendt, bliver her, til den er sendt.'),
     beskedElement(),
     noter.length
       ? h('div', { klasse: 'liste historik-liste' }, ...noter.map(historikKort))

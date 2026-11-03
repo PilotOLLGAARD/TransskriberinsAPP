@@ -625,6 +625,8 @@ test('efter afsendelse ligger referatet under Tidligere optagelser med Sendt og 
   await vis(side, SENDT);
   assert.equal(await side.getByRole('heading', { name: 'Afventer' }).count(), 0);
   await aabnTidligere(side);
+  await vis(side, 'Alle dine optagelser fra de sidste 7 dage, sendt eller ej.');
+  assert.equal(await side.getByText('bliver, til de er sendt', { exact: false }).count(), 0);
   await vis(side, 'Historik');
   await vis(side, 'Sendt');
   await vis(side, 'Slettes om 7 dage');
