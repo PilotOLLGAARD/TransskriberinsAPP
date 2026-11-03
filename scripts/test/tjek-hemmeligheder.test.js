@@ -38,3 +38,50 @@ test('interne dokumenter og hemmelige filer må ikke ligge i git', () => {
     assert.equal(erForbudtFil(navn), false, navn);
   }
 });
+
+test('interne dokumenter findes også med store bogstaver og andre navne', () => {
+  for (const navn of ['docs/Plan.md', 'docs/PLAN-fase4.md', 'docs/plan_ny.md', 'docs/plan-fase 4.md', 'docs/Overdragelse.md', 'docs/IT-opsaetning.md']) {
+    assert.equal(erForbudtFil(navn), true, navn);
+  }
+  assert.equal(erForbudtFil('docs/planlaegning-vejledning.md'), true);
+  assert.equal(erForbudtFil('docs/vejledning.md'), false);
+});
+
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const SCRIPT = path.resolve(__dirname, '../tjek-hemmeligheder.js');
+
+function koerI(mappe, ...args) {
+  return spawnSync('git', args, { cwd: mappe, encoding: 'utf8' });
+}
+
+test('et internt dokument, der kun findes i historikken (fx et tag), findes', () => {
+  const mappe = fs.mkdtempSync(path.join(os.tmpdir(), 'tjek-'));
+  try {
+    koerI(mappe, 'init', '-q');
+    koerI(mappe, 'config', 'user.email', 'test@example.invalid');
+    koerI(mappe, 'config', 'user.name', 'Test');
+    fs.writeFileSync(path.join(mappe, '.gitignore'), '.env\n');
+    fs.mkdirSync(path.join(mappe, 'docs'));
+    fs.writeFileSync(path.join(mappe, 'docs', 'plan.md'), 'intern');
+    koerI(mappe, 'add', '-A');
+    koerI(mappe, 'commit', '-q', '-m', 'med plan');
+    koerI(mappe, 'tag', 'gammel');
+    koerI(mappe, 'rm', '-q', 'docs/plan.md');
+    koerI(mappe, 'commit', '-q', '-m', 'uden plan');
+    const svar = spawnSync(process.execPath, [SCRIPT], { cwd: mappe, encoding: 'utf8' });
+    assert.equal(svar.status, 1, svar.stdout + svar.stderr);
+    assert.match(svar.stderr, /docs\/plan\.md/);
+  } finally {
+    fs.rmSync(mappe, { recursive: true, force: true });
+  }
+});
+
+test('.gitignore holder alle interne dokumenter ude, også nye planer', () => {
+  const rod = path.resolve(__dirname, '../..');
+  for (const navn of ['docs/plan.md', 'docs/plan-del4.md', 'docs/overdragelse.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md']) {
+    assert.equal(koerI(rod, 'check-ignore', '-q', '--no-index', navn).status, 0, `${navn} er ikke ignoreret`);
+  }
+});
