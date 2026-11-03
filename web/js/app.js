@@ -484,7 +484,7 @@ function skaermLogin() {
         { klasse: 'login-midte' },
         ordmaerke(),
         h('h1', {}, 'Transskribering'),
-        h('p', { klasse: 'undertitel' }, 'Indtal en note på byggepladsen. Du får et referat på din egen mail.'),
+        h('p', { klasse: 'undertitel' }, 'Indtal noter, møder og påmindelser. Du får et referat på din egen mail.'),
         beskedElement(),
       ),
       h(

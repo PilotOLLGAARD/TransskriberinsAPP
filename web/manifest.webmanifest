@@ -1,7 +1,7 @@
 {
   "name": "Transskribering",
   "short_name": "Transskribering",
-  "description": "Indtal noter på byggepladsen, og få teksten sendt til dig selv.",
+  "description": "Indtal noter, møder og påmindelser, og få et referat på din egen mail.",
   "lang": "da",
   "start_url": ".",
   "scope": ".",

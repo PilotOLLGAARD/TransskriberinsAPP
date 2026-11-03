@@ -1,6 +1,6 @@
 # Sådan bruger du transskriberingsappen
 
-Indtal en note på byggepladsen, og få et referat med PDF på din egen mail.
+Indtal en note, et møde eller en påmindelse, og få et referat med PDF på din egen mail.
 
 ## Læg appen på hjemmeskærmen
 
