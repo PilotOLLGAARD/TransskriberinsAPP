@@ -6,6 +6,7 @@ export const LOKAL = ['localhost', '127.0.0.1'].includes(globalThis.location?.ho
 const SERVER_ADRESSE = 'https://SERVER-ADRESSE-SAETTES-VED-UDRULNING.invalid';
 
 export const API_URL = LOKAL ? '/transskriber' : `${SERVER_ADRESSE}/transskriber`;
+export const REFERAT_URL = LOKAL ? '/referat' : `${SERVER_ADRESSE}/referat`;
 export const GRAPH_URL = LOKAL ? '/test/graph/v1.0' : 'https://graph.microsoft.com/v1.0';
 
 export const ENTRA = {

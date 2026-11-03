@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sendLyd } from '../js/transskribering.js';
+import { sendLyd, sendReferat } from '../js/transskribering.js';
 
 const LYD = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mp4' });
 
@@ -98,4 +98,33 @@ test('x-type sendes, når typen er kendt', async () => {
   assert.equal(kald.headers['x-type'], undefined);
   await sendLyd(LYD, 'audio/mp4', 'b', {}, hent);
   assert.equal(kald.headers['x-type'], undefined);
+});
+
+test('x-kun-tekst sendes, når kunTekst er sat', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'Del' }), { status: 200 }); };
+  assert.deepEqual(await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true }, hent), { tekst: 'Del' });
+  assert.equal(kald.headers['x-kun-tekst'], '1');
+  await sendLyd(LYD, 'audio/mp4', 'b', {}, hent);
+  assert.equal(kald.headers['x-kun-tekst'], undefined);
+});
+
+test('sendReferat sender JSON med tekster, titel, type, varighed og tidspunkt', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = { url: String(url), valg }; return new Response(JSON.stringify({ tekst: 'A B', titel: 'T' }), { status: 200 }); };
+  const svar = await sendReferat({ tekster: ['A', 'B'], titel: 'Møde', type: 'moede', varighedMs: 90500, oprettet: 7 }, 'beviset', hent);
+  assert.equal(svar.titel, 'T');
+  assert.match(kald.url, /\/referat$/);
+  assert.equal(kald.valg.method, 'POST');
+  assert.equal(kald.valg.headers.authorization, 'Bearer beviset');
+  assert.equal(kald.valg.headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(kald.valg.body), { tekster: ['A', 'B'], titel: 'Møde', type: 'moede', varighedSek: 91, optaget: 7 });
+  assert.ok(kald.valg.signal instanceof AbortSignal);
+});
+
+test('sendReferat giver samme fejltyper som sendLyd', async () => {
+  for (const [status, type] of [[401, 'login'], [403, 'adgang'], [400, 'tjeneste'], [502, 'tjeneste']]) {
+    await assert.rejects(sendReferat({ tekster: ['a'] }, 'b', async () => new Response('{}', { status })), (e) => e.type === type, String(status));
+  }
+  await assert.rejects(sendReferat({ tekster: ['a'] }, 'b', async () => { throw new TypeError('x'); }), (e) => e.type === 'net');
 });

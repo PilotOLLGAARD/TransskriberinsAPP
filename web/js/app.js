@@ -8,7 +8,7 @@ import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, browserMedier, lavOptager } from './optager.js';
 import { STATUS, slettesOm } from './tilstand.js';
-import { sendLyd } from './transskribering.js';
+import { sendLyd, sendReferat } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
 
 const EFTER_LOGIN = 'efterLogin';
@@ -34,7 +34,7 @@ const login = LOKAL
   ? lavLokalLogin()
   : lavLogin({ msal: window.msal, entra: ENTRA, redirectUri: new URL('./', location.href).href });
 const forloeb = lavForloeb({
-  lager, login, sendLyd, sendMail,
+  lager, login, sendLyd, sendMail, sendReferat,
   aktivAndetSted: async (id) => (await optagelserAndetSted())?.has(id) ?? null,
 });
 const optager = lavOptager({ lager, medier: browserMedier() });

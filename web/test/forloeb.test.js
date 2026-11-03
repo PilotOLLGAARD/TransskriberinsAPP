@@ -15,12 +15,13 @@ function falskLager(noter = []) {
     async sletLyd(id) { this.lydSlettet.add(id); },
     async sletNote(id) { kort.delete(id); },
     async alleNoter() { return [...kort.values()].map((n) => ({ ...n })); },
+    async hentDele(id) { return Array.from({ length: kort.get(id)?.dele ?? 1 }, (_, i) => new Blob([`del${i}`])); },
   };
 }
 
-function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted } = {}) {
+function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat } = {}) {
   const lager = falskLager(noter);
-  const t = { lydKald: 0, mailKald: [] };
+  const t = { lydKald: 0, mailKald: [], lydListe: [], referatKald: [] };
   const forloeb = lavForloeb({
     lager,
     nu,
@@ -32,11 +33,16 @@ function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', op
     sendLyd: async (...a) => {
       t.lydKald++;
       t.lydArgs = a;
+      t.lydListe.push(a);
       return sendLyd ? sendLyd(...a) : { tekst: 'Hej' };
     },
     sendMail: async (v) => {
       t.mailKald.push(v);
       return sendMail ? sendMail(v) : undefined;
+    },
+    sendReferat: async (...a) => {
+      t.referatKald.push(a);
+      return sendReferat ? sendReferat(...a) : { ...REFERAT_SVAR, tekst: a[0].tekster.join(' | ') };
     },
   });
   return { lager, t, forloeb };
@@ -554,4 +560,70 @@ test('send igen virker kun på sendte noter med pdf', async () => {
   await s.forloeb.sendIgen('a');
   await s.forloeb.sendIgen('b');
   assert.equal(s.t.mailKald.length, 0);
+});
+
+// Flere dele giver ét referat
+
+const DELT = { id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 7, titel: 'Møde', type: 'moede', varighedMs: 90000, dele: 3 };
+const delTekst = async (del) => ({ tekst: `Tekst ${await del.text()}` });
+
+test('tre dele giver tre lydkald med kunTekst og ét referatkald', async () => {
+  const s = opsaet({ noter: [DELT], sendLyd: delTekst });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 3);
+  for (const [del, mime, bevis, meta] of s.t.lydListe) {
+    assert.ok(del instanceof Blob);
+    assert.equal(mime, 'audio/mp4');
+    assert.equal(bevis, 'bevis-api');
+    assert.equal(meta.kunTekst, true);
+  }
+  assert.equal(s.t.referatKald.length, 1);
+  const [krop, bevis] = s.t.referatKald[0];
+  assert.deepEqual(krop, { tekster: ['Tekst del0', 'Tekst del1', 'Tekst del2'], titel: 'Møde', type: 'moede', varighedMs: 90000, oprettet: 7 });
+  assert.equal(bevis, 'bevis-api');
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
+  assert.equal(s.t.mailKald.length, 1);
+});
+
+test('genforsøg sender ikke dele, der allerede er transskriberet', async () => {
+  let kald = 0;
+  const s = opsaet({ noter: [DELT], sendLyd: async (del) => { kald++; if (kald === 2) throw Object.assign(new Error(), { type: 'net' }); return delTekst(del); } });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.FEJL);
+  assert.deepEqual(s.lager.kort.get('a').deltekster, ['Tekst del0']);
+  await s.forloeb.behandl('a');
+  assert.equal(kald, 4);
+  assert.deepEqual(s.lager.kort.get('a').deltekster, ['Tekst del0', 'Tekst del1', 'Tekst del2']);
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+});
+
+test('en tavs del springes over, og alle tavse giver ingenTale', async () => {
+  const s = opsaet({ noter: [DELT], sendLyd: async (del) => ((await del.text()) === 'del1' ? { tekst: '' } : delTekst(del)) });
+  await s.forloeb.behandl('a');
+  assert.deepEqual(s.t.referatKald[0][0].tekster, ['Tekst del0', 'Tekst del2']);
+  const tavs = opsaet({ noter: [DELT], sendLyd: async () => ({ tekst: '' }) });
+  await tavs.forloeb.behandl('a');
+  assert.equal(tavs.lager.kort.get('a').status, STATUS.FEJL);
+  assert.equal(tavs.lager.kort.get('a').fejlType, 'ingenTale');
+  assert.equal(tavs.t.referatKald.length, 0);
+});
+
+test('fejl i referatkaldet beholder delteksterne og lyden', async () => {
+  const s = opsaet({ noter: [DELT], sendLyd: delTekst, sendReferat: fejl('tjeneste') });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.FEJL);
+  assert.equal(n.fejlType, 'tjeneste');
+  assert.equal(n.deltekster.length, 3);
+  assert.ok((await s.lager.hentLyd('a')).size > 0);
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 3);
+});
+
+test('en note med én del bruger den gamle vej', async () => {
+  const s = opsaet();
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 1);
+  assert.equal(s.t.referatKald.length, 0);
+  assert.equal(s.t.lydListe[0][3].kunTekst, undefined);
 });

@@ -10,7 +10,7 @@ const FRISK_MS = 30 * 1000;
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
  */
-export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = async () => false, nu = Date.now }) {
+export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now }) {
   const igang = new Set();
 
   /**
@@ -41,6 +41,26 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
     await lager.sletLyd(id);
   }
 
+  /**
+   * Transskriberer hver del for sig og laver ét referat. Delteksterne gemmes én ad gangen,
+   * så et genforsøg aldrig sender en del, der allerede er transskriberet.
+   */
+  async function behandlDele(id, note, bevis) {
+    const dele = await lager.hentDele(id);
+    const tekster = [...(note.deltekster || [])];
+    for (let i = 0; i < dele.length; i++) {
+      if (typeof tekster[i] === 'string') continue;
+      tekster[i] = (await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet })).tekst || '';
+      await lager.opdaterNote(id, { deltekster: [...tekster] });
+    }
+    const medTale = tekster.filter((x) => x.trim());
+    if (!medTale.length) return { tekst: '' };
+    return sendReferat(
+      { tekster: medTale, titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet },
+      bevis,
+    );
+  }
+
   async function eneAdgang(id, arbejde) {
     if (igang.has(id)) return;
     igang.add(id);
@@ -62,10 +82,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined });
         const bevis = await login.hentBevis('api');
-        const lyd = await lager.hentLyd(id);
-        const svar = await sendLyd(lyd, note.mime, bevis, {
-          titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
-        });
+        const svar = (note.dele ?? 1) > 1
+          ? await behandlDele(id, note, bevis)
+          : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
+            titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
+          });
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;

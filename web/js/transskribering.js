@@ -1,8 +1,10 @@
-import { API_URL } from './konfig.js';
+import { API_URL, REFERAT_URL } from './konfig.js';
 import { TYPER } from './typer.js';
 
 // Lidt over serverens egen grænse på 900 s, så serverens svar når frem først.
 const TIDSGRAENSE_MS = 16 * 60 * 1000;
+// Referat og PDF af færdige tekster tager under et minut på serveren.
+const REFERAT_TIDSGRAENSE_MS = 2 * 60 * 1000;
 
 const FEJLTYPER = { 401: 'login', 403: 'adgang', 411: 'kanIkkeBehandles', 413: 'kanIkkeBehandles', 415: 'kanIkkeBehandles', 422: 'kanIkkeBehandles' };
 
@@ -13,7 +15,7 @@ export class SendFejl extends Error {
   }
 }
 
-function metaHeadere({ titel, type, varighedMs, oprettet } = {}) {
+function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
   const h = {};
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
   if (typeof titel === 'string' && titel.trim()) {
@@ -25,6 +27,8 @@ function metaHeadere({ titel, type, varighedMs, oprettet } = {}) {
   if (TYPER.some((t) => t.noegle === type)) h['x-type'] = type;
   if (Number.isFinite(varighedMs)) h['x-varighed'] = String(Math.round(varighedMs / 1000));
   if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
+  // En del af en afbrudt optagelse: kun teksten. Referatet laves af alle dele via /referat.
+  if (kunTekst) h['x-kun-tekst'] = '1';
   return h;
 }
 
@@ -44,10 +48,40 @@ export async function sendLyd(lyd, mime, bevis, meta = {}, hent = (...a) => fetc
   } catch {
     throw new SendFejl('net');
   }
+  return laesSvar(svar);
+}
+
+async function laesSvar(svar) {
   if (!svar.ok) throw new SendFejl(FEJLTYPER[svar.status] || 'tjeneste');
   try {
     const krop = await svar.json();
     if (typeof krop.tekst === 'string') return krop;
   } catch { /* Et ulæseligt svar behandles som en fejl hos tjenesten. */ }
   throw new SendFejl('tjeneste');
+}
+
+/**
+ * Ét referat af delteksterne fra en afbrudt optagelse. Intet lyd sendes.
+ * Svaret er som fra sendLyd: tekst, titel, referat, pdf, filnavn, emne og html.
+ */
+export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }, bevis, hent = (...a) => fetch(...a)) {
+  const krop = { tekster };
+  if (typeof titel === 'string') krop.titel = titel;
+  if (typeof type === 'string') krop.type = type;
+  if (Number.isFinite(varighedMs)) krop.varighedSek = Math.round(varighedMs / 1000);
+  if (Number.isFinite(oprettet)) krop.optaget = oprettet;
+  let svar;
+  try {
+    svar = await hent(REFERAT_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
+      body: JSON.stringify(krop),
+      signal: AbortSignal.timeout(REFERAT_TIDSGRAENSE_MS),
+    });
+  } catch {
+    throw new SendFejl('net');
+  }
+  // Et afvist format er ikke lydens skyld. Optagelsen kan sendes igen.
+  if (svar.status === 400) throw new SendFejl('tjeneste');
+  return laesSvar(svar);
 }
