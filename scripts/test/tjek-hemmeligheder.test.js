@@ -85,3 +85,22 @@ test('.gitignore holder alle interne dokumenter ude, også nye planer', () => {
     assert.equal(koerI(rod, 'check-ignore', '-q', '--no-index', navn).status, 0, `${navn} er ikke ignoreret`);
   }
 });
+
+test('et internt dokument med æ, ø eller å i navnet findes også', () => {
+  const mappe = fs.mkdtempSync(path.join(os.tmpdir(), 'tjek-'));
+  try {
+    koerI(mappe, 'init', '-q');
+    koerI(mappe, 'config', 'user.email', 'test@example.invalid');
+    koerI(mappe, 'config', 'user.name', 'Test');
+    fs.writeFileSync(path.join(mappe, '.gitignore'), '.env\n');
+    fs.mkdirSync(path.join(mappe, 'docs'));
+    fs.writeFileSync(path.join(mappe, 'docs', 'plan-møde.md'), 'intern');
+    koerI(mappe, 'add', '-A');
+    koerI(mappe, 'commit', '-q', '-m', 'med plan');
+    const svar = spawnSync(process.execPath, [SCRIPT], { cwd: mappe, encoding: 'utf8' });
+    assert.equal(svar.status, 1, svar.stdout + svar.stderr);
+    assert.match(svar.stderr, /docs\/plan-møde\.md/);
+  } finally {
+    fs.rmSync(mappe, { recursive: true, force: true });
+  }
+});

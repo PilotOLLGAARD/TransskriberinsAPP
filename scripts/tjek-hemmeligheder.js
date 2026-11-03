@@ -27,7 +27,8 @@ function findLaek(filer, vaerdier = []) {
 }
 
 function git(args, input) {
-  return spawnSync('git', args, { encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+  // Uden quotePath=false skriver git filnavne med æ, ø og å som koder, og så findes de ikke.
+  return spawnSync('git', ['-c', 'core.quotePath=false', ...args], { encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
 }
 
 function linjer(tekst) {

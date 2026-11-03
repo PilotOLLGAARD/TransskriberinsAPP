@@ -17,7 +17,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
 - Ingen hemmeligheder i git, i `web/` eller i logs. Læs aldrig `.env*`.
 - GitHub-kontoen PilotOLLGAARD må kun have denne ene GitHub Pages-side, og repoet `pilotollgaard.github.io` må aldrig oprettes. Alle Pages-sider på kontoen deler adressen `https://pilotollgaard.github.io`, så en anden side kunne læse login og optagelser. Skal der flere sider til, skal appen først have sit eget domæne.
-- Push aldrig tags eller andre grene end `main` uden at køre `npm run tjek:hemmeligheder` først.
+- Kør `npm run tjek:hemmeligheder` før hvert push, også til `main`. Testen på GitHub kører først, når historikken allerede er offentlig. Push aldrig tags eller andre grene end `main`.
 - Brug aldrig rigtige byggepladsnoter i udvikling eller test.
 
 ## Arkitektur
