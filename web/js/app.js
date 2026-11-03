@@ -162,7 +162,7 @@ async function optag() {
   t.besked = null;
   tegn();
   try {
-    await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType });
+    nyDelStartet(await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType }));
     maerkbar();
     // Valget gælder kun denne optagelse. Det ligger nu på noten.
     t.valgtNavn = '';
@@ -196,6 +196,7 @@ async function fortsaetOptagelse(id) {
     }
     const note = await lager.hentNote(id);
     await optager.fortsaet(id);
+    nyDelStartet(id);
     maerkbar();
     if (optager.erAktiv()) {
       t.visning = 'optager';
@@ -393,6 +394,8 @@ optager.naarAfsluttet(({ id, grund }) => {
   if (grund === 'afbrudt') {
     sidstAfbrudt = { id, tid: Date.now() };
     if (document.visibilityState === 'hidden') advarStoppet(id);
+  } else {
+    sidstAfbrudt = null;
   }
   t.visning = 'start';
   if (AFSLUT_BESKEDER[grund]) visFejl(AFSLUT_BESKEDER[grund]);
@@ -884,6 +887,8 @@ function skaermNavn() {
     h('p', { klasse: 'felt-titel', 'aria-hidden': 'true' }, 'Type'),
     typeVaelger(t.navnType ?? note.type ?? STANDARD_TYPE, (type) => { t.navnType = type; }),
     h('button', { type: 'submit' }, ikon('send'), 'Send'),
+    // En afbrudt optagelse kan vente. Den ligger i Afventer.
+    note.afbrudt ? h('button', { type: 'button', klasse: 'hvid', vedTryk: tilForsiden }, ikon('tilbage'), 'Til forsiden') : null,
   );
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1004,25 +1009,35 @@ const STOPPET_VINDUE_MS = 10 * 1000;
 const advaretOm = new Set();
 let sidstAfbrudt = null; // { id, tid }
 
+/** Én notifikation pr. afbrydelse. Giver true, hvis den blev vist. */
 function advarStoppet(id) {
-  if (!id || advaretOm.has(id)) return;
+  if (!id || advaretOm.has(id)) return false;
   advaretOm.add(id);
   visAdvarsel(STOPPET);
+  return true;
+}
+
+/** En ny del er startet: en senere afbrydelse skal give en ny notifikation. */
+function nyDelStartet(id) {
+  advaretOm.delete(id);
+  sidstAfbrudt = null;
 }
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;
   if (optager.erAktiv()) {
-    advarStoppet(optager.aktivId());
+    // Har brugeren lige trykket Stop, er der intet at advare om.
+    const grund = optager.afsluttesMed();
+    if (!grund || grund === 'afbrudt') advarStoppet(optager.aktivId());
     return;
   }
-  if (sidstAfbrudt && Date.now() - sidstAfbrudt.tid < STOPPET_VINDUE_MS) {
-    advarStoppet(sidstAfbrudt.id);
-    return;
-  }
+  if (sidstAfbrudt && Date.now() - sidstAfbrudt.tid < STOPPET_VINDUE_MS && advarStoppet(sidstAfbrudt.id)) return;
   const igang = t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
   if (igang) visAdvarsel(IKKE_SENDT);
 });
+
+// En afbrudt optagelse åbnes direkte ved start, hvis den er fra den sidste halve time. Ældre ligger i Afventer.
+const NYLIG_AFBRUDT_MS = 30 * 60 * 1000;
 
 async function start() {
   await login.init().catch(() => {});
@@ -1032,7 +1047,8 @@ async function start() {
     t.noter = [];
   }
   // Blev appen lukket midt i en optagelse, skal det være det første, man ser.
-  const afbrudtNote = t.noter.find((n) => n.status === STATUS.GEMT && n.afbrudt && !n.navngivet);
+  const nylig = (n) => Date.now() - (n.sidstAktiv ?? n.oprettet ?? 0) < NYLIG_AFBRUDT_MS;
+  const afbrudtNote = t.noter.find((n) => n.status === STATUS.GEMT && n.afbrudt && !n.navngivet && nylig(n));
   if (afbrudtNote) {
     t.visning = 'navn';
     t.navnNote = afbrudtNote.id;

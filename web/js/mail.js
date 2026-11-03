@@ -1,5 +1,5 @@
 import { GRAPH_URL } from './konfig.js';
-import { SendFejl } from './transskribering.js';
+import { SendFejl, kombinerSignaler } from './transskribering.js';
 
 const TIDSGRAENSE_MS = 30 * 1000;
 const TIDSZONE = 'Europe/Copenhagen';
@@ -66,7 +66,7 @@ export async function sendMail({ note, til, bevis, signal, hent = (...a) => fetc
   try {
     svar = await hent(`${GRAPH_URL}/me/sendMail`, {
       method: 'POST',
-      signal: AbortSignal.any([AbortSignal.timeout(TIDSGRAENSE_MS), ...(signal ? [signal] : [])]),
+      signal: kombinerSignaler([AbortSignal.timeout(TIDSGRAENSE_MS), signal]),
       headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         message: { ...lavBesked(note), toRecipients: [{ emailAddress: { address: til } }] },

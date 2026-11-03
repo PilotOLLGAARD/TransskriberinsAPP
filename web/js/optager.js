@@ -252,6 +252,8 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
 
     erAktiv: () => Boolean(aktiv),
     aktivId: () => aktiv?.id ?? null,
+    /** Grunden, hvis optagelsen er ved at blive afsluttet ('stop', 'afbrudt', 'maks' …), ellers null. */
+    afsluttesMed: () => (aktiv?.afslutter ? aktiv.grund : null),
   };
 
   /**

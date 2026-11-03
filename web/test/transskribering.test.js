@@ -143,3 +143,20 @@ test('afbrydelse udefra giver net', async () => {
   ctrl.abort();
   await assert.rejects(loefte, (e) => e.type === 'net');
 });
+
+test('virker uden AbortSignal.any (iOS 16 og 17.0–17.3)', async () => {
+  const any = AbortSignal.any;
+  AbortSignal.any = undefined;
+  try {
+    const hent = async (url, valg) => { assert.ok(valg.signal instanceof AbortSignal); return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
+    assert.deepEqual(await sendLyd(LYD, 'audio/mp4', 'b', {}, hent), { tekst: 'Hej' });
+    const ctrl = new AbortController();
+    const venter = (url, valg) => new Promise((_, afvis) => valg.signal.addEventListener('abort', () => afvis(new DOMException('x', 'AbortError'))));
+    const loefte = sendLyd(LYD, 'audio/mp4', 'b', {}, venter, { signal: ctrl.signal });
+    ctrl.abort();
+    await assert.rejects(loefte, (e) => e.type === 'net');
+    assert.ok((await sendReferat({ tekster: ['a'] }, 'b', hent)).tekst);
+  } finally {
+    AbortSignal.any = any;
+  }
+});

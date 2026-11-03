@@ -8,6 +8,21 @@ const REFERAT_TIDSGRAENSE_MS = 2 * 60 * 1000;
 
 const FEJLTYPER = { 401: 'login', 403: 'adgang', 411: 'kanIkkeBehandles', 413: 'kanIkkeBehandles', 415: 'kanIkkeBehandles', 422: 'kanIkkeBehandles' };
 
+/** Som AbortSignal.any, som først findes i Safari 17.4. Ældre telefoner får en håndlavet udgave. */
+export function kombinerSignaler(signaler) {
+  const liste = signaler.filter(Boolean);
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(liste);
+  const ctrl = new AbortController();
+  for (const s of liste) {
+    if (s.aborted) {
+      ctrl.abort(s.reason);
+      break;
+    }
+    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true });
+  }
+  return ctrl.signal;
+}
+
 export class SendFejl extends Error {
   constructor(type) {
     super(type);
@@ -68,7 +83,7 @@ export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdri
       method: 'POST',
       headers: { authorization: `Bearer ${bevis}`, 'content-type': mime, ...metaHeadere(meta) },
       body: lyd,
-      signal: AbortSignal.any(signaler),
+      signal: kombinerSignaler(signaler),
       vedSendt,
     });
   } catch {
@@ -102,7 +117,7 @@ export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }
       method: 'POST',
       headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
       body: JSON.stringify(krop),
-      signal: AbortSignal.any([AbortSignal.timeout(REFERAT_TIDSGRAENSE_MS), ...(signal ? [signal] : [])]),
+      signal: kombinerSignaler([AbortSignal.timeout(REFERAT_TIDSGRAENSE_MS), signal]),
     });
   } catch {
     throw new SendFejl('net');

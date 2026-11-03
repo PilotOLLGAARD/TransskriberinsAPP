@@ -94,3 +94,14 @@ test('lavBesked bruger serverens emne og html', () => {
   assert.deepEqual(b.body, { contentType: 'HTML', content: '<p>Fra serveren</p>' });
   assert.equal(b.attachments[0].contentBytes, 'JVBERi0xLjM=');
 });
+
+test('sendMail virker uden AbortSignal.any (iOS 16 og 17.0–17.3)', async () => {
+  const any = AbortSignal.any;
+  AbortSignal.any = undefined;
+  try {
+    const { hent } = lavHent(202);
+    await sendMail({ note: NY, til: 'a@ollgaard.dk', bevis: 'b', hent });
+  } finally {
+    AbortSignal.any = any;
+  }
+});

@@ -1064,3 +1064,54 @@ test('slet under afsendelse stopper den, og der sendes ingen mail', async () => 
   assert.equal(await antalNoter(side), 0);
   await kontekst.close();
 });
+
+// Rettelser efter gennemgang
+
+test('Stop og lås med det samme giver ingen notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await startOptagelse(side);
+  await knap(side, 'Stop').click();
+  await skjul(side);
+  await side.waitForTimeout(800);
+  assert.deepEqual(await side.evaluate(() => window.vist), []);
+  await kontekst.close();
+});
+
+test('en fortsat optagelse, der afbrydes igen, giver en ny notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await gemStream(side);
+  await startOptagelse(side);
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length === 1, null, { timeout: 5000 });
+  await side.getByLabel(FELT).waitFor();
+  await synlig(side);
+  await knap(side, 'Fortsæt optagelsen').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await mute(side);
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length === 2, null, { timeout: 5000 });
+  await kontekst.close();
+});
+
+test('en gammel afbrudt optagelse åbner ikke navneskærmen, og navneskærmen har Til forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await afbrydOptagelse(side);
+  await knap(side, 'Til forsiden').click();
+  await knap(side, 'Optag').waitFor();
+  // To timer gammel: appen åbner på forsiden, og noten ligger i Afventer.
+  await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const [note] = await l.alleNoter();
+    const gammel = Date.now() - 2 * 60 * 60 * 1000;
+    await l.opdaterNote(note.id, { oprettet: gammel, sidstAktiv: gammel });
+  });
+  await side.reload();
+  await knap(side, 'Optag').waitFor();
+  await vis(side, AFBRUDT);
+  assert.equal(await side.getByLabel(FELT).count(), 0);
+  await kontekst.close();
+});
