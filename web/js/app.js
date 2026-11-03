@@ -173,6 +173,41 @@ async function optag() {
   await opdater();
 }
 
+/** Optager en ny del på en afbrudt note. Navn og type fra navneskærmen gemmes først. */
+async function fortsaetOptagelse(id) {
+  if (t.starter || optager.erAktiv()) return;
+  t.starter = true;
+  t.besked = null;
+  try {
+    if (t.visning === 'navn' && t.navnNote === id) {
+      const felter = {};
+      if (t.navnUdkast !== null) felter.titel = [...t.navnUdkast.trim()].slice(0, 120).join('').trim();
+      if (t.navnType) felter.type = t.navnType;
+      if (Object.keys(felter).length) await lager.opdaterNote(id, felter);
+    }
+    const note = await lager.hentNote(id);
+    await optager.fortsaet(id);
+    maerkbar();
+    if (optager.erAktiv()) {
+      t.visning = 'optager';
+      // Uret fortsætter fra den samlede tid.
+      t.startTid = Date.now() - (note?.varighedMs ?? 0);
+      t.advarsel = false;
+      urTimer = setInterval(opdaterUr, 1000);
+    }
+  } catch (e) {
+    visFejl(e?.type || 'kanIkkeOptage');
+  } finally {
+    t.starter = false;
+  }
+  await opdater();
+}
+
+function fortsaetKnap(id) {
+  // type=button, så knappen ikke sender navneskærmens formular.
+  return h('button', { type: 'button', klasse: 'tonet', vedTryk: () => fortsaetOptagelse(id), disabled: t.starter }, ikon('mikrofon'), 'Fortsæt optagelsen');
+}
+
 async function stop() {
   maerkbar();
   await optager.stop();
@@ -463,10 +498,12 @@ function kortIndhold(note) {
     : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
 
   if (note.status === STATUS.GEMT || note.status === STATUS.OPTAGER) {
+    const send = note.navngivet ? proevIgen : knap('Navngiv og send', () => aabnNavn(note.id), { ikonNavn: 'send' });
+    const kanFortsaette = note.status === STATUS.GEMT && note.afbrudt;
     return {
       klasse: 'kort', ikonNavn: 'ur', ikonKlasse: 'venter',
       forklaring: note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.',
-      handling: note.navngivet ? proevIgen : knap('Navngiv og send', () => aabnNavn(note.id), { ikonNavn: 'send' }),
+      handling: kanFortsaette ? h('div', { klasse: 'knapper' }, fortsaetKnap(note.id), send) : send,
     };
   }
 
@@ -676,6 +713,7 @@ function skaermNavn() {
   const form = h(
     'form',
     { klasse: 'navn' },
+    note.status === STATUS.GEMT && note.afbrudt ? fortsaetKnap(note.id) : null,
     h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
     felt,
     h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel.'),

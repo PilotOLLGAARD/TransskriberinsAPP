@@ -706,3 +706,112 @@ test('Tidligere optagelser kan betjenes på 360 px', async () => {
   for (const s of m.tekst) assert.ok(s >= 16, `tekst på ${s} px`);
   await kontekst.close();
 });
+
+// Fortsæt optagelsen efter afbrydelse
+
+const AFBRUDT = 'Optagelsen blev afbrudt — det optagede er gemt. Vil du fortsætte?';
+const MARKOER = '[Optagelsen blev afbrudt her]';
+
+/** Som når telefonen låses eller man skifter app. */
+async function skjul(side) {
+  await side.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+async function synlig(side) {
+  await side.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+async function afbrydOptagelse(side) {
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await skjul(side);
+  await side.getByLabel(FELT).waitFor();
+  await synlig(side);
+}
+
+async function fortsaetOgStop(side) {
+  await knap(side, 'Fortsæt optagelsen').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await side.getByLabel(FELT).waitFor();
+}
+
+test('skjult app under optagelse giver beskeden og Fortsæt optagelsen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await afbrydOptagelse(side);
+  await vis(side, AFBRUDT);
+  await knap(side, 'Fortsæt optagelsen').waitFor();
+  await knap(side, 'Send').waitFor();
+  await kontekst.close();
+});
+
+test('fortsat optagelse giver én mail med markøren og én pdf', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await afbrydOptagelse(side);
+  await fortsaetOgStop(side);
+  assert.equal(await side.getByText(AFBRUDT).count(), 0);
+  await navngiv(side, 'To dele');
+  await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.geminiKald - foer.geminiKald, 2);
+  assert.equal(efter.referatKald - foer.referatKald, 1);
+  assert.equal(efter.mailKald - foer.mailKald, 1);
+  assert.equal(efter.sidsteReferat.titel, 'To dele');
+  assert.ok(efter.sidsteMail.message.body.content.includes(MARKOER));
+  assert.equal(efter.sidsteMail.message.attachments.length, 1);
+  await kontekst.close();
+});
+
+test('afbrudt og sendt uden at fortsætte giver mail med én del', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await afbrydOptagelse(side);
+  await navngiv(side, 'Én del');
+  await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.geminiKald - foer.geminiKald, 1);
+  assert.ok(!efter.sidsteMail.message.body.content.includes(MARKOER));
+  await kontekst.close();
+});
+
+test('afbrudt note på startskærmen kan fortsættes efter genåbning', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await afbrydOptagelse(side);
+  await side.reload();
+  await knap(side, 'Optag').waitFor();
+  await vis(side, AFBRUDT);
+  await fortsaetOgStop(side);
+  await navngiv(side, 'Genåbnet');
+  await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.referatKald - foer.referatKald, 1);
+  assert.ok(efter.sidsteMail.message.body.content.includes(MARKOER));
+  await kontekst.close();
+});
+
+test('navneskærmen med Fortsæt optagelsen kan betjenes på 360 px', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await afbrydOptagelse(side);
+  const m = await side.evaluate(() => ({
+    bred: document.documentElement.scrollWidth,
+    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height), b.getAttribute('role')]),
+  }));
+  assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
+  for (const [tekst, hoejde, rolle] of m.knapper) assert.ok(hoejde >= (rolle === 'radio' ? 56 : 72), `"${tekst}" er ${hoejde} px`);
+  await kontekst.close();
+});
