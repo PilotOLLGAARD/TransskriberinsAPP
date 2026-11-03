@@ -52,8 +52,10 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const omfang = new URL(self.registration.scope).pathname;
   const sti = url.pathname.slice(omfang.length);
-  if (e.request.mode !== 'navigate' && !FILER.includes(sti)) return;
-  const noegle = e.request.mode === 'navigate' ? './' : e.request;
+  // Kun appens forside gives ved sideskift. Andre sider på samme adresse hentes fra nettet.
+  const navigering = e.request.mode === 'navigate';
+  if (navigering ? sti !== '' && sti !== 'index.html' : !FILER.includes(sti)) return;
+  const noegle = navigering ? './' : e.request;
 
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
