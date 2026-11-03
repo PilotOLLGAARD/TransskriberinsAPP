@@ -6,13 +6,12 @@ import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
-import { browserMedier, lavOptager } from './optager.js';
+import { LAAS_PRAEFIKS, browserMedier, lavOptager } from './optager.js';
 import { STATUS } from './tilstand.js';
 import { sendLyd } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
 
 const EFTER_LOGIN = 'efterLogin';
-const LAAS = 'optag-';
 const SKJUL_FORKLARING = 'skjulForklaring';
 
 // Lageret kan være slået fra i privat tilstand. Så vises forklaringen bare igen.
@@ -34,7 +33,10 @@ function huskes(noegle) {
 const login = LOKAL
   ? lavLokalLogin()
   : lavLogin({ msal: window.msal, entra: ENTRA, redirectUri: new URL('./', location.href).href });
-const forloeb = lavForloeb({ lager, login, sendLyd, sendMail });
+const forloeb = lavForloeb({
+  lager, login, sendLyd, sendMail,
+  aktivAndetSted: async (id) => (await optagelserAndetSted())?.has(id) ?? null,
+});
 const optager = lavOptager({ lager, medier: browserMedier() });
 
 const app = document.getElementById('app');
@@ -58,7 +60,6 @@ const t = {
 };
 
 let urTimer = null;
-const frigivLaas = new Map();
 
 // Ikoner tegnet som streger, i samme stil som telefonens egne.
 const IKONER = {
@@ -145,19 +146,13 @@ async function logInd(efterLogin) {
   }
 }
 
-function holdLaas(id) {
-  // Fortæller andre faner og den installerede app, at optagelsen kører her.
-  navigator.locks?.request(LAAS + id, () => new Promise((frigiv) => frigivLaas.set(id, frigiv))).catch(() => {});
-}
-
 async function optag() {
   if (t.starter || optager.erAktiv()) return;
   t.starter = true;
   t.besked = null;
   tegn();
   try {
-    const id = await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType });
-    holdLaas(id);
+    await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType });
     maerkbar();
     // Valget gælder kun denne optagelse. Det ligger nu på noten.
     t.valgtNavn = '';
@@ -287,8 +282,6 @@ const AFSLUT_BESKEDER = {
 
 optager.naarAfsluttet(({ id, grund }) => {
   clearInterval(urTimer);
-  frigivLaas.get(id)?.();
-  frigivLaas.delete(id);
   t.visning = 'start';
   if (AFSLUT_BESKEDER[grund]) visFejl(AFSLUT_BESKEDER[grund]);
   if (grund === 'tom' || grund === 'pladsTom') {
@@ -675,12 +668,14 @@ async function genoptagEfterLogin() {
   }
 }
 
+/** Optagelser, der kører i en anden fane eller i den installerede app. null, når det ikke kan ses. */
 async function optagelserAndetSted() {
+  if (!navigator.locks?.query) return null;
   try {
-    const { held = [] } = (await navigator.locks?.query()) ?? {};
-    return new Set(held.map((l) => l.name).filter((n) => n?.startsWith(LAAS)).map((n) => n.slice(LAAS.length)));
+    const { held = [] } = await navigator.locks.query();
+    return new Set(held.map((l) => l.name).filter((n) => n?.startsWith(LAAS_PRAEFIKS)).map((n) => n.slice(LAAS_PRAEFIKS.length)));
   } catch {
-    return new Set();
+    return null;
   }
 }
 

@@ -574,3 +574,28 @@ test('langt navn uden mellemrum giver ingen vandret rulning på 360 px', async (
   await vis(side, SENDT);
   await kontekst.close();
 });
+
+test('en anden fane uden Web Locks, der åbnes under optagelsen, sletter eller ændrer den ikke', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  // Den anden fane åbner, før første stykke lyd er gemt, og kan ikke se låsene (som en ældre browser).
+  const anden = await kontekst.newPage();
+  await anden.addInitScript(() => Object.defineProperty(Navigator.prototype, 'locks', { get: () => undefined }));
+  await anden.goto(miljoe.adresse);
+  await knap(anden, 'Optag').waitFor();
+  const noter = await anden.evaluate(async () => (await import('/js/lager.js')).alleNoter());
+  assert.equal(noter.length, 1);
+  assert.equal(noter[0].status, 'optager');
+  await anden.close();
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await navngiv(side, 'To faner');
+  await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.mailKald - foer.mailKald, 1);
+  assert.ok(efter.modtaget.bytes > 0);
+  await kontekst.close();
+});

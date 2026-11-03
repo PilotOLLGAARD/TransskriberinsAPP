@@ -16,11 +16,13 @@ function falskLager(noter = []) {
   };
 }
 
-function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis } = {}) {
+function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted } = {}) {
   const lager = falskLager(noter);
   const t = { lydKald: 0, mailKald: [] };
   const forloeb = lavForloeb({
     lager,
+    nu,
+    aktivAndetSted,
     login: {
       hentBevis: hentBevis || (async (o) => `bevis-${o}`),
       brugerMail: () => 'a@ollgaard.dk',
@@ -385,4 +387,47 @@ test('navngivOgSend uden type beholder notens type, og ukendt type bliver automa
   assert.equal(s.lager.kort.get('a').type, 'moede');
   await s.forloeb.navngivOgSend('a', 'Tag', 'ond');
   assert.equal(s.lager.kort.get('a').type, 'automatisk');
+});
+
+// Optagelser, der måske kører i en anden fane, må aldrig røres
+
+const NU = 1_000_000_000;
+
+test('ukendt låsetilstand: genstart rører ikke en optagelse, der lige har gemt lyd', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', oprettet: NU - 600000, sidstAktiv: NU - 5000 }], nu: () => NU });
+  assert.deepEqual(await s.forloeb.genoptag(null), []);
+  assert.equal(s.lager.kort.get('a').status, STATUS.OPTAGER);
+});
+
+test('ukendt låsetilstand: genstart sletter ikke en ny optagelse uden lyd endnu', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', oprettet: NU - 2000 }], nu: () => NU });
+  s.lager.hentLyd = async () => new Blob([]);
+  assert.deepEqual(await s.forloeb.genoptag(null), []);
+  assert.equal(s.lager.kort.has('a'), true);
+});
+
+test('ukendt låsetilstand: en gammel afbrudt optagelse rettes som før', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', oprettet: NU - 600000, sidstAktiv: NU - 120000 }], nu: () => NU });
+  const [note] = await s.forloeb.genoptag(null);
+  assert.equal(note.status, STATUS.GEMT);
+  assert.equal(note.afbrudt, true);
+});
+
+test('behandl sender ikke en optagelse, der kører i en anden fane', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', oprettet: NU - 600000 }], nu: () => NU, aktivAndetSted: async (id) => id === 'a' });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 0);
+  assert.equal(s.lager.kort.get('a').status, STATUS.OPTAGER);
+});
+
+test('behandl med ukendt låsetilstand sender ikke en optagelse, der lige har gemt lyd', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', sidstAktiv: NU - 3000 }], nu: () => NU, aktivAndetSted: async () => null });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 0);
+});
+
+test('behandl sender en afbrudt optagelse, der ikke kører andre steder', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', sidstAktiv: NU - 120000 }], nu: () => NU, aktivAndetSted: async () => null });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 1);
 });

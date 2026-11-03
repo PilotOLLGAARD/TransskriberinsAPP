@@ -3,13 +3,25 @@ import { rensType } from './typer.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
 const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.SENDER]);
+// En optagelse, der har gemt lyd for nylig, kan stadig køre i en anden fane.
+const FRISK_MS = 30 * 1000;
 
 /**
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
  */
-export function lavForloeb({ lager, login, sendLyd, sendMail }) {
+export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = async () => false, nu = Date.now }) {
   const igang = new Set();
+
+  /**
+   * Om en optagelse måske stadig kører et andet sted. aktive er låsene, andre faner holder,
+   * eller null, når de ikke kan ses. Så afgør tiden siden sidste gemte stykke, og tvivl betyder ja.
+   */
+  function maaskeIGang(note, aktive) {
+    if (note.status !== STATUS.OPTAGER) return false;
+    if (aktive) return aktive.has(note.id);
+    return nu() - (note.sidstAktiv ?? note.oprettet ?? 0) < FRISK_MS;
+  }
 
   async function opdaterTrygt(id, felter) {
     try {
@@ -33,6 +45,10 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
     behandl: (id) => eneAdgang(id, async () => {
       const note = await lager.hentNote(id);
       if (!note || !KAN_BEHANDLES.has(note.status)) return;
+      if (note.status === STATUS.OPTAGER) {
+        const andetSted = await aktivAndetSted(id).catch(() => null);
+        if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
+      }
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined });
         const bevis = await login.hentBevis('api');
@@ -95,12 +111,15 @@ export function lavForloeb({ lager, login, sendLyd, sendMail }) {
       await forloeb.behandlOgSend(id);
     },
 
-    /** Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv. */
+    /**
+     * Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv.
+     * aktiveAndetSted er null, når andre fanes låse ikke kan ses. Så røres en frisk optagelse ikke.
+     */
     async genoptag(aktiveAndetSted = new Set()) {
       const vist = [];
       for (const note of await lager.alleNoter()) {
         // En optagelse, der stadig kører i en anden fane eller i den installerede app, er ikke vores.
-        if (aktiveAndetSted.has(note.id)) continue;
+        if (maaskeIGang(note, aktiveAndetSted)) continue;
         try {
           // Lukket før første stykke blev gemt: Der er intet at gemme.
           if (note.status === STATUS.OPTAGER && (await lager.hentLyd(note.id)).size === 0) {

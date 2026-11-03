@@ -13,6 +13,8 @@ const ADVARSEL_MS = 55 * 60 * 1000;
 const MAKS_MS = 59 * 60 * 1000;
 const STOP_VENTETID_MS = 3000;
 const LAGER_VENTETID_MS = 5000;
+// Andre faner og den installerede app ser optagelsen som i gang, så længe denne lås holdes.
+export const LAAS_PRAEFIKS = 'optag-';
 
 export class OptageFejl extends Error {
   /** @param {'mikrofonNaegtet'|'kanIkkeOptage'} type */
@@ -35,6 +37,11 @@ export function browserMedier() {
     lavRecorder: (stream, valg) => new MediaRecorder(stream, valg),
     erUnderstoettet: (mime) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime),
     skaermlaas: () => navigator.wakeLock.request('screen'),
+    /** Giver en funktion, der frigiver låsen, når den er taget. Uden Web Locks gives null. */
+    laas: (navn) => new Promise((tildelt) => {
+      if (!navigator.locks?.request) { tildelt(null); return; }
+      navigator.locks.request(navn, () => new Promise((frigiv) => tildelt(frigiv))).catch(() => tildelt(null));
+    }),
     dokument: document,
   };
 }
@@ -139,6 +146,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       // Noten står som optager og rettes ved næste start. Lyden er gemt.
     }
     if (aktiv === o) aktiv = null;
+    o.frigivLaas?.();
     vedAfsluttet({ id: o.id, grund: endelig });
   }
 
@@ -176,16 +184,20 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       }
 
       let recorder;
-      let id;
+      const id = crypto.randomUUID();
+      let frigivLaas = null;
       try {
         recorder = medier.lavRecorder(stream, { mimeType: mime, audioBitsPerSecond: BITRATE });
-        id = await lager.opretNote({ mime: recorder.mimeType || mime, titel, type });
+        // Låsen tages, før noten findes, så en anden fane aldrig ser optagelsen uden lås.
+        frigivLaas = (await medier.laas?.(LAAS_PRAEFIKS + id)) ?? null;
+        await lager.opretNote({ id, mime: recorder.mimeType || mime, titel, type });
       } catch {
+        frigivLaas?.();
         stopSpor(stream);
         throw new OptageFejl('kanIkkeOptage');
       }
 
-      const o = { id, stream, recorder, naesteNr: 0, gemte: 0, kaede: Promise.resolve(), sidsteStykke: ur.nu(), startet: ur.nu(), fuld: false };
+      const o = { id, frigivLaas, stream, recorder, naesteNr: 0, gemte: 0, kaede: Promise.resolve(), sidsteStykke: ur.nu(), startet: ur.nu(), fuld: false };
 
       recorder.addEventListener('dataavailable', (e) => gemData(o, e.data));
       recorder.addEventListener('error', () => afslut(o, 'afbrudt'));
@@ -201,6 +213,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         o.afslutter = Promise.resolve();
         stopSpor(stream);
         await lager.sletNote(id).catch(() => {});
+        frigivLaas?.();
         throw new OptageFejl('kanIkkeOptage');
       }
 

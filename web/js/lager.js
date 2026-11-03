@@ -56,15 +56,22 @@ function alleStykkerInterval(id) {
   return IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]);
 }
 
-export async function opretNote({ mime, titel = '', type = STANDARD_TYPE }) {
-  const id = crypto.randomUUID();
+export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', type = STANDARD_TYPE }) {
   const note = { id, mime, titel, type, status: STATUS.OPTAGER, oprettet: Date.now() };
   await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
   return id;
 }
 
+/** Gemmer et stykke lyd og stempler noten som aktiv, så andre faner kan se, at optagelsen kører. */
 export async function gemStykke(id, nr, bytes) {
-  await transaktion(STYKKER, 'readwrite', (t) => t.objectStore(STYKKER).put({ noteId: id, nr, bytes }));
+  await transaktion([NOTER, STYKKER], 'readwrite', (t) => {
+    t.objectStore(STYKKER).put({ noteId: id, nr, bytes });
+    const noter = t.objectStore(NOTER);
+    const r = noter.get(id);
+    r.onsuccess = () => {
+      if (r.result) noter.put({ ...r.result, sidstAktiv: Date.now() });
+    };
+  });
 }
 
 export async function hentLyd(id) {

@@ -8,8 +8,7 @@ function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}
   const l = {
     noter: new Map(),
     stykker: [],
-    async opretNote({ mime, titel, type }) {
-      const id = `note-${l.noter.size + 1}`;
+    async opretNote({ id, mime, titel, type }) {
       l.noter.set(id, { id, mime, titel, type, status: 'optager' });
       return id;
     },
@@ -66,6 +65,7 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
     timere: [],
     laase: 0,
     frigivet: 0,
+    haendelser: [],
   };
   const dokument = new EventTarget();
   dokument.visibilityState = 'visible';
@@ -76,6 +76,10 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
       return { getTracks: () => [spor] };
     },
     lavRecorder: (stream, valg) => { tilstand.recorder = new FalskRecorder(stream, valg); return tilstand.recorder; },
+    laas: async (navn) => {
+      tilstand.haendelser.push(['laas', navn]);
+      return () => tilstand.haendelser.push(['frigiv', navn]);
+    },
     erUnderstoettet: understoettet,
     skaermlaas: skaermlaas || (async () => {
       tilstand.laase++;
@@ -115,7 +119,7 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
     for (let i = 0; i < 50 && !afsluttet.length; i++) await new Promise((ok) => setTimeout(ok, 1));
     return afsluttet[0];
   };
-  return { lager, optager, tilstand, spor, dokument, skrid, skridMedLyd, afsluttet, advarsler, venTilAfsluttet };
+  return { lager, optager, tilstand, spor, dokument, optagerMedier: medier, skrid, skridMedLyd, afsluttet, advarsler, venTilAfsluttet };
 }
 
 test('vælger mp4 når muligt', () => {
@@ -430,4 +434,33 @@ test('start uden valg giver tomt navn og Automatisk', async () => {
   const id = await s.optager.start();
   assert.equal(s.lager.noter.get(id).titel, '');
   assert.equal(s.lager.noter.get(id).type, 'automatisk');
+});
+
+test('låsen tages, før noten oprettes, og frigives, når optagelsen er gemt', async () => {
+  const s = opsaet();
+  const opret = s.lager.opretNote;
+  s.lager.opretNote = async (v) => { s.tilstand.haendelser.push(['opret', v.id]); return opret(v); };
+  const id = await s.optager.start();
+  assert.deepEqual(s.tilstand.haendelser, [['laas', `optag-${id}`], ['opret', id]]);
+  s.tilstand.recorder.send('a');
+  await s.optager.stop();
+  assert.deepEqual(s.tilstand.haendelser.at(-1), ['frigiv', `optag-${id}`]);
+  assert.equal(s.lager.noter.get(id).status, 'gemt');
+});
+
+test('låsen frigives, hvis noten ikke kan oprettes', async () => {
+  const s = opsaet();
+  s.lager.opretNote = async () => { throw new Error('lager'); };
+  await assert.rejects(s.optager.start());
+  assert.deepEqual(s.tilstand.haendelser.map((h) => h[0]), ['laas', 'frigiv']);
+});
+
+test('uden låse i browseren kan der stadig optages', async () => {
+  const s = opsaet();
+  s.optagerMedier.laas = async () => null;
+  const id = await s.optager.start();
+  assert.ok(id);
+  s.tilstand.recorder.send('a');
+  await s.optager.stop();
+  assert.equal(s.lager.noter.get(id).status, 'gemt');
 });

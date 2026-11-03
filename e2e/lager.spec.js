@@ -92,3 +92,19 @@ test('opretNote gemmer titel og type', async () => {
   assert.equal(note.type, 'moede');
   await kontekst.close();
 });
+
+test('opretNote bruger et givet id, og gemStykke stempler noten som aktiv', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const svar = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const id = await l.opretNote({ id: 'fast-id', mime: 'audio/mp4' });
+    const foer = (await l.hentNote(id)).sidstAktiv;
+    await l.gemStykke(id, 0, new Uint8Array([1]).buffer);
+    return { id, foer, efter: (await l.hentNote(id)).sidstAktiv };
+  });
+  assert.equal(svar.id, 'fast-id');
+  assert.equal(svar.foer, undefined);
+  assert.ok(Number.isFinite(svar.efter));
+  await kontekst.close();
+});
