@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sendLyd, sendReferat } from '../js/transskribering.js';
+import { sendLyd, sendReferat, hentMedFremdrift } from '../js/transskribering.js';
 
 const LYD = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mp4' });
 
@@ -159,4 +159,47 @@ test('virker uden AbortSignal.any (iOS 16 og 17.0–17.3)', async () => {
   } finally {
     AbortSignal.any = any;
   }
+});
+
+/** Falsk XMLHttpRequest. haendelser styrer, hvad telefonen melder under upload. */
+function falskXhr(haendelser) {
+  return class {
+    constructor() { this.upload = new EventTarget(); this.status = 0; this.responseText = ''; }
+    open() {}
+    setRequestHeader() {}
+    abort() { this.onabort?.(); }
+    send() {
+      setTimeout(() => {
+        for (const h of haendelser) {
+          const { type, ...felter } = h;
+          const e = new Event(type);
+          Object.assign(e, felter);
+          this.upload.dispatchEvent(e);
+        }
+        this.status = 200;
+        this.responseText = JSON.stringify({ tekst: 'Hej' });
+        this.onload?.();
+      }, 1);
+    }
+  };
+}
+
+for (const [navn, haendelser] of [
+  ['upload load', [{ type: 'load' }]],
+  ['kun progress til 100 %', [{ type: 'progress', lengthComputable: true, loaded: 10, total: 10 }]],
+  ['ingen upload-signaler (som måske på iPhone)', []],
+]) {
+  test(`vedSendt kaldes præcis én gang, før svaret gives: ${navn}`, async () => {
+    const raekke = [];
+    const svar = await hentMedFremdrift('/x', { method: 'POST', headers: {}, body: 'lyd', vedSendt: () => raekke.push('sendt') }, falskXhr(haendelser));
+    raekke.push('svar');
+    assert.deepEqual(raekke, ['sendt', 'svar']);
+    assert.equal(svar.status, 200);
+  });
+}
+
+test('progress under 100 % kalder ikke vedSendt før tid', async () => {
+  const raekke = [];
+  await hentMedFremdrift('/x', { method: 'POST', headers: {}, body: 'lyd', vedSendt: () => raekke.push('sendt') }, falskXhr([{ type: 'progress', lengthComputable: true, loaded: 5, total: 10 }, { type: 'load' }]));
+  assert.deepEqual(raekke, ['sendt']);
 });

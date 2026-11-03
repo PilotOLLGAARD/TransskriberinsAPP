@@ -51,21 +51,35 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
  * Som fetch, men med XMLHttpRequest, som kan melde, når hele lyden er sendt (vedSendt).
  * fetch kan ikke vise fremdrift for upload i alle browsere.
  */
-function hentMedFremdrift(url, { method, headers, body, signal, vedSendt }) {
-  if (typeof XMLHttpRequest === 'undefined') return fetch(url, { method, headers, body, signal });
+export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt }, Xhr = globalThis.XMLHttpRequest) {
+  if (typeof Xhr !== 'function') return fetch(url, { method, headers, body, signal });
   return new Promise((ok, fejl) => {
-    const x = new XMLHttpRequest();
+    const x = new Xhr();
+    // Præcis én melding. Melder telefonen ikke selv, at lyden er sendt, meldes det, når svaret kommer.
+    let meldt = false;
+    const meldSendt = () => {
+      if (meldt) return;
+      meldt = true;
+      vedSendt?.();
+    };
+    const afbryd = () => x.abort();
+    const faerdig = () => signal?.removeEventListener('abort', afbryd);
     x.open(method, url);
     for (const [navn, vaerdi] of Object.entries(headers)) x.setRequestHeader(navn, vaerdi);
-    if (vedSendt) x.upload.addEventListener('load', () => vedSendt());
-    x.onload = () => ok({ ok: x.status >= 200 && x.status < 300, status: x.status, json: async () => JSON.parse(x.responseText) });
-    x.onerror = () => fejl(new TypeError('netværk'));
-    x.onabort = () => fejl(new DOMException('afbrudt', 'AbortError'));
+    x.upload.addEventListener('load', meldSendt);
+    x.upload.addEventListener('progress', (e) => { if (e.lengthComputable && e.loaded >= e.total) meldSendt(); });
+    x.onload = () => {
+      faerdig();
+      meldSendt();
+      ok({ ok: x.status >= 200 && x.status < 300, status: x.status, json: async () => JSON.parse(x.responseText) });
+    };
+    x.onerror = () => { faerdig(); fejl(new TypeError('netværk')); };
+    x.onabort = () => { faerdig(); fejl(new DOMException('afbrudt', 'AbortError')); };
     if (signal?.aborted) {
       fejl(new DOMException('afbrudt', 'AbortError'));
       return;
     }
-    signal?.addEventListener('abort', () => x.abort(), { once: true });
+    signal?.addEventListener('abort', afbryd, { once: true });
     x.send(body);
   });
 }

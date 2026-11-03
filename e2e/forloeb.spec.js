@@ -1115,3 +1115,21 @@ test('en gammel afbrudt optagelse åbner ikke navneskærmen, og navneskærmen ha
   assert.equal(await side.getByLabel(FELT).count(), 0);
   await kontekst.close();
 });
+
+test('Fortryd-bjælken er den samme, mens skærmen tegnes igen, og glider derfor kun ind én gang', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Bjælke' });
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await aabnTidligere(side);
+  await knap(side, 'Slet').click();
+  await knap(side, 'Fortryd').waitFor();
+  await side.evaluate(() => { window.foersteBjaelke = document.querySelector('.toast'); });
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Optag').waitFor();
+  assert.equal(await side.evaluate(() => document.querySelector('.toast') === window.foersteBjaelke), true);
+  await knap(side, 'Fortryd').click();
+  assert.equal(await side.locator('.toast').count(), 0);
+  await kontekst.close();
+});

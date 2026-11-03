@@ -94,8 +94,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
 
   const forloeb = {
     behandl: (id) => eneAdgang(id, async () => {
+      // Oprettes før alt andet, så Slet altid kan stoppe afsendelsen, også i de første millisekunder.
+      const signal = nyAfbryder(id);
+      try {
       const note = await lager.hentNote(id);
-      if (!note || note.slettet || !KAN_BEHANDLES.has(note.status)) return;
+      if (!note || note.slettet || signal.aborted || !KAN_BEHANDLES.has(note.status)) return;
       if (note.status === STATUS.OPTAGER) {
         const andetSted = await aktivAndetSted(id).catch(() => null);
         if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
@@ -103,7 +106,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined, fremdrift: 'sender' });
         vedAendring(id);
-        const signal = nyAfbryder(id);
+        if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const bevis = await login.hentBevis('api');
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const svar = (note.dele ?? 1) > 1
@@ -120,6 +123,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: e?.type || 'tjeneste' });
+      }
       } finally {
         afbrydere.delete(id);
       }

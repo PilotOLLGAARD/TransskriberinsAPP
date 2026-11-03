@@ -702,3 +702,21 @@ test('slettede noter ryddes ved næste start efter Fortryd-tiden og vises ikke',
   assert.equal(s.lager.kort.has('gammel'), false);
   assert.equal(s.lager.kort.has('frisk'), true);
 });
+
+test('slet i de første millisekunder af en afsendelse: lyden sendes slet ikke', async () => {
+  const s = opsaet({ nu: () => 5000 });
+  const opdater = s.lager.opdaterNote;
+  let slip;
+  // Telefonens lager er langsomt lige der, hvor afsendelsen begynder.
+  s.lager.opdaterNote = async (id, felter) => {
+    if (felter.status === STATUS.SENDER) await new Promise((ok) => { slip = ok; });
+    return opdater(id, felter);
+  };
+  const afsendelse = s.forloeb.behandlOgSend('a');
+  for (let i = 0; i < 20 && !slip; i++) await new Promise((ok) => setTimeout(ok, 1));
+  await s.forloeb.slet('a');
+  slip();
+  await afsendelse;
+  assert.equal(s.t.lydKald, 0);
+  assert.equal(s.t.mailKald.length, 0);
+});

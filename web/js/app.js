@@ -341,11 +341,15 @@ async function sletOptagelse(id) {
   await forloeb.slet(id);
   t.besked = null;
   t.fortryd = { id, tekst, timer: setTimeout(() => sletEndeligt(id), FORTRYD_MS) };
+  visFortrydBjaelke();
   await opdater();
 }
 
 async function sletEndeligt(id) {
-  if (t.fortryd?.id === id) t.fortryd = null;
+  if (t.fortryd?.id === id) {
+    t.fortryd = null;
+    fjernFortrydBjaelke();
+  }
   await forloeb.endeligSlet(id).catch(() => {});
   await opdater();
 }
@@ -355,13 +359,23 @@ async function fortrydSletning() {
   const { id, timer } = t.fortryd;
   clearTimeout(timer);
   t.fortryd = null;
+  fjernFortrydBjaelke();
   await forloeb.fortrydSlet(id);
   await opdater();
 }
 
-function fortrydBjaelke() {
-  if (!t.fortryd) return null;
-  return h('div', { klasse: 'toast', role: 'status' }, h('span', {}, t.fortryd.tekst), h('button', { type: 'button', vedTryk: fortrydSletning }, 'Fortryd'));
+// Ligger uden for #app, så den ikke laves om (og glider ind igen), hver gang skærmen tegnes.
+let bjaelke = null;
+
+function visFortrydBjaelke() {
+  bjaelke?.remove();
+  bjaelke = h('div', { klasse: 'toast', role: 'status' }, h('span', {}, t.fortryd.tekst), h('button', { type: 'button', vedTryk: fortrydSletning }, 'Fortryd'));
+  document.body.append(bjaelke);
+}
+
+function fjernFortrydBjaelke() {
+  bjaelke?.remove();
+  bjaelke = null;
 }
 
 function aabnTekst(id) {
@@ -951,7 +965,7 @@ function tegn() {
   // En note, der bliver færdig i baggrunden, tegner skærmen på ny. Skriver brugeren, skal feltet beholde fokus.
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
-  app.replaceChildren(...indhold.filter(Boolean), ...[fortrydBjaelke()].filter(Boolean));
+  app.replaceChildren(...indhold.filter(Boolean));
   // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
   if (t.visning === 'navn') document.getElementById('titel')?.focus();
   else if (markering) {
