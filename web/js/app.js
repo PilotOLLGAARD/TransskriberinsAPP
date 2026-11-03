@@ -878,6 +878,13 @@ async function start() {
   } catch {
     t.noter = [];
   }
+  // Blev appen lukket midt i en optagelse, skal det være det første, man ser.
+  const afbrudtNote = t.noter.find((n) => n.status === STATUS.GEMT && n.afbrudt && !n.navngivet);
+  if (afbrudtNote) {
+    t.visning = 'navn';
+    t.navnNote = afbrudtNote.id;
+    visFejl('afbrudt');
+  }
   tegn();
   document.body.dataset.klar = '1';
   // Beder telefonen om ikke at slette optagelserne. Afgøres af telefonen.

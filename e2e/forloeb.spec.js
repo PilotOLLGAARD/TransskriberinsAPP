@@ -206,7 +206,7 @@ test('app dræbt under optagelse kan navngives og sendes', async () => {
   await ny.goto(miljoe.adresse);
   await vis(ny, 'Optagelsen blev afbrudt');
   assert.ok((await lydBytes(ny)) > 0);
-  await knap(ny, 'Navngiv og send').click();
+  // Appen åbner direkte på navneskærmen for den afbrudte optagelse.
   await navngiv(ny, 'Afbrudt note');
   await vis(ny, SENDT);
   await kontekst.close();
@@ -789,13 +789,13 @@ test('afbrudt og sendt uden at fortsætte giver mail med én del', async () => {
   await kontekst.close();
 });
 
-test('afbrudt note på startskærmen kan fortsættes efter genåbning', async () => {
+test('afbrudt note kan fortsættes efter genåbning', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   const foer = await tal(miljoe);
   await afbrydOptagelse(side);
   await side.reload();
-  await knap(side, 'Optag').waitFor();
+  await side.getByLabel(FELT).waitFor();
   await vis(side, AFBRUDT);
   await fortsaetOgStop(side);
   await navngiv(side, 'Genåbnet');
@@ -927,5 +927,20 @@ test('stop med knappen og skjul bagefter: ingen notifikation', async () => {
   await skjul(side);
   await side.waitForTimeout(300);
   assert.deepEqual(await side.evaluate(() => window.vist), []);
+  await kontekst.close();
+});
+
+test('appen lukket under optagelse åbner direkte på den afbrudte optagelse', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(6000); // Mindst ét stykke lyd er gemt.
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  await side.goto(miljoe.adresse);
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  await vis(side, AFBRUDT);
+  await knap(side, 'Fortsæt optagelsen').waitFor();
+  await knap(side, 'Send').waitFor();
   await kontekst.close();
 });
