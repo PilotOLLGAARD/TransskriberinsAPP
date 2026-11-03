@@ -13,16 +13,21 @@ Sådan fortsætter du på en anden computer, opsætter tjenesterne og udgiver en
 
 Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Repoet hedder `TransskriberinsAPP`, og appen ligger på https://pilotollgaard.github.io/TransskriberinsAPP/. Brug præcis de store og små bogstaver, for adressen skal stemme med login-opsætningen.
 
+**Opret aldrig andre GitHub Pages-sider på kontoen PilotOLLGAARD**, og aldrig repoet `pilotollgaard.github.io`. Alle sider på kontoen deler adressen `https://pilotollgaard.github.io`. En anden side ville derfor kunne læse medarbejdernes login og optagelser i browseren. Skal kontoen bruges til andet, skal appen først flyttes til sit eget domæne.
+
 ## Filer, der kun ligger i projektmappen
 
 Disse filer kommer ikke på GitHub og følger ikke med `git clone`. Skifter du computer, skal du selv kopiere dem:
 
 - `.env`
-- `docs/plan.md`
+- `docs/overdragelse.md`
+- `docs/plan.md` og alle `docs/plan-*.md`
 - `docs/it-opsaetning.md`
 - `docs/test-resultater.md`
 
-Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv et sted med sikkerhedskopi.
+Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv et sted med sikkerhedskopi. `npm run tjek:hemmeligheder` fejler, hvis en af dem nogensinde har ligget i git, også i et tag eller en gammel gren.
+
+Historikken fra før repoet blev offentligt ligger som `C:\Users\RW\TranskriberingsApp-backup\foer-offentlig.bundle` uden for projektmappen. Den indeholder interne dokumenter og må aldrig lægges på GitHub.
 
 ## Lokal opstart
 
