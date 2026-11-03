@@ -86,6 +86,20 @@ p { margin: 0; font-size: 19px; }
 
 .ordmaerke { display: block; height: 28px; width: auto; }
 
+/* Lille knap i toppen. Stadig over 44 px, så den kan rammes med handsker. */
+.top { justify-content: space-between; gap: 12px; }
+.top-knap {
+  width: auto;
+  min-height: 48px;
+  padding: 8px 16px 8px 12px;
+  gap: 8px;
+  border-radius: 999px;
+  color: var(--blaa-dyb);
+  background: var(--blaa-tone);
+  font-size: 18px;
+}
+.top-knap svg { width: 22px; height: 22px; }
+
 .titel { margin: 18px 0 6px; overflow-wrap: anywhere; }
 .undertitel { color: var(--graa); }
 

@@ -625,7 +625,13 @@ function skaermStart() {
   // Sendte noter venter ikke på noget. De ligger under Tidligere optagelser.
   const afventer = t.noter.filter((n) => n.id !== optager.aktivId() && n.status !== STATUS.SENDT);
   return [
-    h('header', { klasse: 'top' }, ordmaerke()),
+    h(
+      'header',
+      { klasse: 'top' },
+      ordmaerke(),
+      // Øverst, så den altid kan ses uden at rulle.
+      h('button', { klasse: 'top-knap', 'aria-label': 'Tidligere optagelser', vedTryk: aabnTidligere }, ikon('liste'), 'Tidligere'),
+    ),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
     forklaring(),
@@ -644,7 +650,6 @@ function skaermStart() {
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
-    knap('Tidligere optagelser', aabnTidligere, { klasse: 'hvid', ikonNavn: 'liste' }),
     t.forklaringSkjult ? knap('Vis forklaring', () => visForklaring(true), { klasse: 'hvid' }) : null,
     hjaelpTilHjemmeskaerm(),
   ];

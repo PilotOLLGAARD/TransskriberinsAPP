@@ -447,13 +447,14 @@ test('kan betjenes på 360 px', async () => {
   async function tjek(navn) {
     const m = await side.evaluate(() => ({
       bred: document.documentElement.scrollWidth,
-      knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, b.getBoundingClientRect().height, b.getAttribute('role'), b.getBoundingClientRect().right]),
+      knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, b.getBoundingClientRect().height, b.getAttribute('role'), b.getBoundingClientRect().right, b.className]),
       lille: [...document.querySelectorAll('button, p, h1, h2, input')].map((e) => parseFloat(getComputedStyle(e).fontSize)),
     }));
     assert.ok(m.bred <= 360, `${navn}: vandret rulning, ${m.bred}`);
     assert.ok(m.knapper.length > 0, navn);
-    for (const [tekst, hoejde, rolle, hoejre] of m.knapper) {
-      assert.ok(Math.round(hoejde) >= (rolle === 'radio' ? 56 : 72), `${navn}: "${tekst}" er ${hoejde} px`);
+    for (const [tekst, hoejde, rolle, hoejre, klasse] of m.knapper) {
+      const mindst = rolle === 'radio' ? 56 : klasse.includes('top-knap') ? 44 : 72;
+      assert.ok(Math.round(hoejde) >= mindst, `${navn}: "${tekst}" er ${hoejde} px`);
       assert.ok(hoejre <= 360, `${navn}: "${tekst}" går ud over kanten`);
     }
     for (const stoerrelse of m.lille) assert.ok(stoerrelse >= 18, `${navn}: tekst på ${stoerrelse} px`);
@@ -813,5 +814,15 @@ test('navneskærmen med Fortsæt optagelsen kan betjenes på 360 px', async () =
   }));
   assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
   for (const [tekst, hoejde, rolle] of m.knapper) assert.ok(hoejde >= (rolle === 'radio' ? 56 : 72), `"${tekst}" er ${hoejde} px`);
+  await kontekst.close();
+});
+
+test('Tidligere optagelser kan ses øverst uden at rulle, også med forklaringen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  const r = await knap(side, TIDLIGERE).boundingBox();
+  assert.ok(r.y >= 0 && r.y + r.height <= 120, `knappen ligger ${Math.round(r.y)} px nede`);
+  assert.ok(r.height >= 44, `knappen er ${r.height} px høj`);
+  assert.ok(r.x + r.width <= 360);
   await kontekst.close();
 });

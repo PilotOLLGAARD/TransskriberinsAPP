@@ -16,7 +16,7 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 1. Log ind med din ØLLGAARD-konto.
 2. Vælg typen, og skriv evt. et navn, fx "Møde omkring SAS Lounge". Begge dele er valgfrie og kan også vælges efter optagelsen.
 3. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
-4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele.
+4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele. Har du givet appen lov til notifikationer (den spørger første gang, du trykker Optag), får du beskeden "Optagelsen er stoppet — hold appen åben, mens du optager." Det er afprøvet på iPhone med appen på hjemmeskærmen.
 5. Tryk på **Stop**.
 6. Ret navnet og typen, hvis du vil, og tryk **Send**. Er navnet tomt, finder appen selv på en titel.
 7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
@@ -41,7 +41,7 @@ Når mailen er sendt, slettes lyden fra telefonen. Referatet og PDF'en bliver i 
 
 ## Tidligere optagelser
 
-Tryk **Tidligere optagelser** nederst på startskærmen. Du ser titel, type, dato, varighed og status for hver optagelse:
+Tryk **Tidligere** øverst til højre på startskærmen. Du ser titel, type, dato, varighed og status for hver optagelse:
 
 | Status | Betyder | Slettes |
 |---|---|---|
