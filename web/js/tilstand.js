@@ -10,6 +10,8 @@ export const STATUS = {
 
 /** Så længe bliver referat og PDF på telefonen efter første afsendelse. Lyden slettes ved afsendelse. */
 export const OPBEVARING_MS = 7 * 24 * 60 * 60 * 1000;
+/** Så længe kan en sletning fortrydes. Derefter slettes noten helt. */
+export const FORTRYD_MS = 7 * 1000;
 const DAG_MS = 24 * 60 * 60 * 1000;
 
 /** Hele dage, til en sendt note slettes (0 = i dag). null for noter, der ikke slettes automatisk. */

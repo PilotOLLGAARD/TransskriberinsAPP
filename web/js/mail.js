@@ -61,12 +61,12 @@ export function lavBesked(note) {
 }
 
 /** Sender noten fra brugerens egen konto til brugeren selv. Kun 202 er succes. */
-export async function sendMail({ note, til, bevis, hent = (...a) => fetch(...a) }) {
+export async function sendMail({ note, til, bevis, signal, hent = (...a) => fetch(...a) }) {
   let svar;
   try {
     svar = await hent(`${GRAPH_URL}/me/sendMail`, {
       method: 'POST',
-      signal: AbortSignal.timeout(TIDSGRAENSE_MS),
+      signal: AbortSignal.any([AbortSignal.timeout(TIDSGRAENSE_MS), ...(signal ? [signal] : [])]),
       headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         message: { ...lavBesked(note), toRecipients: [{ emailAddress: { address: til } }] },

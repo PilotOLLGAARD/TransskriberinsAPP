@@ -7,7 +7,7 @@ import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
-import { STATUS, slettesOm } from './tilstand.js';
+import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
 
@@ -50,6 +50,7 @@ const t = {
   aabenNote: null,
   fraVisning: 'start', // skærmen, Læs vender tilbage til
   fremdriftNote: null, // noten, skærmen efter Send viser
+  fortryd: null, // { id, tekst, timer } mens en sletning kan fortrydes
   navnNote: null,
   navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
   navnType: null, // typen valgt på navneskærmen; null betyder den, der blev valgt før optagelsen
@@ -126,7 +127,8 @@ function maerkbar() {
 }
 
 async function opdater() {
-  t.noter = await lager.alleNoter();
+  // Noter, der er ved at blive slettet, vises ikke. De kan stadig fortrydes.
+  t.noter = (await lager.alleNoter()).filter((n) => !n.slettet);
   tegn();
 }
 
@@ -326,10 +328,39 @@ async function bekraeftSendt(id) {
   await opdater();
 }
 
-async function slet(id) {
-  if (!confirm('Slet optagelsen? Den kan ikke hentes igen.')) return;
+/** Sletter med det samme, men kan fortrydes i FORTRYD_MS. Stopper en afsendelse, der er i gang. */
+async function sletOptagelse(id) {
+  const note = t.noter.find((n) => n.id === id);
+  const tekst = note?.status === STATUS.SENDT ? 'Optagelsen er slettet.' : 'Optagelsen er slettet og bliver aldrig sendt.';
+  // En tidligere sletning, der stadig kunne fortrydes, bliver endelig nu.
+  if (t.fortryd) {
+    clearTimeout(t.fortryd.timer);
+    forloeb.endeligSlet(t.fortryd.id).catch(() => {});
+  }
   await forloeb.slet(id);
+  t.besked = null;
+  t.fortryd = { id, tekst, timer: setTimeout(() => sletEndeligt(id), FORTRYD_MS) };
   await opdater();
+}
+
+async function sletEndeligt(id) {
+  if (t.fortryd?.id === id) t.fortryd = null;
+  await forloeb.endeligSlet(id).catch(() => {});
+  await opdater();
+}
+
+async function fortrydSletning() {
+  if (!t.fortryd) return;
+  const { id, timer } = t.fortryd;
+  clearTimeout(timer);
+  t.fortryd = null;
+  await forloeb.fortrydSlet(id);
+  await opdater();
+}
+
+function fortrydBjaelke() {
+  if (!t.fortryd) return null;
+  return h('div', { klasse: 'toast', role: 'status' }, h('span', {}, t.fortryd.tekst), h('button', { type: 'button', vedTryk: fortrydSletning }, 'Fortryd'));
 }
 
 function aabnTekst(id) {
@@ -485,17 +516,32 @@ function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
   );
 }
 
+/** Handlinger øverst, derefter Læs og Slet ved siden af hinanden. Slet findes på alle kort. */
+function kortKnapper(note, handlinger, laes) {
+  return h(
+    'div',
+    { klasse: 'knapper' },
+    ...handlinger,
+    h(
+      'div',
+      { klasse: 'knap-raekke' },
+      laes ? knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' }) : null,
+      knap('Slet', () => sletOptagelse(note.id), { klasse: 'slet', ikonNavn: 'slet' }),
+    ),
+  );
+}
+
 /** Forklaring og knapper for en note, der ikke er sendt. Bruges i Afventer og Tidligere optagelser. */
 function kortIndhold(note) {
   if (t.igang.has(note.id) || note.status === STATUS.SENDER || note.status === STATUS.SENDER_MAIL) {
-    return { klasse: 'kort', ikonNavn: 'spinner', ikonKlasse: 'venter', forklaring: 'Laver referat …', handling: null };
+    return { klasse: 'kort', ikonNavn: 'spinner', ikonKlasse: 'venter', forklaring: 'Laver referat …', handlinger: [], laes: false };
   }
 
   if (note.status === STATUS.TEKST_KLAR) {
     if (note.maaskeSendt) {
       return {
         klasse: 'kort fejl', ikonNavn: 'advarsel', ikonKlasse: 'fejl', forklaring: BESKEDER.maaskeSendt,
-        handling: knap('Læs og send', () => aabnTekst(note.id)),
+        handlinger: [knap('Læs og send', () => aabnTekst(note.id))], laes: false,
       };
     }
     const forklaring = note.fejlType === 'mailFejl' ? BESKEDER.mailFejl
@@ -508,7 +554,8 @@ function kortIndhold(note) {
       ikonNavn: note.fejlType ? 'advarsel' : 'tekst',
       ikonKlasse: note.fejlType ? 'fejl' : '',
       forklaring,
-      handling: h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' })),
+      handlinger: [send],
+      laes: true,
     };
   }
 
@@ -522,20 +569,22 @@ function kortIndhold(note) {
     return {
       klasse: 'kort', ikonNavn: 'ur', ikonKlasse: 'venter',
       forklaring: note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.',
-      handling: kanFortsaette ? h('div', { klasse: 'knapper' }, fortsaetKnap(note.id), send) : send,
+      handlinger: kanFortsaette ? [fortsaetKnap(note.id), send] : [send],
+      laes: false,
     };
   }
 
   return {
     klasse: 'kort fejl', ikonNavn: 'advarsel', ikonKlasse: 'fejl',
     forklaring: BESKEDER[note.fejlType] || BESKEDER.tjeneste,
-    handling: h('div', { klasse: 'knapper' }, proevIgen, knap('Slet', () => slet(note.id), { klasse: 'slet', ikonNavn: 'slet' })),
+    handlinger: [proevIgen],
+    laes: false,
   };
 }
 
 function kort(note) {
   const k = kortIndhold(note);
-  return h('section', { klasse: k.klasse }, kortHoved(note, k.ikonNavn, k.ikonKlasse, k.forklaring), k.handling);
+  return h('section', { klasse: k.klasse }, kortHoved(note, k.ikonNavn, k.ikonKlasse, k.forklaring), kortKnapper(note, k.handlinger, k.laes));
 }
 
 function klokken(ms) {
@@ -563,11 +612,11 @@ function sletteTekst(note) {
 }
 
 function sendtKnapper(note) {
-  if (t.igang.has(note.id)) return venter('Sender mail …');
-  const send = note.fejlType === 'login'
-    ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'sendIgen' }), { ikonNavn: 'person' })
-    : knap('Send referat igen', () => sendIgen(note.id), { ikonNavn: 'send' });
-  return h('div', { klasse: 'knapper' }, send, knap('Læs', () => aabnTekst(note.id), { klasse: 'hvid', ikonNavn: 'tekst' }));
+  const send = t.igang.has(note.id) ? venter('Sender mail …')
+    : note.fejlType === 'login'
+      ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'sendIgen' }), { ikonNavn: 'person' })
+      : knap('Send referat igen', () => sendIgen(note.id), { ikonNavn: 'send' });
+  return kortKnapper(note, [send], true);
 }
 
 function historikKort(note) {
@@ -591,7 +640,7 @@ function historikKort(note) {
     h('p', { klasse: 'slettes' }, sletteTekst(note)),
     note.sendtIgen ? h('p', { klasse: 'meta' }, `Sendt igen kl. ${klokken(note.sendtIgen)}`) : null,
     advarsel ? h('p', { klasse: 'forklaring' }, advarsel) : null,
-    sendt ? sendtKnapper(note) : indhold.handling,
+    sendt ? sendtKnapper(note) : kortKnapper(note, indhold.handlinger, indhold.laes),
   );
 }
 
@@ -897,7 +946,7 @@ function tegn() {
   // En note, der bliver færdig i baggrunden, tegner skærmen på ny. Skriver brugeren, skal feltet beholde fokus.
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
-  app.replaceChildren(...indhold.filter(Boolean));
+  app.replaceChildren(...indhold.filter(Boolean), ...[fortrydBjaelke()].filter(Boolean));
   // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
   if (t.visning === 'navn') document.getElementById('titel')?.focus();
   else if (markering) {

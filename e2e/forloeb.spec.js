@@ -392,21 +392,17 @@ test('referat-fejl vises, intet tabt, og det kan prøves igen', async () => {
   await kontekst.close();
 });
 
-test('kan ikke behandles vises og kan slettes med bekræftelse', async () => {
+test('kan ikke behandles vises og kan slettes uden dialog', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await saetNaesteFejl(miljoe, 'format');
   await optag(side);
   await vis(side, 'Optagelsen kunne ikke behandles.');
   await tilForsiden(side);
-
-  side.once('dialog', (d) => d.dismiss());
+  side.once('dialog', () => assert.fail('der må ikke komme en dialog'));
   await knap(side, 'Slet').click();
-  assert.equal(await antalNoter(side), 1);
-
-  side.once('dialog', (d) => d.accept());
-  await knap(side, 'Slet').click();
-  await side.getByText('Optagelsen kunne ikke behandles.').waitFor({ state: 'detached' });
+  await vis(side, 'Optagelsen er slettet og bliver aldrig sendt.');
+  await side.waitForTimeout(7500);
   assert.equal(await antalNoter(side), 0);
   await kontekst.close();
 });
@@ -1015,5 +1011,56 @@ test('skærmen efter Send kan betjenes på 360 px', async () => {
   }));
   assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
   for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `"${tekst}" er ${hoejde} px`);
+  await kontekst.close();
+});
+
+// Slet med Fortryd
+
+test('Slet i Tidligere viser Fortryd, og Fortryd bringer optagelsen tilbage', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Fortrydes' });
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await aabnTidligere(side);
+  await knap(side, 'Slet').click();
+  await vis(side, 'Optagelsen er slettet.');
+  await vis(side, 'Ingen optagelser endnu.');
+  await knap(side, 'Fortryd').click();
+  await vis(side, 'Fortrydes');
+  await side.waitForTimeout(7500);
+  assert.equal(await antalNoter(side), 1);
+  await kontekst.close();
+});
+
+test('en optagelse, der ikke er sendt, er helt væk efter Fortryd-tiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Væk' });
+  await vis(side, 'Referatet kunne ikke laves lige nu');
+  await tilForsiden(side);
+  await aabnTidligere(side);
+  await knap(side, 'Slet').click();
+  await vis(side, 'Optagelsen er slettet og bliver aldrig sendt.');
+  await side.waitForTimeout(7500);
+  assert.equal(await antalNoter(side), 0);
+  assert.equal(await side.getByRole('button', { name: 'Fortryd' }).count(), 0);
+  await kontekst.close();
+});
+
+test('slet under afsendelse stopper den, og der sendes ingen mail', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Stoppes' });
+  await vis(side, 'Referatet laves');
+  await tilForsiden(side);
+  await knap(side, 'Slet').click();
+  await vis(side, 'Optagelsen er slettet og bliver aldrig sendt.');
+  await side.waitForTimeout(8000);
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald);
+  assert.equal(await antalNoter(side), 0);
   await kontekst.close();
 });

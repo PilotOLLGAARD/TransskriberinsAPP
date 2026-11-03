@@ -1,4 +1,4 @@
-import { OPBEVARING_MS, STATUS, efterGenstart } from './tilstand.js';
+import { FORTRYD_MS, OPBEVARING_MS, STATUS, efterGenstart } from './tilstand.js';
 import { rensType } from './typer.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
@@ -12,6 +12,14 @@ const FRISK_MS = 30 * 1000;
  */
 export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {} }) {
   const igang = new Set();
+  // Afsendelser, der kan stoppes, når brugeren sletter noten.
+  const afbrydere = new Map();
+
+  function nyAfbryder(id) {
+    const ctrl = new AbortController();
+    afbrydere.set(id, ctrl);
+    return ctrl.signal;
+  }
 
   /**
    * Om en optagelse måske stadig kører et andet sted. aktive er låsene, andre faner holder,
@@ -45,7 +53,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
    * Transskriberer hver del for sig og laver ét referat. Delteksterne gemmes én ad gangen,
    * så et genforsøg aldrig sender en del, der allerede er transskriberet.
    */
-  async function behandlDele(id, note, bevis) {
+  async function behandlDele(id, note, bevis, signal) {
     const dele = await lager.hentDele(id);
     const tekster = [...(note.deltekster || [])];
     for (let i = 0; i < dele.length; i++) {
@@ -53,6 +61,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       const sidste = i === dele.length - 1;
       const svar = await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet }, undefined, {
         vedSendt: sidste ? () => fremdrift(id, 'laver') : undefined,
+        signal,
       });
       tekster[i] = svar.tekst || '';
       await lager.opdaterNote(id, { deltekster: [...tekster] });
@@ -62,6 +71,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     return sendReferat(
       { tekster: medTale, titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet },
       bevis,
+      undefined,
+      { signal },
     );
   }
 
@@ -84,7 +95,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
   const forloeb = {
     behandl: (id) => eneAdgang(id, async () => {
       const note = await lager.hentNote(id);
-      if (!note || !KAN_BEHANDLES.has(note.status)) return;
+      if (!note || note.slettet || !KAN_BEHANDLES.has(note.status)) return;
       if (note.status === STATUS.OPTAGER) {
         const andetSted = await aktivAndetSted(id).catch(() => null);
         if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
@@ -92,12 +103,14 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined, fremdrift: 'sender' });
         vedAendring(id);
+        const signal = nyAfbryder(id);
         const bevis = await login.hentBevis('api');
+        if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const svar = (note.dele ?? 1) > 1
-          ? await behandlDele(id, note, bevis)
+          ? await behandlDele(id, note, bevis, signal)
           : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
             titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
-          }, undefined, { vedSendt: () => fremdrift(id, 'laver') });
+          }, undefined, { vedSendt: () => fremdrift(id, 'laver'), signal });
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;
@@ -107,17 +120,21 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: e?.type || 'tjeneste' });
+      } finally {
+        afbrydere.delete(id);
       }
     }),
 
     sendTilMig: (id) => eneAdgang(id, async () => {
       const note = await lager.hentNote(id);
-      if (!note || note.status !== STATUS.TEKST_KLAR) return;
+      if (!note || note.slettet || note.status !== STATUS.TEKST_KLAR) return;
+      const signal = nyAfbryder(id);
       try {
         await lager.opdaterNote(id, { status: STATUS.SENDER_MAIL, fejlType: undefined, fremdrift: 'mailer' });
         vedAendring(id);
         const bevis = await login.hentBevis('mail');
-        await sendMail({ note, til: login.brugerMail(), bevis });
+        if (signal.aborted) throw Object.assign(new Error('mailFejl'), { type: 'mailFejl' });
+        await sendMail({ note, til: login.brugerMail(), bevis, signal });
       } catch (e) {
         if (e?.type === 'mailUkendt') {
           // Mailen kan være sendt. Brugeren tjekker indbakken i stedet for at få en dobbelt mail.
@@ -129,6 +146,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
           fejlType: e?.type === 'login' ? 'login' : 'mailFejl',
         });
         return;
+      } finally {
+        afbrydere.delete(id);
       }
       try {
         await markerSendt(id);
@@ -143,7 +162,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
      */
     sendIgen: (id) => eneAdgang(id, async () => {
       const note = await lager.hentNote(id);
-      if (note?.status !== STATUS.SENDT || !note.pdf) return;
+      if (note?.status !== STATUS.SENDT || !note.pdf || note.slettet) return;
       try {
         const bevis = await login.hentBevis('mail');
         await sendMail({ note, til: login.brugerMail(), bevis });
@@ -161,7 +180,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       await forloeb.behandl(id);
       const note = await lager.hentNote(id);
       // En mulig dobbelt mail skal brugeren selv tage stilling til.
-      if (note?.status === STATUS.TEKST_KLAR && !note.maaskeSendt) await forloeb.sendTilMig(id);
+      if (note?.status === STATUS.TEKST_KLAR && !note.maaskeSendt && !note.slettet) await forloeb.sendTilMig(id);
     },
 
     /** Gemmer navnet, før noget sendes, så det overlever netværksfejl og genforsøg. */
@@ -185,6 +204,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       const noter = await lager.alleNoter();
       const aktive = typeof aktiveAndetSted === 'function' ? await aktiveAndetSted() : aktiveAndetSted;
       for (const note of noter) {
+        // Slettet inden for Fortryd-tiden: vises ikke, og ryddes ved næste start.
+        if (note.slettet) continue;
         // En optagelse, der stadig kører i en anden fane eller i den installerede app, er ikke vores.
         if (maaskeIGang(note, aktive)) continue;
         try {
@@ -214,17 +235,32 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     async ryd() {
       let antal = 0;
       for (const note of await lager.alleNoter()) {
-        if (note.status !== STATUS.SENDT || !Number.isFinite(note.sendt) || nu() - note.sendt < OPBEVARING_MS) continue;
+        const udloebet = note.status === STATUS.SENDT && Number.isFinite(note.sendt) && nu() - note.sendt >= OPBEVARING_MS;
+        const slettet = Number.isFinite(note.slettet) && nu() - note.slettet >= FORTRYD_MS;
+        if (!udloebet && !slettet) continue;
         await lager.sletNote(note.id);
         antal++;
       }
       return antal;
     },
 
+    /**
+     * Sletter en note, så den kan fortrydes i FORTRYD_MS. En afsendelse, der er i gang, stoppes straks,
+     * og serveren stopper så sit arbejde og sletter lydfilen hos Google.
+     */
     async slet(id) {
+      afbrydere.get(id)?.abort();
+      await lager.opdaterNote(id, { slettet: nu() });
+    },
+
+    async fortrydSlet(id) {
+      await lager.opdaterNote(id, { slettet: undefined });
+    },
+
+    /** Sletter lyd, tekst, referat og PDF helt fra telefonen. Kun noter, der er markeret slettet. */
+    async endeligSlet(id) {
       const note = await lager.hentNote(id);
-      if (note?.status !== STATUS.FEJL) throw new Error('Kun fejlede optagelser kan slettes');
-      await lager.sletNote(id);
+      if (note?.slettet) await lager.sletNote(id);
     },
   };
   return forloeb;

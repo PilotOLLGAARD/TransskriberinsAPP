@@ -277,18 +277,20 @@ test('genstart beholder en optagelse med lyd', async () => {
   assert.equal(note.afbrudt, true);
 });
 
-test('slet virker på fejlede noter', async () => {
-  const s = opsaet({ noter: [{ id: 'a', status: STATUS.FEJL, fejlType: 'kanIkkeBehandles' }] });
-  await s.forloeb.slet('a');
-  assert.equal(s.lager.kort.has('a'), false);
+test('slet markerer noten som slettet i alle statusser, og endeligSlet fjerner den', async () => {
+  for (const status of [STATUS.FEJL, STATUS.GEMT, STATUS.TEKST_KLAR, STATUS.SENDT, STATUS.SENDER]) {
+    const s = opsaet({ noter: [{ id: 'a', status }], nu: () => 5000 });
+    await s.forloeb.slet('a');
+    assert.equal(s.lager.kort.get('a').slettet, 5000, status);
+    await s.forloeb.endeligSlet('a');
+    assert.equal(s.lager.kort.has('a'), false, status);
+  }
 });
 
-test('slet kræver fejl-status', async () => {
-  for (const status of [STATUS.GEMT, STATUS.TEKST_KLAR, STATUS.SENDER, STATUS.SENDER_MAIL]) {
-    const s = opsaet({ noter: [{ id: 'a', status }] });
-    await assert.rejects(s.forloeb.slet('a'));
-    assert.equal(s.lager.kort.has('a'), true);
-  }
+test('endeligSlet rører kun noter, der er markeret slettet', async () => {
+  const s = opsaet();
+  await s.forloeb.endeligSlet('a');
+  assert.equal(s.lager.kort.has('a'), true);
 });
 
 const REFERAT_SVAR = { tekst: 'Fuld tekst', titel: 'AI-titel', referat: { opsummering: 'O' }, pdf: 'JVBERg==', filnavn: 'f.pdf' };
@@ -640,4 +642,63 @@ test('fremdrift går sender → laver → mailer, og appen får besked', async (
   await s.forloeb.behandlOgSend('a');
   assert.deepEqual(set, ['sender', 'laver', 'mailer', undefined]);
   assert.ok(aendringer >= 3);
+});
+
+// Slet med Fortryd
+
+/** sendLyd, der først svarer, når den bliver afbrudt. */
+const venterPaaAfbrydelse = (t) => (lyd, mime, bevis, meta, hent, valg) => new Promise((_, afvis) => {
+  t.signal = valg?.signal;
+  valg?.signal?.addEventListener('abort', () => afvis(Object.assign(new Error('net'), { type: 'net' })));
+});
+
+test('slet under afsendelse stopper den, og ingen mail sendes', async () => {
+  const t = {};
+  const s = opsaet({ sendLyd: venterPaaAfbrydelse(t), nu: () => 5000 });
+  const afsendelse = s.forloeb.behandlOgSend('a');
+  for (let i = 0; i < 20 && !t.signal; i++) await new Promise((ok) => setTimeout(ok, 1));
+  await s.forloeb.slet('a');
+  await afsendelse;
+  assert.equal(t.signal.aborted, true);
+  assert.equal(s.t.mailKald.length, 0);
+  assert.equal(s.lager.kort.get('a').slettet, 5000);
+});
+
+test('fortryd bringer noten tilbage, og den kan sendes', async () => {
+  const t = {};
+  let gang = 0;
+  const s = opsaet({ sendLyd: async (...a) => (++gang === 1 ? venterPaaAfbrydelse(t)(...a) : REFERAT_SVAR) });
+  const afsendelse = s.forloeb.behandlOgSend('a');
+  for (let i = 0; i < 20 && !t.signal; i++) await new Promise((ok) => setTimeout(ok, 1));
+  await s.forloeb.slet('a');
+  await afsendelse;
+  await s.forloeb.fortrydSlet('a');
+  assert.equal(s.lager.kort.get('a').slettet, undefined);
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
+  assert.equal(s.t.mailKald.length, 1);
+});
+
+test('en slettet note sendes ikke, og Send igen virker ikke på den', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', slettet: 1 }, { id: 'b', status: STATUS.SENDT, sendt: 1, pdf: 'x', slettet: 1 }] });
+  await s.forloeb.behandlOgSend('a');
+  await s.forloeb.sendIgen('b');
+  assert.equal(s.t.lydKald, 0);
+  assert.equal(s.t.mailKald.length, 0);
+});
+
+test('slettede noter ryddes ved næste start efter Fortryd-tiden og vises ikke', async () => {
+  const NU2 = 1_000_000;
+  const s = opsaet({
+    nu: () => NU2,
+    noter: [
+      { id: 'gammel', status: STATUS.GEMT, slettet: NU2 - 8000 },
+      { id: 'frisk', status: STATUS.GEMT, slettet: NU2 - 2000 },
+      { id: 'synlig', status: STATUS.GEMT },
+    ],
+  });
+  const vist = await s.forloeb.genoptag();
+  assert.deepEqual(vist.map((n) => n.id), ['synlig']);
+  assert.equal(s.lager.kort.has('gammel'), false);
+  assert.equal(s.lager.kort.has('frisk'), true);
 });

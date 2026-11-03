@@ -90,7 +90,7 @@ async function laesSvar(svar) {
  * Ét referat af delteksterne fra en afbrudt optagelse. Intet lyd sendes.
  * Svaret er som fra sendLyd: tekst, titel, referat, pdf, filnavn, emne og html.
  */
-export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }, bevis, hent = (...a) => fetch(...a)) {
+export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }, bevis, hent = (...a) => fetch(...a), { signal } = {}) {
   const krop = { tekster };
   if (typeof titel === 'string') krop.titel = titel;
   if (typeof type === 'string') krop.type = type;
@@ -102,7 +102,7 @@ export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }
       method: 'POST',
       headers: { authorization: `Bearer ${bevis}`, 'content-type': 'application/json' },
       body: JSON.stringify(krop),
-      signal: AbortSignal.timeout(REFERAT_TIDSGRAENSE_MS),
+      signal: AbortSignal.any([AbortSignal.timeout(REFERAT_TIDSGRAENSE_MS), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw new SendFejl('net');
