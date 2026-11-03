@@ -16,6 +16,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
   /**
    * Om en optagelse måske stadig kører et andet sted. aktive er låsene, andre faner holder,
    * eller null, når de ikke kan ses. Så afgør tiden siden sidste gemte stykke, og tvivl betyder ja.
+   * Låsene skal læses efter noten: optageren tager sin lås, før noten findes.
    */
   function maaskeIGang(note, aktive) {
     if (note.status !== STATUS.OPTAGER) return false;
@@ -113,13 +114,17 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
 
     /**
      * Retter noter, der stod midt i noget, da appen blev lukket. Sender intet af sig selv.
-     * aktiveAndetSted er null, når andre fanes låse ikke kan ses. Så røres en frisk optagelse ikke.
+     * aktiveAndetSted er låsene eller en funktion, der henter dem. Funktionen kaldes først, når
+     * noterne er læst, så en optagelse, der starter imens, altid ses med sin lås.
+     * Låsene er null, når de ikke kan ses. Så røres en frisk optagelse ikke.
      */
     async genoptag(aktiveAndetSted = new Set()) {
       const vist = [];
-      for (const note of await lager.alleNoter()) {
+      const noter = await lager.alleNoter();
+      const aktive = typeof aktiveAndetSted === 'function' ? await aktiveAndetSted() : aktiveAndetSted;
+      for (const note of noter) {
         // En optagelse, der stadig kører i en anden fane eller i den installerede app, er ikke vores.
-        if (maaskeIGang(note, aktiveAndetSted)) continue;
+        if (maaskeIGang(note, aktive)) continue;
         try {
           // Lukket før første stykke blev gemt: Der er intet at gemme.
           if (note.status === STATUS.OPTAGER && (await lager.hentLyd(note.id)).size === 0) {

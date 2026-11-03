@@ -431,3 +431,19 @@ test('behandl sender en afbrudt optagelse, der ikke kører andre steder', async 
   await s.forloeb.behandlOgSend('a');
   assert.equal(s.t.lydKald, 1);
 });
+
+test('genstart læser låsene efter noterne, så en optagelse, der starter imens, ikke slettes', async () => {
+  // Den anden fane tager sin lås og opretter noten, mens denne fane starter op.
+  const s = opsaet({ noter: [], nu: () => NU });
+  s.lager.hentLyd = async () => new Blob([]);
+  let laast = false;
+  const alleNoter = s.lager.alleNoter;
+  s.lager.alleNoter = async () => {
+    laast = true;
+    s.lager.kort.set('a', { id: 'a', status: STATUS.OPTAGER, mime: 'audio/mp4', oprettet: NU - 1000 });
+    return alleNoter();
+  };
+  const hentAktive = async () => (laast ? new Set(['a']) : new Set());
+  assert.deepEqual(await s.forloeb.genoptag(hentAktive), []);
+  assert.equal(s.lager.kort.has('a'), true);
+});

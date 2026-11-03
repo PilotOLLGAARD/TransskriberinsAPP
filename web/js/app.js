@@ -682,7 +682,7 @@ async function optagelserAndetSted() {
 async function start() {
   await login.init().catch(() => {});
   try {
-    t.noter = await forloeb.genoptag(await optagelserAndetSted());
+    t.noter = await forloeb.genoptag(optagelserAndetSted);
   } catch {
     t.noter = [];
   }
