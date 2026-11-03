@@ -6,7 +6,7 @@ import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
-import { LAAS_PRAEFIKS, browserMedier, lavOptager } from './optager.js';
+import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager } from './optager.js';
 import { STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
@@ -150,6 +150,8 @@ async function logInd(efterLogin) {
 
 async function optag() {
   if (t.starter || optager.erAktiv()) return;
+  // Første gang: lov til at give besked, hvis optagelsen stopper. Venter ikke, så optagelsen starter straks.
+  bedOmTilladelse();
   t.starter = true;
   t.besked = null;
   tegn();
@@ -176,6 +178,7 @@ async function optag() {
 /** Optager en ny del på en afbrudt note. Navn og type fra navneskærmen gemmes først. */
 async function fortsaetOptagelse(id) {
   if (t.starter || optager.erAktiv()) return;
+  bedOmTilladelse();
   t.starter = true;
   t.besked = null;
   try {

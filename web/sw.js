@@ -47,6 +47,16 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
+// Et tryk på beskeden om en stoppet optagelse åbner appen igen.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const [vindue] = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (vindue) await vindue.focus();
+    else await self.clients.openWindow('./');
+  })());
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;

@@ -26,6 +26,30 @@ export class OptageFejl extends Error {
   }
 }
 
+// Vises, når telefonen låses eller man skifter app under optagelse. Set virke på iPhone fra hjemmeskærmen.
+const STOPPET = 'Optagelsen er stoppet — hold appen åben, mens du optager.';
+
+/** Viser en notifikation via service workeren, hvis brugeren har givet lov. Giver true, hvis den blev vist. */
+export async function visAdvarsel(tekst, { notifikation = globalThis.Notification, serviceWorker = globalThis.navigator?.serviceWorker } = {}) {
+  if (notifikation?.permission !== 'granted') return false;
+  try {
+    const reg = await serviceWorker?.ready;
+    if (!reg) return false;
+    await reg.showNotification('Transskribering', { body: tekst, tag: 'optagelse-stoppet' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Beder om lov til notifikationer, når det ikke er afgjort. Skal kaldes ved et tryk. */
+export async function bedOmTilladelse({ notifikation = globalThis.Notification } = {}) {
+  if (notifikation?.permission !== 'default') return;
+  try {
+    await notifikation.requestPermission();
+  } catch { /* Ingen notifikation, men optagelsen virker som før. */ }
+}
+
 export function vaelgFormat(erUnderstoettet) {
   return FORMATER.find((f) => erUnderstoettet(f)) ?? null;
 }
@@ -39,6 +63,7 @@ export function browserMedier() {
     lavRecorder: (stream, valg) => new MediaRecorder(stream, valg),
     erUnderstoettet: (mime) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime),
     skaermlaas: () => navigator.wakeLock.request('screen'),
+    advar: (tekst) => visAdvarsel(tekst),
     /** Giver en funktion, der frigiver låsen, når den er taget. Uden Web Locks gives null. */
     laas: (navn) => new Promise((tildelt) => {
       if (!navigator.locks?.request) { tildelt(null); return; }
@@ -290,8 +315,12 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       aktiv = o;
       // Låses telefonen eller skiftes app, kan mikrofonen give stilhed uden fejl. Delen afsluttes straks.
       o.vedSynlighed = () => {
-        if (medier.dokument.visibilityState !== 'visible') afslut(o, 'afbrudt');
-        else tagSkaermlaas(o);
+        if (medier.dokument.visibilityState === 'visible') {
+          tagSkaermlaas(o);
+          return;
+        }
+        if (!o.afslutter) medier.advar?.(STOPPET);
+        afslut(o, 'afbrudt');
       };
       medier.dokument.addEventListener('visibilitychange', o.vedSynlighed);
       o.advarselTimer = ur.saetTimeout(() => vedAdvaret('snartSlut'), Math.max(0, ADVARSEL_MS - tidligereMs));
