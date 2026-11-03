@@ -1,4 +1,4 @@
-import { STATUS, efterGenstart } from './tilstand.js';
+import { OPBEVARING_MS, STATUS, efterGenstart } from './tilstand.js';
 import { rensType } from './typer.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
@@ -30,6 +30,15 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
     } catch {
       // Lyden er stadig gemt, og noten rettes ved næste start.
     }
+  }
+
+  /**
+   * Mailen er modtaget: noten bliver i OPBEVARING_MS med referat og PDF, så den kan sendes igen.
+   * Status skrives før lyden slettes, så et nedbrud imellem kun efterlader lyd, aldrig en tabt note.
+   */
+  async function markerSendt(id) {
+    await lager.opdaterNote(id, { status: STATUS.SENDT, sendt: nu(), fejlType: undefined, maaskeSendt: undefined });
+    await lager.sletLyd(id);
   }
 
   async function eneAdgang(id, arbejde) {
@@ -89,7 +98,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
         return;
       }
       try {
-        await lager.sletNote(id);
+        await markerSendt(id);
       } catch {
         // Noten står som sender-mail og får advarslen om mulig afsendelse ved næste start.
       }
@@ -119,6 +128,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
      * Låsene er null, når de ikke kan ses. Så røres en frisk optagelse ikke.
      */
     async genoptag(aktiveAndetSted = new Set()) {
+      await forloeb.ryd().catch(() => {});
       const vist = [];
       const noter = await lager.alleNoter();
       const aktive = typeof aktiveAndetSted === 'function' ? await aktiveAndetSted() : aktiveAndetSted;
@@ -145,7 +155,18 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
     async bekraeftSendt(id) {
       const note = await lager.hentNote(id);
       if (!note?.maaskeSendt) throw new Error('Kun noter med advarsel kan bekræftes');
-      await lager.sletNote(id);
+      await markerSendt(id);
+    },
+
+    /** Sletter sendte noter, når opbevaringen er udløbet. Alt andet slettes aldrig automatisk. */
+    async ryd() {
+      let antal = 0;
+      for (const note of await lager.alleNoter()) {
+        if (note.status !== STATUS.SENDT || !Number.isFinite(note.sendt) || nu() - note.sendt < OPBEVARING_MS) continue;
+        await lager.sletNote(note.id);
+        antal++;
+      }
+      return antal;
     },
 
     async slet(id) {

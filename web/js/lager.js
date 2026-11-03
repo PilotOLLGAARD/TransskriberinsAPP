@@ -108,6 +108,11 @@ export async function alleNoter() {
   });
 }
 
+/** Sletter lyden, men beholder noten med referat og PDF. */
+export async function sletLyd(id) {
+  await transaktion(STYKKER, 'readwrite', (t) => t.objectStore(STYKKER).delete(alleStykkerInterval(id)));
+}
+
 export async function sletNote(id) {
   await transaktion([NOTER, STYKKER], 'readwrite', (t) => {
     t.objectStore(NOTER).delete(id);

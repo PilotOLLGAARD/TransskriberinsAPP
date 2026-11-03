@@ -10,7 +10,9 @@ function falskLager(noter = []) {
     kort,
     async hentNote(id) { const n = kort.get(id); return n ? { ...n } : null; },
     async opdaterNote(id, felter) { Object.assign(kort.get(id), felter); },
-    async hentLyd(id) { return kort.has(id) ? new Blob(['lyd']) : null; },
+    lydSlettet: new Set(),
+    async hentLyd(id) { if (!kort.has(id)) return null; return this.lydSlettet.has(id) ? new Blob([]) : new Blob(['lyd']); },
+    async sletLyd(id) { this.lydSlettet.add(id); },
     async sletNote(id) { kort.delete(id); },
     async alleNoter() { return [...kort.values()].map((n) => ({ ...n })); },
   };
@@ -121,11 +123,16 @@ test('behandl rører ikke en note med tekst', async () => {
 
 const KLAR = { id: 'a', status: STATUS.TEKST_KLAR, tekst: 'Min note', oprettet: 7, mime: 'audio/mp4' };
 
-test('202 sletter note og lyd', async () => {
-  const s = opsaet({ noter: [KLAR] });
+test('ved 202 bliver noten sendt, lyden slettes, og referat og pdf bliver', async () => {
+  const s = opsaet({ noter: [{ ...KLAR, referat: { opsummering: 'O' }, pdf: 'JVBERg==', maaskeSendt: true }], nu: () => 5000 });
   await s.forloeb.sendTilMig('a');
-  assert.equal(s.lager.kort.has('a'), false);
-  assert.equal(await s.lager.hentLyd('a'), null);
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(n.sendt, 5000);
+  assert.equal(n.pdf, 'JVBERg==');
+  assert.deepEqual(n.referat, { opsummering: 'O' });
+  assert.equal(n.maaskeSendt, undefined);
+  assert.equal((await s.lager.hentLyd('a')).size, 0);
 });
 
 test('mail går kun til brugeren selv', async () => {
@@ -225,10 +232,14 @@ test('fuldt lager under genstart viser stadig alle noter', async () => {
   assert.deepEqual(noter.map((n) => n.id), ['a', 'b']);
 });
 
-test('bekræftet mail sletter noten', async () => {
-  const s = opsaet({ noter: [{ ...KLAR, maaskeSendt: true }] });
+test('bekræft sendt gør noten sendt i stedet for at slette den', async () => {
+  const s = opsaet({ noter: [{ ...KLAR, maaskeSendt: true }], nu: () => 9000 });
   await s.forloeb.bekraeftSendt('a');
-  assert.equal(s.lager.kort.has('a'), false);
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(n.sendt, 9000);
+  assert.equal(n.maaskeSendt, undefined);
+  assert.equal((await s.lager.hentLyd('a')).size, 0);
   assert.equal(s.t.mailKald.length, 0);
 });
 
@@ -319,7 +330,7 @@ test('navnet overlever netværksfejl og genforsøg', async () => {
   await s.forloeb.behandlOgSend('a');
   assert.equal(s.t.lydArgs[3].titel, 'Møde om tag');
   assert.equal(s.t.mailKald.length, 1);
-  assert.equal(s.lager.kort.has('a'), false);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
 });
 
 test('mail sendes automatisk efter referat', async () => {
@@ -327,7 +338,7 @@ test('mail sendes automatisk efter referat', async () => {
   await s.forloeb.navngivOgSend('a', '');
   assert.equal(s.t.mailKald.length, 1);
   assert.equal(s.t.mailKald[0].note.pdf, 'JVBERg==');
-  assert.equal(s.lager.kort.has('a'), false);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
 });
 
 test('ingen mail ved tom tekst', async () => {
@@ -348,7 +359,7 @@ test('mailfejl efter referat sender igen uden nyt referat', async () => {
   await s.forloeb.behandlOgSend('a');
   assert.equal(s.t.lydKald, 1);
   assert.equal(s.t.mailKald.length, 2);
-  assert.equal(s.lager.kort.has('a'), false);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
 });
 
 test('behandlOgSend sender ikke, når mailen måske er sendt', async () => {
@@ -446,4 +457,39 @@ test('genstart læser låsene efter noterne, så en optagelse, der starter imens
   const hentAktive = async () => (laast ? new Set(['a']) : new Set());
   assert.deepEqual(await s.forloeb.genoptag(hentAktive), []);
   assert.equal(s.lager.kort.has('a'), true);
+});
+
+// Opbevaring i 7 dage
+
+const DAG_MS = 24 * 60 * 60 * 1000;
+
+test('ryd sletter kun sendte noter over 7 dage', async () => {
+  const t0 = Date.UTC(2026, 10, 3, 12);
+  const s = opsaet({
+    nu: () => t0,
+    noter: [
+      { id: 'gammel-sendt', status: STATUS.SENDT, sendt: t0 - 7 * DAG_MS },
+      { id: 'ny-sendt', status: STATUS.SENDT, sendt: t0 - 6 * DAG_MS },
+      { id: 'sendt-uden-tid', status: STATUS.SENDT },
+      { id: 'fejl', status: STATUS.FEJL, oprettet: t0 - 30 * DAG_MS, sendt: t0 - 30 * DAG_MS },
+      { id: 'gemt', status: STATUS.GEMT, oprettet: t0 - 30 * DAG_MS },
+      { id: 'klar', status: STATUS.TEKST_KLAR, oprettet: t0 - 30 * DAG_MS },
+    ],
+  });
+  assert.equal(await s.forloeb.ryd(), 1);
+  assert.deepEqual([...s.lager.kort.keys()].sort(), ['fejl', 'gemt', 'klar', 'ny-sendt', 'sendt-uden-tid']);
+});
+
+test('genoptag rydder op og viser sendte noter', async () => {
+  const t0 = Date.UTC(2026, 10, 3, 12);
+  const s = opsaet({
+    nu: () => t0,
+    noter: [
+      { id: 'gammel', status: STATUS.SENDT, sendt: t0 - 8 * DAG_MS },
+      { id: 'ny', status: STATUS.SENDT, sendt: t0 - DAG_MS },
+    ],
+  });
+  const noter = await s.forloeb.genoptag();
+  assert.deepEqual(noter.map((n) => n.id), ['ny']);
+  assert.equal(s.lager.kort.has('gammel'), false);
 });

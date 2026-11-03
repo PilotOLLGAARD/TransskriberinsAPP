@@ -108,3 +108,19 @@ test('opretNote bruger et givet id, og gemStykke stempler noten som aktiv', asyn
   assert.ok(Number.isFinite(svar.efter));
   await kontekst.close();
 });
+
+test('sletLyd fjerner stykker, men beholder noten', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const svar = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const id = await l.opretNote({ mime: 'audio/mp4' });
+    await l.gemStykke(id, 0, new Uint8Array([1, 2, 3]).buffer);
+    await l.opdaterNote(id, { pdf: 'JVBERg==' });
+    await l.sletLyd(id);
+    return { note: await l.hentNote(id), bytes: (await l.hentLyd(id)).size };
+  });
+  assert.equal(svar.bytes, 0);
+  assert.equal(svar.note.pdf, 'JVBERg==');
+  await kontekst.close();
+});

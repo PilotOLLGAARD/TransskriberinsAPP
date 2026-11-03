@@ -177,7 +177,7 @@ async function stop() {
 }
 
 async function efterAfsendelse(id) {
-  if (!(await lager.hentNote(id))) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
+  if ((await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   await opdater();
 }
 
@@ -234,7 +234,7 @@ async function sendTilMig(id) {
   } finally {
     t.igang.delete(id);
   }
-  if (!(await lager.hentNote(id))) {
+  if ((await lager.hentNote(id))?.status === STATUS.SENDT) {
     t.visning = 'start';
     t.aabenNote = null;
     t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
@@ -492,7 +492,8 @@ function skaermLogin() {
 }
 
 function skaermStart() {
-  const afventer = t.noter.filter((n) => n.id !== optager.aktivId());
+  // Sendte noter venter ikke på noget. De ligger under Tidligere optagelser.
+  const afventer = t.noter.filter((n) => n.id !== optager.aktivId() && n.status !== STATUS.SENDT);
   return [
     h('header', { klasse: 'top' }, ordmaerke()),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
@@ -614,7 +615,7 @@ function skaermTekst() {
       ...(sender
         ? [venter('Sender mail …')]
         : [
-          note.maaskeSendt ? knap('Jeg har fået mailen, slet', () => bekraeftSendt(note.id), { klasse: 'tonet', ikonNavn: 'tjek' }) : null,
+          note.maaskeSendt ? knap('Jeg har fået mailen', () => bekraeftSendt(note.id), { klasse: 'tonet', ikonNavn: 'tjek' }) : null,
           send,
           knap('Tilbage', tilbage, { klasse: 'hvid', ikonNavn: 'tilbage' }),
         ]),

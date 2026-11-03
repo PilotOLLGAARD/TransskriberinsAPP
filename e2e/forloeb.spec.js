@@ -48,6 +48,14 @@ async function fejlMail(side) {
 }
 
 const antalNoter = (side) => side.evaluate(async () => (await (await import('/js/lager.js')).alleNoter()).length);
+// Sendte noter bliver i 7 dage, men uden lyd.
+const sendteUdenLyd = (side) => side.evaluate(async () => {
+  const l = await import('/js/lager.js');
+  const noter = await l.alleNoter();
+  const sendte = noter.filter((n) => n.status === 'sendt');
+  for (const n of sendte) if ((await l.hentLyd(n.id)).size) return -1;
+  return noter.length === sendte.length ? sendte.length : -2;
+});
 
 async function lydBytes(side) {
   return side.evaluate(async () => {
@@ -76,7 +84,7 @@ test('hele forløbet med navn', async () => {
   assert.match(besked.body.content, /Testreferat af/);
   assert.match(besked.attachments[0].name, /^\d{4}-\d{2}-\d{2} Møde omkring SAS Lounge\.pdf$/);
   assert.equal(Buffer.from(besked.attachments[0].contentBytes, 'base64').subarray(0, 5).toString(), '%PDF-');
-  assert.equal(await antalNoter(side), 0);
+  assert.equal(await sendteUdenLyd(side), 1);
   await kontekst.close();
 });
 
@@ -283,9 +291,9 @@ test('måske sendt: advarsel, ingen automatisk afsendelse, og noten kan fjernes'
   await knap(side, 'Læs og send').click();
   await vis(side, 'Mailen er måske allerede sendt.');
   assert.equal((await tal(miljoe)).mailKald, foer.mailKald);
-  await knap(side, 'Jeg har fået mailen, slet').click();
+  await knap(side, 'Jeg har fået mailen').click();
   await knap(side, 'Optag').waitFor();
-  assert.equal(await antalNoter(side), 0);
+  assert.equal(await sendteUdenLyd(side), 1);
   await kontekst.close();
 });
 
@@ -417,7 +425,7 @@ test('mailfejl efter referat sender igen uden nyt referat', async () => {
   const efter = await tal(miljoe);
   assert.equal(efter.geminiKald, foer.geminiKald);
   assert.equal(efter.referatKald, foer.referatKald);
-  assert.equal(await antalNoter(side), 0);
+  assert.equal(await sendteUdenLyd(side), 1);
   await kontekst.close();
 });
 
