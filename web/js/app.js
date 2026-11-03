@@ -36,6 +36,8 @@ const login = LOKAL
 const forloeb = lavForloeb({
   lager, login, sendLyd, sendMail, sendReferat,
   aktivAndetSted: async (id) => (await optagelserAndetSted())?.has(id) ?? null,
+  // Fremdriften vises på skærmen efter Send.
+  vedAendring: () => { opdater().catch(() => {}); },
 });
 const optager = lavOptager({ lager, medier: browserMedier() });
 
@@ -47,6 +49,7 @@ const t = {
   noter: [],
   aabenNote: null,
   fraVisning: 'start', // skærmen, Læs vender tilbage til
+  fremdriftNote: null, // noten, skærmen efter Send viser
   navnNote: null,
   navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
   navnType: null, // typen valgt på navneskærmen; null betyder den, der blev valgt før optagelsen
@@ -76,6 +79,7 @@ const IKONER = {
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   tilbage: '<path d="M15 5l-7 7 7 7"/>',
   liste: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/>',
 };
 
 function ikon(navn) {
@@ -235,7 +239,8 @@ async function behandlOgSend(id) {
 }
 
 async function navngivOgSend(id, titel, type) {
-  t.visning = 'start';
+  t.visning = 'fremdrift';
+  t.fremdriftNote = id;
   t.navnNote = null;
   t.navnUdkast = null;
   t.navnType = null;
@@ -298,6 +303,13 @@ async function sendIgen(id) {
     t.besked = { tekst: `Referatet er sendt igen til ${login.brugerMail()}.`, type: 'ok' };
   }
   await opdater();
+}
+
+function tilForsiden() {
+  t.visning = 'start';
+  t.fremdriftNote = null;
+  t.besked = null;
+  tegn();
 }
 
 function aabnTidligere() {
@@ -659,6 +671,97 @@ function skaermStart() {
   ];
 }
 
+// Skærmen efter Send: fire trin, der krydses af undervejs
+
+function trinPunkt(tilstand, titel, tekst) {
+  const tegnet = tilstand === 'faerdig' ? ikon('tjek')
+    : tilstand === 'fejl' ? ikon('advarsel')
+      : tilstand === 'igang' ? h('span', { klasse: 'spinner' }) : null;
+  return h(
+    'li',
+    { klasse: `trin-punkt ${tilstand}` },
+    h('span', { klasse: 'trin-ikon', 'aria-hidden': 'true' }, tegnet),
+    h('div', {}, h('p', { klasse: 'trin-titel' }, titel), tekst ? h('p', { klasse: 'trin-tekst' }, tekst) : null),
+  );
+}
+
+/** Hvor langt noten er: 1 sender lyden, 2 laver referatet, 3 sender mailen, 4 færdig. */
+function fase(note) {
+  if (note.status === STATUS.SENDT) return 4;
+  if (note.status === STATUS.SENDER_MAIL || note.status === STATUS.TEKST_KLAR) return 3;
+  return note.fremdrift === 'laver' ? 2 : 1;
+}
+
+/** Hvilket trin der fejlede, og hvad der skal stå. null, når intet fejlede. */
+function fremdriftFejl(note) {
+  if (t.igang.has(note.id)) return null;
+  if (note.status === STATUS.FEJL) {
+    if (note.fremdrift === 'laver' || note.fejlType === 'ingenTale') {
+      return { trin: 3, titel: 'Referatet kunne ikke laves lige nu', tekst: BESKEDER[note.fejlType] || BESKEDER.tjeneste };
+    }
+    return { trin: 2, titel: 'Lyden kunne ikke sendes', tekst: BESKEDER[note.fejlType] || BESKEDER.tjeneste };
+  }
+  if (note.status === STATUS.TEKST_KLAR && (note.fejlType || note.maaskeSendt)) {
+    const tekst = note.maaskeSendt ? BESKEDER.maaskeSendt : note.fejlType === 'login' ? BESKEDER.login : BESKEDER.mailFejl;
+    return { trin: 4, titel: 'Mailen blev ikke sendt', tekst };
+  }
+  return null;
+}
+
+function skaermFremdrift() {
+  const note = t.noter.find((n) => n.id === t.fremdriftNote);
+  if (!note) {
+    t.visning = 'start';
+    return skaermStart();
+  }
+  const mail = login.brugerMail();
+  const p = fase(note);
+  const fejl = fremdriftFejl(note);
+  const trin = [
+    trinPunkt('faerdig', 'Optagelsen er gemt', 'På telefonen'),
+    fejl?.trin === 2 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
+      : trinPunkt(p > 1 ? 'faerdig' : 'igang', p > 1 ? 'Lyden er sendt' : 'Sender lyden …'),
+    fejl?.trin === 3 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
+      : p > 2 ? trinPunkt('faerdig', 'Referatet er lavet')
+        : p === 2 && !fejl ? trinPunkt('igang', 'Referatet laves …', 'Det kan tage et par minutter.')
+          : trinPunkt('venter', 'Referatet laves'),
+    fejl?.trin === 4 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
+      : p === 4 ? trinPunkt('faerdig', `Referatet er sendt til ${mail}`)
+        : trinPunkt(p === 3 && !fejl ? 'igang' : 'venter', 'Referatet sendes til din mail'),
+  ];
+  const type = TYPER.find((x) => x.noegle === note.type)?.navn;
+  const meta = [type, formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ');
+  let nederst;
+  if (fejl) {
+    const kanIgen = !['ingenTale', 'kanIkkeBehandles'].includes(note.fejlType) && !note.maaskeSendt;
+    const igen = note.fejlType === 'login'
+      ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: note.status === STATUS.TEKST_KLAR ? 'send' : 'behandl' }), { ikonNavn: 'person' })
+      : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
+    nederst = h('div', { klasse: 'knapper' }, kanIgen ? igen : null, knap('Til forsiden', tilForsiden, { klasse: 'hvid', ikonNavn: 'tilbage' }));
+  } else if (p === 4) {
+    nederst = [
+      h('p', { klasse: 'mail-linje' }, 'Du finder det også under ', h('strong', {}, 'Tidligere'), ' i 7 dage.'),
+      knap('Ny optagelse', tilForsiden, { ikonNavn: 'mikrofon' }),
+    ];
+  } else {
+    nederst = [
+      h('p', { klasse: 'mail-linje' }, 'Sendes til ', h('strong', {}, mail)),
+      h('div', { klasse: 'info' }, ikon('info'), h('span', {}, 'Hold appen åben, til referatet er sendt. Lukker du den, får du en besked og kan sende igen bagefter.')),
+      // En ny optagelse kan startes, mens referatet laves. Appen er stadig åben.
+      knap('Ny optagelse', tilForsiden, { klasse: 'hvid', ikonNavn: 'mikrofon' }),
+    ];
+  }
+  return [
+    h('header', { klasse: 'top' }, ordmaerke()),
+    h('h1', { klasse: 'titel' }, note.titel || 'Optagelse'),
+    meta ? h('p', { klasse: 'undertitel' }, meta) : null,
+    // Fejl som manglende net ved login vises her. At referatet er sendt, står allerede i trinene.
+    t.besked?.type === 'fejl' ? beskedElement() : null,
+    h('div', { klasse: 'trin-kort' }, h('ol', { klasse: 'trin-liste', 'aria-live': 'polite' }, ...trin)),
+    ...[nederst].flat(),
+  ];
+}
+
 function skaermTidligere() {
   const noter = t.noter.filter((n) => n.id !== optager.aktivId());
   return [
@@ -786,6 +889,7 @@ function tegn() {
   else if (t.visning === 'tekst') indhold = skaermTekst();
   else if (t.visning === 'navn') indhold = skaermNavn();
   else if (t.visning === 'tidligere') indhold = skaermTidligere();
+  else if (t.visning === 'fremdrift') indhold = skaermFremdrift();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();

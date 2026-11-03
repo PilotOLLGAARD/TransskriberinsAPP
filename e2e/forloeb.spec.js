@@ -47,6 +47,12 @@ async function fejlMail(side) {
   await vis(side, 'Mailen blev ikke sendt.');
 }
 
+/** Fra skærmen efter Send til forsiden, som når brugeren trykker Ny optagelse eller Til forsiden. */
+async function tilForsiden(side) {
+  await side.getByRole('button', { name: /^(Ny optagelse|Til forsiden)$/ }).first().click();
+  await knap(side, 'Optag').waitFor();
+}
+
 const antalNoter = (side) => side.evaluate(async () => (await (await import('/js/lager.js')).alleNoter()).length);
 // Sendte noter bliver i 7 dage, men uden lyd.
 const sendteUdenLyd = (side) => side.evaluate(async () => {
@@ -106,6 +112,7 @@ test('navnet bevares, når en anden note bliver færdig i baggrunden', async () 
   await logInd(side);
   await saetNaesteFejl(miljoe, 'langsom');
   await optag(side, { titel: 'Første note' });
+  await tilForsiden(side);
   await stopOptagelse(side);
   await side.getByLabel(FELT).fill('Anden no');
   await vis(side, SENDT);
@@ -391,6 +398,7 @@ test('kan ikke behandles vises og kan slettes med bekræftelse', async () => {
   await saetNaesteFejl(miljoe, 'format');
   await optag(side);
   await vis(side, 'Optagelsen kunne ikke behandles.');
+  await tilForsiden(side);
 
   side.once('dialog', (d) => d.dismiss());
   await knap(side, 'Slet').click();
@@ -420,7 +428,8 @@ test('mailfejl efter referat sender igen uden nyt referat', async () => {
   assert.equal(await antalNoter(side), 1);
   assert.ok((await lydBytes(side)) > 0);
   const foer = await tal(miljoe);
-  await knap(side, 'Send igen').click();
+  // Prøv igen på skærmen efter Send sender mailen igen uden nyt referat.
+  await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
   const efter = await tal(miljoe);
   assert.equal(efter.geminiKald, foer.geminiKald);
@@ -524,6 +533,7 @@ test('navn og type nulstilles, når optagelsen er startet', async () => {
   await side.getByLabel(STARTNAVN).fill('Gåtur');
   await optag(side, { titel: 'Gåtur' });
   await vis(side, SENDT);
+  await tilForsiden(side);
   assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'true');
   assert.equal(await side.getByLabel(STARTNAVN).inputValue(), '');
   await kontekst.close();
@@ -534,6 +544,7 @@ test('navnet på startskærmen bevares, når en note bliver færdig i baggrunden
   await logInd(side);
   await saetNaesteFejl(miljoe, 'langsom');
   await optag(side, { titel: 'Første' });
+  await tilForsiden(side);
   await side.getByLabel(STARTNAVN).fill('Næste no');
   await vis(side, SENDT);
   assert.equal(await side.getByLabel(STARTNAVN).inputValue(), 'Næste no');
@@ -623,6 +634,7 @@ test('efter afsendelse ligger referatet under Tidligere optagelser med Sendt og 
   await logInd(side);
   await optag(side, { titel: 'Historik' });
   await vis(side, SENDT);
+  await tilForsiden(side);
   assert.equal(await side.getByRole('heading', { name: 'Afventer' }).count(), 0);
   await aabnTidligere(side);
   await vis(side, 'Her finder du dine optagelser fra de sidste 7 dage. Optagelser, der endnu ikke er sendt, gemmes, indtil de er sendt.');
@@ -641,6 +653,7 @@ test('Send referat igen sender samme emne og pdf uden nyt Gemini- eller referatk
   await logInd(side);
   await optag(side, { titel: 'Igen' });
   await vis(side, SENDT);
+  await tilForsiden(side);
   const foer = await tal(miljoe);
   await aabnTidligere(side);
   await knap(side, 'Send referat igen').click();
@@ -659,6 +672,7 @@ test('Læs fra Tidligere optagelser kan sende igen og fører tilbage til listen'
   await logInd(side);
   await optag(side, { titel: 'Læses' });
   await vis(side, SENDT);
+  await tilForsiden(side);
   await aabnTidligere(side);
   await knap(side, 'Læs').click();
   await vis(side, 'Testreferat af');
@@ -674,6 +688,7 @@ test('fejlet optagelse vises som Fejlet med Slettes ikke, før den er sendt, og 
   await saetNaesteFejl(miljoe, 'tjeneste');
   await optag(side, { titel: 'Fejler' });
   await vis(side, 'Transskriptionen mislykkedes');
+  await tilForsiden(side);
   await aabnTidligere(side);
   await vis(side, 'Fejlet');
   await vis(side, 'Slettes ikke, før den er sendt');
@@ -695,9 +710,11 @@ test('Tidligere optagelser kan betjenes på 360 px', async () => {
   await logInd(side);
   await optag(side, { titel: `Lang${'x'.repeat(100)}` });
   await vis(side, SENDT);
+  await tilForsiden(side);
   await saetNaesteFejl(miljoe, 'tjeneste');
   await optag(side, { titel: 'Fejler på smal skærm' });
   await vis(side, 'Transskriptionen mislykkedes');
+  await tilForsiden(side);
   await aabnTidligere(side);
   const m = await side.evaluate(() => ({
     bred: document.documentElement.scrollWidth,
@@ -849,7 +866,7 @@ test('skjult app, mens referatet laves, giver en notifikation', async () => {
   await side.evaluate(() => navigator.serviceWorker.ready);
   await saetNaesteFejl(miljoe, 'langsom');
   await optag(side, { titel: 'Langsom' });
-  await vis(side, 'Laver referat');
+  await vis(side, 'Referatet laves');
   await skjul(side);
   await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 5000 });
   assert.deepEqual(await side.evaluate(() => window.vist), [IKKE_SENDT]);
@@ -942,5 +959,61 @@ test('appen lukket under optagelse åbner direkte på den afbrudte optagelse', a
   await vis(side, AFBRUDT);
   await knap(side, 'Fortsæt optagelsen').waitFor();
   await knap(side, 'Send').waitFor();
+  await kontekst.close();
+});
+
+// Skærmen efter Send: fire trin
+
+test('efter Send vises trinene, og til sidst at referatet er sendt til mailadressen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Trin' });
+  await vis(side, 'Optagelsen er gemt');
+  await vis(side, 'Sendes til test@ollgaard.dk');
+  await vis(side, 'Hold appen åben, til referatet er sendt.');
+  await vis(side, SENDT);
+  assert.equal(await side.getByText('Referatet er lavet').count(), 1);
+  await knap(side, 'Ny optagelse').click();
+  await knap(side, 'Optag').waitFor();
+  await kontekst.close();
+});
+
+test('langsomt referat viser Lyden er sendt, Referatet laves og Det kan tage et par minutter', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Langsomt' });
+  await vis(side, 'Referatet laves …');
+  await vis(side, 'Det kan tage et par minutter.');
+  await vis(side, 'Lyden er sendt');
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
+test('fejl viser en venlig besked og Prøv igen, og Prøv igen sender', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Fejl' });
+  await vis(side, 'Referatet kunne ikke laves lige nu');
+  await vis(side, 'Optagelsen er gemt');
+  await knap(side, 'Til forsiden').waitFor();
+  await knap(side, 'Prøv igen').click();
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
+test('skærmen efter Send kan betjenes på 360 px', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await optag(side, { titel: `Lang${'x'.repeat(100)}` });
+  await vis(side, SENDT);
+  const m = await side.evaluate(() => ({
+    bred: document.documentElement.scrollWidth,
+    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+  }));
+  assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
+  for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `"${tekst}" er ${hoejde} px`);
   await kontekst.close();
 });
