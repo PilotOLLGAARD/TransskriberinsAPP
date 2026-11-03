@@ -128,3 +128,18 @@ test('sendReferat giver samme fejltyper som sendLyd', async () => {
   }
   await assert.rejects(sendReferat({ tekster: ['a'] }, 'b', async () => { throw new TypeError('x'); }), (e) => e.type === 'net');
 });
+
+test('vedSendt gives videre og kaldes, når lyden er sendt', async () => {
+  let sendt = 0;
+  const hent = async (url, valg) => { valg.vedSendt(); return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
+  await sendLyd(LYD, 'audio/mp4', 'b', {}, hent, { vedSendt: () => { sendt++; } });
+  assert.equal(sendt, 1);
+});
+
+test('afbrydelse udefra giver net', async () => {
+  const ctrl = new AbortController();
+  const hent = (url, valg) => new Promise((_, afvis) => valg.signal.addEventListener('abort', () => afvis(new DOMException('x', 'AbortError'))));
+  const loefte = sendLyd(LYD, 'audio/mp4', 'b', {}, hent, { signal: ctrl.signal });
+  ctrl.abort();
+  await assert.rejects(loefte, (e) => e.type === 'net');
+});

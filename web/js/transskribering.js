@@ -33,17 +33,43 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
 }
 
 /**
+ * Som fetch, men med XMLHttpRequest, som kan melde, når hele lyden er sendt (vedSendt).
+ * fetch kan ikke vise fremdrift for upload i alle browsere.
+ */
+function hentMedFremdrift(url, { method, headers, body, signal, vedSendt }) {
+  if (typeof XMLHttpRequest === 'undefined') return fetch(url, { method, headers, body, signal });
+  return new Promise((ok, fejl) => {
+    const x = new XMLHttpRequest();
+    x.open(method, url);
+    for (const [navn, vaerdi] of Object.entries(headers)) x.setRequestHeader(navn, vaerdi);
+    if (vedSendt) x.upload.addEventListener('load', () => vedSendt());
+    x.onload = () => ok({ ok: x.status >= 200 && x.status < 300, status: x.status, json: async () => JSON.parse(x.responseText) });
+    x.onerror = () => fejl(new TypeError('netværk'));
+    x.onabort = () => fejl(new DOMException('afbrudt', 'AbortError'));
+    if (signal?.aborted) {
+      fejl(new DOMException('afbrudt', 'AbortError'));
+      return;
+    }
+    signal?.addEventListener('abort', () => x.abort(), { once: true });
+    x.send(body);
+  });
+}
+
+/**
  * Sender originallyden. Svaret er { tekst } og, når der var tale, også titel, referat, pdf og filnavn.
+ * vedSendt kaldes, når hele lyden er sendt. signal afbryder (fx når brugeren sletter optagelsen).
  * Kaster SendFejl med typen, appen skal vise.
  */
-export async function sendLyd(lyd, mime, bevis, meta = {}, hent = (...a) => fetch(...a)) {
+export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdrift, { vedSendt, signal } = {}) {
+  const signaler = [AbortSignal.timeout(TIDSGRAENSE_MS), ...(signal ? [signal] : [])];
   let svar;
   try {
     svar = await hent(API_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${bevis}`, 'content-type': mime, ...metaHeadere(meta) },
       body: lyd,
-      signal: AbortSignal.timeout(TIDSGRAENSE_MS),
+      signal: AbortSignal.any(signaler),
+      vedSendt,
     });
   } catch {
     throw new SendFejl('net');

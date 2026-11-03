@@ -19,13 +19,14 @@ function falskLager(noter = []) {
   };
 }
 
-function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat } = {}) {
+function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat, vedAendring } = {}) {
   const lager = falskLager(noter);
   const t = { lydKald: 0, mailKald: [], lydListe: [], referatKald: [] };
   const forloeb = lavForloeb({
     lager,
     nu,
     aktivAndetSted,
+    vedAendring,
     login: {
       hentBevis: hentBevis || (async (o) => `bevis-${o}`),
       brugerMail: () => 'a@ollgaard.dk',
@@ -626,4 +627,17 @@ test('en note med én del bruger den gamle vej', async () => {
   assert.equal(s.t.lydKald, 1);
   assert.equal(s.t.referatKald.length, 0);
   assert.equal(s.t.lydListe[0][3].kunTekst, undefined);
+});
+
+// Fremdrift til skærmen efter Send
+
+test('fremdrift går sender → laver → mailer, og appen får besked', async () => {
+  const set = [];
+  let aendringer = 0;
+  const s = opsaet({ sendLyd: async (lyd, mime, bevis, meta, hent, valg) => { valg.vedSendt(); return REFERAT_SVAR; }, vedAendring: () => { aendringer++; } });
+  const opdater = s.lager.opdaterNote;
+  s.lager.opdaterNote = async (id, felter) => { if ('fremdrift' in felter) set.push(felter.fremdrift); return opdater(id, felter); };
+  await s.forloeb.behandlOgSend('a');
+  assert.deepEqual(set, ['sender', 'laver', 'mailer', undefined]);
+  assert.ok(aendringer >= 3);
 });

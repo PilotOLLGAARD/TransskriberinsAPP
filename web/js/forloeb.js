@@ -10,7 +10,7 @@ const FRISK_MS = 30 * 1000;
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
  */
-export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now }) {
+export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {} }) {
   const igang = new Set();
 
   /**
@@ -37,7 +37,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
    * Status skrives før lyden slettes, så et nedbrud imellem kun efterlader lyd, aldrig en tabt note.
    */
   async function markerSendt(id) {
-    await lager.opdaterNote(id, { status: STATUS.SENDT, sendt: nu(), fejlType: undefined, maaskeSendt: undefined });
+    await lager.opdaterNote(id, { status: STATUS.SENDT, sendt: nu(), fejlType: undefined, maaskeSendt: undefined, fremdrift: undefined });
     await lager.sletLyd(id);
   }
 
@@ -50,7 +50,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     const tekster = [...(note.deltekster || [])];
     for (let i = 0; i < dele.length; i++) {
       if (typeof tekster[i] === 'string') continue;
-      tekster[i] = (await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet })).tekst || '';
+      const sidste = i === dele.length - 1;
+      const svar = await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet }, undefined, {
+        vedSendt: sidste ? () => fremdrift(id, 'laver') : undefined,
+      });
+      tekster[i] = svar.tekst || '';
       await lager.opdaterNote(id, { deltekster: [...tekster] });
     }
     const medTale = tekster.filter((x) => x.trim());
@@ -59,6 +63,12 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       { tekster: medTale, titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet },
       bevis,
     );
+  }
+
+  /** Hvor langt afsendelsen er: sender, laver (referatet) eller mailer. Vises på skærmen efter Send. */
+  async function fremdrift(id, trin) {
+    await opdaterTrygt(id, { fremdrift: trin });
+    vedAendring(id);
   }
 
   async function eneAdgang(id, arbejde) {
@@ -80,13 +90,14 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
       }
       try {
-        await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined });
+        await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined, fremdrift: 'sender' });
+        vedAendring(id);
         const bevis = await login.hentBevis('api');
         const svar = (note.dele ?? 1) > 1
           ? await behandlDele(id, note, bevis)
           : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
             titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
-          });
+          }, undefined, { vedSendt: () => fremdrift(id, 'laver') });
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;
@@ -103,7 +114,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       const note = await lager.hentNote(id);
       if (!note || note.status !== STATUS.TEKST_KLAR) return;
       try {
-        await lager.opdaterNote(id, { status: STATUS.SENDER_MAIL, fejlType: undefined });
+        await lager.opdaterNote(id, { status: STATUS.SENDER_MAIL, fejlType: undefined, fremdrift: 'mailer' });
+        vedAendring(id);
         const bevis = await login.hentBevis('mail');
         await sendMail({ note, til: login.brugerMail(), bevis });
       } catch (e) {
