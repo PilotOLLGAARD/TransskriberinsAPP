@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'none'">
+  <meta name="theme-color" content="#f3f5f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Notifikationstest">
+  <title>Notifikationstest</title>
+  <!-- Midlertidig testside. Slettes igen, når testen er gennemført. -->
+  <link rel="manifest" href="notifikationstest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="notifikationstest.js"></script>
+</head>
+<body>
+  <main id="app">
+    <header class="top"><img class="ordmaerke" src="ordmaerke.svg" alt="ØLLGAARD"></header>
+    <h1 class="titel">Notifikationstest</h1>
+    <p class="undertitel">Midlertidig testside. Den optager ikke noget og sender intet.</p>
+    <ol class="trin">
+      <li>Læg siden på hjemmeskærmen, og åbn den derfra.</li>
+      <li>Tryk <strong>Tillad notifikationer</strong>, og sig ja.</li>
+      <li>Tryk <strong>Vis en prøve nu</strong>. Kommer der en notifikation?</li>
+      <li>Tryk <strong>Start test</strong>, og lås telefonen. Vent 10 sekunder.</li>
+      <li>Kom der en notifikation? Lås op, og åbn siden igen. Se loggen nederst.</li>
+    </ol>
+    <p id="status" class="besked ok" role="status"></p>
+    <div class="knapper">
+      <button id="tillad" type="button">Tillad notifikationer</button>
+      <button id="proeve" type="button" class="hvid">Vis en prøve nu</button>
+      <button id="start" type="button">Start test</button>
+      <button id="nulstil" type="button" class="hvid">Nulstil loggen</button>
+    </div>
+    <h2 class="sektion-titel">Log</h2>
+    <ol id="log" class="trin"></ol>
+  </main>
+</body>
+</html>
