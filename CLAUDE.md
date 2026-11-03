@@ -12,6 +12,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - En fremmed må aldrig kunne koste penge: adgangstjekket er det første, serveren gør på `POST /transskriber`, før lyden læses. Fejler lukket.
 - Alle ansatte i ØLLGAARDs tenant har adgang, gæster har ikke. Serveren kræver gyldig signatur, `iss` og `aud` (v1 eller v2), `exp`, `tid`, scope `access_as_user` og `acct = 0`. Mailadressen afgør aldrig adgang.
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
+- Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
 - Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i PDF'en.
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
@@ -27,10 +28,10 @@ iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | Fil | Ansvar |
 |---|---|
 | `server/src/adgang.js` | Tjek af Entra-bevis |
-| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF. Headere `x-titel`, `x-varighed`, `x-optaget` |
+| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF. Headere `x-titel`, `x-type`, `x-varighed`, `x-optaget`, `x-kun-tekst` (kun teksten). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
 | `server/src/gemini.js` | Upload, transskription og sletning hos Google |
 | `web/js/optager.js` | Optagelse, afbrydelser, varighed |
-| `web/js/forloeb.js` | Navngiv og send, genforsøg, genstart. Lyd slettes kun ved 202 |
+| `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, oprydning efter 7 dage. Lyd slettes kun ved 202 |
 | `web/js/app.js` | Kun brugerflade |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |
 

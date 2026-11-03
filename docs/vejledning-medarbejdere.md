@@ -16,7 +16,7 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 1. Log ind med din ØLLGAARD-konto.
 2. Vælg typen, og skriv evt. et navn, fx "Møde omkring SAS Lounge". Begge dele er valgfrie og kan også vælges efter optagelsen.
 3. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
-4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen eller skifter app, kan optagelsen stoppe. Det, du har indtalt indtil da, er gemt.
+4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele.
 5. Tryk på **Stop**.
 6. Ret navnet og typen, hvis du vil, og tryk **Send**. Er navnet tomt, finder appen selv på en titel.
 7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
@@ -37,7 +37,17 @@ Alle referater begynder med en kort opsummering. Afsnit uden indhold udelades. E
 
 Referatet laves af en AI ud fra det, du sagde. Det skriver "[uklart]", hvor noget ikke var til at forstå. Tjek altid vigtige tal og aftaler mod transskriptionen bagerst i PDF'en.
 
-Når mailen er sendt, slettes lyd og tekst fra telefonen. Mailen er din kopi.
+Når mailen er sendt, slettes lyden fra telefonen. Referatet og PDF'en bliver i 7 dage under **Tidligere optagelser**, så du kan trykke **Send referat igen**. Det sender den samme mail igen og koster ikke et nyt referat. Mailen er din kopi.
+
+## Tidligere optagelser
+
+Tryk **Tidligere optagelser** nederst på startskærmen. Du ser titel, type, dato, varighed og status for hver optagelse:
+
+| Status | Betyder | Slettes |
+|---|---|---|
+| Sendt | Mailen er sendt | Efter 7 dage. Der står, hvor mange dage der er tilbage |
+| Venter | Ikke sendt endnu | Aldrig af sig selv. Tryk Send igen eller Navngiv og send |
+| Fejlet | Noget gik galt | Aldrig af sig selv. Tryk Prøv igen |
 
 ## Hvis noget går galt
 
@@ -48,6 +58,8 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 | Ingen forbindelse | Vent, til du har net, og tryk på Prøv igen |
 | Du skal logge ind igen | Tryk på Log ind og prøv igen |
 | Appen må ikke bruge mikrofonen | Giv appen tilladelse i telefonens indstillinger |
+| Optagelsen blev afbrudt — det optagede er gemt | Tryk Fortsæt optagelsen for at optage videre, eller Send for at få referat af det, der er optaget |
+| Optagelsen kan ikke fortsættes mere | Send den, og start en ny. Grænsen er 59 minutter eller 20 dele |
 | Din konto har ikke adgang | Kontakt IT |
 | Transskriptionen mislykkedes | Tryk på Prøv igen. Navnet er gemt |
 | Mailen blev ikke sendt | Tryk på Send igen |

@@ -133,6 +133,16 @@ gcloud secrets versions add gemini-api-key --data-file=-
 
 Efter transskriptionen laver serveren et referat med Gemini 3.8 Flash og en PDF med ØLLGAARD-logo, skriften Lato og hele transskriptionen som bilag. Intet gemmes på serveren eller hos Google (`store: false`). Et referat koster ca. 2 øre for 5 minutters tale.
 
+En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til `POST /transskriber` med `x-kun-tekst: 1` og transskriberes for sig. Derefter laver `POST /referat` ét referat af delteksterne, samlet med "[Optagelsen blev afbrudt her]". Serveren gemmer heller ikke her noget.
+
+### Sletteregler
+
+| Data | Telefonen | Serveren og Google |
+|---|---|---|
+| Lyd | Slettes, når Microsoft har svaret 202, eller når brugeren vælger Slet | Gemmes ikke. Filen hos Google slettes efter transskription |
+| Tekst, referat og PDF | Bliver 7 dage efter første afsendelse (til "Send referat igen"), og slettes så, når appen åbnes | Gemmes ikke (`store: false`) |
+| Ikke sendt eller fejlet | Slettes aldrig automatisk | – |
+
 - Modellen kan skiftes med miljøvariablen `REFERAT_MODEL` på serveren, fx `gemini-3.5-flash-lite`.
 - Reglerne for referatet står i `server/src/referat.js`.
 - Prøv et referat og en PDF på din computer (koster penge, brug kun opdigtede tekster):
