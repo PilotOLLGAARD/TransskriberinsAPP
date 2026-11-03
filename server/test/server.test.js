@@ -91,3 +91,19 @@ test('h2c-klient kan sende 33 MiB', async () => {
     server.close();
   }
 });
+
+const { vedNedlukning } = require('../src/server.js');
+
+test('ved nedlukning slettes aktive filer, og processen afsluttes', async () => {
+  const haendelser = [];
+  await vedNedlukning({ gemini: { sletAktive: async () => { haendelser.push('slet'); } }, afslut: (k) => haendelser.push(`afslut ${k}`) });
+  assert.deepEqual(haendelser, ['slet', 'afslut 0']);
+});
+
+test('nedlukning afsluttes, selvom sletning hænger eller fejler', async () => {
+  const haendelser = [];
+  await vedNedlukning({ gemini: { sletAktive: () => new Promise(() => {}) }, afslut: (k) => haendelser.push(k), ventMs: 20 });
+  await vedNedlukning({ gemini: { sletAktive: async () => { throw new Error('x'); } }, afslut: (k) => haendelser.push(k) });
+  await vedNedlukning({ gemini: null, afslut: (k) => haendelser.push(k) });
+  assert.deepEqual(haendelser, [0, 0, 0]);
+});

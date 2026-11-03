@@ -73,11 +73,23 @@ function hentUdenGraense(url, { method, headers, body, signal }) {
   });
 }
 
-function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {} }) {
+/** Filens navn vælges her, så den kan slettes, selvom svaret på upload aldrig kommer frem. */
+function nytFilnavn() {
+  return `files/opt-${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+/**
+ * oprydning: { hvertMs, aeldreEndMs } sletter filer, som en afbrudt eller lukket server efterlod.
+ * Uden den er oprydning slået fra.
+ */
+function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, oprydning, nu = Date.now }) {
   const hentKald = hent || ((...a) => fetch(...a));
   const hentTransskription = hentLangsom || hent || hentUdenGraense;
+  // Filer, der er startet hos Google og ikke slettet endnu.
+  const aktive = new Set();
+  let sidsteOprydning = -Infinity;
 
-  async function upload(strom, bytes, mime, signal) {
+  async function upload(strom, bytes, mime, signal, navn, vedStart) {
     const start = await hentKald(`${BASE}/upload/v1beta/files`, {
       method: 'POST',
       signal,
@@ -89,9 +101,11 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
         'X-Goog-Upload-Header-Content-Type': mime,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ file: { display_name: 'optagelse' } }),
+      body: JSON.stringify({ file: { name: navn, display_name: 'optagelse' } }),
     });
     if (!start.ok) throw httpFejl(start.status, 'upload-start');
+    // Fra nu af kan filen findes hos Google, også hvis resten af upload går galt.
+    vedStart();
     const adresse = start.headers.get('x-goog-upload-url');
     if (!adresse) throw new GeminiFejl('tjeneste', 'upload-start: mangler adresse');
 
@@ -145,6 +159,8 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
         headers: { 'x-goog-api-key': noegle },
         signal: AbortSignal.timeout(SLET_TIMEOUT_MS),
       });
+      // 403 og 404: filen findes ikke (længere). Andre fejl prøves igen ved nedlukning og oprydning.
+      if (svar.ok || svar.status === 403 || svar.status === 404) aktive.delete(navn);
       if (!svar.ok) advar(`fil-ikke-slettet status ${svar.status}`);
     } catch (e) {
       // Filen udløber selv efter 48 timer. Fejl her må ikke vælte svaret.
@@ -152,22 +168,59 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
     }
   }
 
+  /** Sletter filer over aeldreEndMs, som denne eller en anden server har efterladt. */
+  async function rydGamle() {
+    let side = '';
+    do {
+      const url = new URL(`${BASE}/v1beta/files`);
+      url.searchParams.set('pageSize', '100');
+      if (side) url.searchParams.set('pageToken', side);
+      const svar = await hentKald(url, { headers: { 'x-goog-api-key': noegle }, signal: AbortSignal.timeout(SLET_TIMEOUT_MS) });
+      if (!svar.ok) throw new Error(`status ${svar.status}`);
+      const { files = [], nextPageToken } = await svar.json();
+      for (const fil of files) {
+        if (aktive.has(fil.name) || !(Date.parse(fil.createTime) < nu() - oprydning.aeldreEndMs)) continue;
+        await sletFil(fil.name);
+      }
+      side = nextPageToken || '';
+    } while (side);
+  }
+  rydGamle.igang = Promise.resolve();
+
+  function planlaegOprydning() {
+    if (!oprydning || nu() - sidsteOprydning < oprydning.hvertMs) return;
+    sidsteOprydning = nu();
+    // Kører, mens kaldet har CPU, og venter ikke på det.
+    rydGamle.igang = rydGamle().catch((e) => advar(`oprydning ${e && e.name}`));
+  }
+
   return {
     async transskriber(strom, { bytes, mime, signal }) {
+      planlaegOprydning();
       const type = geminiMime(mime);
       const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
-      let fil;
+      const navn = nytFilnavn();
+      const navne = new Set();
       try {
-        fil = await upload(strom, bytes, type, samlet);
+        const fil = await upload(strom, bytes, type, samlet, navn, () => { navne.add(navn); aktive.add(navn); });
+        // Google bør bruge vores navn. Gør den ikke, slettes begge.
+        if (fil.name !== navn) { navne.add(fil.name); aktive.add(fil.name); }
         return { tekst: await transskriberFil(fil, type, samlet) };
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.
         throw new GeminiFejl('tjeneste', `netværk ${e && e.name}`);
       } finally {
-        if (fil) await sletFil(fil.name);
+        for (const n of navne) await sletFil(n);
       }
     },
+
+    /** Ved nedlukning: slet filer, der stadig er i gang. */
+    async sletAktive() {
+      await Promise.all([...aktive].map(sletFil));
+    },
+
+    rydGamle,
   };
 }
 

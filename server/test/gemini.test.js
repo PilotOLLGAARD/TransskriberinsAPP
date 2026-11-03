@@ -13,19 +13,23 @@ function json(status, krop, headers = {}) {
 }
 
 // Falsk Google. `interaktion` afgør svaret på transskriptionen.
-function falskHent({ interaktion = () => json(200, SVAR_OK), startSvar } = {}) {
+function falskHent({ interaktion = () => json(200, SVAR_OK), startSvar, uploadSvar, filer = [] } = {}) {
   const kald = [];
+  let navn = FIL.name;
   const hent = async (url, valg = {}) => {
     const s = String(url);
     kald.push({ url: s, metode: valg.method, headers: valg.headers || {}, krop: valg.body, duplex: valg.duplex });
     if (s.endsWith('/upload/v1beta/files')) {
+      navn = JSON.parse(valg.body).file?.name || FIL.name;
       if (startSvar) return startSvar();
       return new Response('{}', { status: 200, headers: { 'x-goog-upload-url': 'https://upload.example/u1' } });
     }
     if (s === 'https://upload.example/u1') {
       for await (const _ of valg.body) { /* læs strømmen */ }
-      return json(200, { file: FIL });
+      if (uploadSvar) return uploadSvar(valg);
+      return json(200, { file: { name: navn, uri: `https://generativelanguage.googleapis.com/v1beta/${navn}` } });
     }
+    if (s.includes('/v1beta/files?') && (valg.method || 'GET') === 'GET') return json(200, { files: filer });
     if (s.endsWith('/v1beta/interactions')) return interaktion(valg);
     if (valg.method === 'DELETE') return new Response('{}', { status: 200 });
     throw new Error(`Uventet kald: ${s}`);
@@ -100,7 +104,7 @@ test('upload bruger strøm og oplyst længde', async () => {
   assert.equal(kald[1].headers['X-Goog-Upload-Command'], 'upload, finalize');
   assert.equal(kald[1].headers['X-Goog-Upload-Offset'], '0');
   assert.equal(kald[1].duplex, 'half');
-  assert.equal(interaktionsKrop(kald).input[0].uri, FIL.uri);
+  assert.equal(interaktionsKrop(kald).input[0].uri, `https://generativelanguage.googleapis.com/v1beta/${startNavn(kald)}`);
 });
 
 test('nøglen sendes som header og aldrig i adressen', async () => {
@@ -130,11 +134,13 @@ test('læser også output_text og outputs', async () => {
   assert.equal((await lav(b.hent).transskriber(lyd(), valg())).tekst, 'Hej2');
 });
 
+const startNavn = (kald) => JSON.parse(kald.find((k) => k.url.endsWith('/upload/v1beta/files')).krop).file.name;
+
 test('sletter fil efter succes', async () => {
   const { hent, kald } = falskHent();
   await lav(hent).transskriber(lyd(), valg());
   const slet = kald.find((k) => k.metode === 'DELETE');
-  assert.ok(slet.url.endsWith('/v1beta/files/abc'));
+  assert.ok(slet.url.endsWith(`/v1beta/${startNavn(kald)}`));
 });
 
 test('sletter fil efter fejl', async () => {
@@ -309,4 +315,88 @@ test('nøglen indgår aldrig i en fejlbesked', async () => {
     assert.ok(!e.message.includes(NOEGLE));
     return e instanceof GeminiFejl && e.kode === 'tjeneste';
   });
+});
+
+// Filen slettes i alle tilfælde
+
+test('filen får et nyt navn, vi selv vælger, før upload', async () => {
+  const a = falskHent();
+  const g = lav(a.hent);
+  await g.transskriber(lyd(), valg());
+  await g.transskriber(lyd(), valg());
+  const navne = a.kald.filter((k) => k.url.endsWith('/upload/v1beta/files')).map((k) => JSON.parse(k.krop).file.name);
+  for (const n of navne) assert.match(n, /^files\/opt-[0-9a-f]{32}$/);
+  assert.notEqual(navne[0], navne[1]);
+});
+
+test('filen slettes, selvom svaret på upload aldrig kommer', async () => {
+  const { hent, kald } = falskHent({ uploadSvar: () => { throw new TypeError('forbindelsen røg'); } });
+  await assert.rejects(lav(hent).transskriber(lyd(), valg()), GeminiFejl);
+  const slet = kald.filter((k) => k.metode === 'DELETE');
+  assert.equal(slet.length, 1);
+  assert.ok(slet[0].url.endsWith(`/v1beta/${startNavn(kald)}`));
+});
+
+test('intet slettes, hvis upload aldrig blev startet', async () => {
+  const { hent, kald } = falskHent({ startSvar: () => json(500, {}) });
+  await assert.rejects(lav(hent).transskriber(lyd(), valg()), GeminiFejl);
+  assert.equal(kald.filter((k) => k.metode === 'DELETE').length, 0);
+});
+
+test('sletAktive sletter filer, der stadig er i gang, ved nedlukning', async () => {
+  const { hent, kald } = falskHent({ interaktion: () => new Promise(() => {}) });
+  const g = lav(hent, { timeoutMs: 60000 });
+  g.transskriber(lyd(), valg()).catch(() => {});
+  for (let i = 0; i < 50 && !kald.some((k) => k.url.endsWith('/v1beta/interactions')); i++) await new Promise((ok) => setTimeout(ok, 1));
+  await g.sletAktive();
+  const slet = kald.filter((k) => k.metode === 'DELETE');
+  assert.equal(slet.length, 1);
+  assert.ok(slet[0].url.endsWith(`/v1beta/${startNavn(kald)}`));
+});
+
+test('sletAktive uden noget i gang gør intet', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent).sletAktive();
+  assert.equal(kald.length, 0);
+});
+
+const MIN = 60 * 1000;
+
+test('oprydning sletter filer over 20 minutter, højst hvert 10. minut', async () => {
+  let tid = Date.UTC(2026, 10, 3, 12);
+  const filer = [
+    { name: 'files/gammel', createTime: new Date(tid - 25 * MIN).toISOString() },
+    { name: 'files/ny', createTime: new Date(tid - 5 * MIN).toISOString() },
+  ];
+  const { hent, kald } = falskHent({ filer });
+  const g = lav(hent, { nu: () => tid, oprydning: { hvertMs: 10 * MIN, aeldreEndMs: 20 * MIN } });
+  await g.transskriber(lyd(), valg());
+  await g.rydGamle.igang;
+  await g.transskriber(lyd(), valg());
+  await g.rydGamle.igang;
+  const lister = () => kald.filter((k) => k.url.includes('/v1beta/files?')).length;
+  assert.equal(lister(), 1);
+  assert.ok(kald.some((k) => k.metode === 'DELETE' && k.url.endsWith('/v1beta/files/gammel')));
+  assert.ok(!kald.some((k) => k.metode === 'DELETE' && k.url.endsWith('/v1beta/files/ny')));
+  tid += 11 * MIN;
+  await g.transskriber(lyd(), valg());
+  await g.rydGamle.igang;
+  assert.equal(lister(), 2);
+  for (const k of kald.filter((x) => x.url.includes('/v1beta/files?'))) assert.equal(k.headers['x-goog-api-key'], NOEGLE);
+});
+
+test('oprydning er slået fra uden indstilling, og en fejl vælter ikke transskriptionen', async () => {
+  const a = falskHent();
+  await lav(a.hent).transskriber(lyd(), valg());
+  assert.ok(!a.kald.some((k) => k.url.includes('/v1beta/files?')));
+  const advarsler = [];
+  const b = falskHent();
+  const medFejl = async (url, v = {}) => {
+    if (String(url).includes('/v1beta/files?')) throw new Error('nede');
+    return b.hent(url, v);
+  };
+  const g = lav(medFejl, { oprydning: { hvertMs: 10 * MIN, aeldreEndMs: 20 * MIN }, advar: (x) => advarsler.push(x) });
+  assert.equal((await g.transskriber(lyd(), valg())).tekst, 'Hej');
+  await g.rydGamle.igang;
+  assert.ok(advarsler.some((x) => x.startsWith('oprydning')));
 });
