@@ -104,6 +104,25 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, aktivAndetSted = a
       }
     }),
 
+    /**
+     * Sender en sendt notes referat og PDF igen fra telefonen. Intet AI-kald og intet kald til serveren.
+     * sendt ændres ikke, så de 7 dage regnes fra første afsendelse.
+     */
+    sendIgen: (id) => eneAdgang(id, async () => {
+      const note = await lager.hentNote(id);
+      if (note?.status !== STATUS.SENDT || !note.pdf) return;
+      try {
+        const bevis = await login.hentBevis('mail');
+        await sendMail({ note, til: login.brugerMail(), bevis });
+      } catch (e) {
+        // Mailen kan være sendt. Brugeren tjekker indbakken i stedet for at få en dobbelt mail.
+        if (e?.type === 'mailUkendt') await opdaterTrygt(id, { maaskeSendt: true });
+        else await opdaterTrygt(id, { fejlType: e?.type === 'login' ? 'login' : 'mailFejl' });
+        return;
+      }
+      await opdaterTrygt(id, { sendtIgen: nu(), fejlType: undefined, maaskeSendt: undefined });
+    }),
+
     /** Laver referatet, hvis det mangler, og sender det derefter selv. Bruges også af Prøv igen. */
     async behandlOgSend(id) {
       await forloeb.behandl(id);

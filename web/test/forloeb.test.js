@@ -493,3 +493,65 @@ test('genoptag rydder op og viser sendte noter', async () => {
   assert.deepEqual(noter.map((n) => n.id), ['ny']);
   assert.equal(s.lager.kort.has('gammel'), false);
 });
+
+// Send referat igen
+
+const SENDT_NOTE = { id: 'a', status: STATUS.SENDT, sendt: 1000, tekst: 'T', referat: { opsummering: 'O' }, pdf: 'JVBERg==', emne: 'Møde: X – 3. nov. 2026', html: '<p>x</p>', oprettet: 1 };
+
+test('send igen bruger den gemte pdf og laver intet kald til serveren', async () => {
+  const s = opsaet({ noter: [SENDT_NOTE], nu: () => 5000 });
+  await s.forloeb.sendIgen('a');
+  assert.equal(s.t.lydKald, 0);
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.t.mailKald[0].note.pdf, 'JVBERg==');
+  assert.equal(s.t.mailKald[0].note.emne, 'Møde: X – 3. nov. 2026');
+  assert.equal(s.t.mailKald[0].bevis, 'bevis-mail');
+});
+
+test('send igen ændrer ikke sendt, men gemmer sendtIgen', async () => {
+  const s = opsaet({ noter: [SENDT_NOTE], nu: () => 5000 });
+  await s.forloeb.sendIgen('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(n.sendt, 1000);
+  assert.equal(n.sendtIgen, 5000);
+});
+
+test('send igen med ukendt udfald giver måske sendt og sender ikke selv igen', async () => {
+  const s = opsaet({ noter: [SENDT_NOTE], sendMail: fejl('mailUkendt') });
+  await s.forloeb.sendIgen('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(n.maaskeSendt, true);
+  assert.equal(s.t.mailKald.length, 1);
+});
+
+test('send igen med udløbet login giver login, og andre fejl giver mailFejl', async () => {
+  const a = opsaet({ noter: [SENDT_NOTE], sendMail: fejl('login') });
+  await a.forloeb.sendIgen('a');
+  assert.equal(a.lager.kort.get('a').fejlType, 'login');
+  const b = opsaet({ noter: [SENDT_NOTE], sendMail: fejl('mailFejl') });
+  await b.forloeb.sendIgen('a');
+  assert.equal(b.lager.kort.get('a').fejlType, 'mailFejl');
+  assert.equal(b.lager.kort.get('a').status, STATUS.SENDT);
+});
+
+test('vellykket send igen fjerner en tidligere fejl', async () => {
+  const s = opsaet({ noter: [{ ...SENDT_NOTE, fejlType: 'mailFejl', maaskeSendt: true }] });
+  await s.forloeb.sendIgen('a');
+  assert.equal(s.lager.kort.get('a').fejlType, undefined);
+  assert.equal(s.lager.kort.get('a').maaskeSendt, undefined);
+});
+
+test('to tryk på send igen giver én mail', async () => {
+  const s = opsaet({ noter: [SENDT_NOTE] });
+  await Promise.all([s.forloeb.sendIgen('a'), s.forloeb.sendIgen('a')]);
+  assert.equal(s.t.mailKald.length, 1);
+});
+
+test('send igen virker kun på sendte noter med pdf', async () => {
+  const s = opsaet({ noter: [{ ...KLAR }, { ...SENDT_NOTE, id: 'b', pdf: undefined }] });
+  await s.forloeb.sendIgen('a');
+  await s.forloeb.sendIgen('b');
+  assert.equal(s.t.mailKald.length, 0);
+});
