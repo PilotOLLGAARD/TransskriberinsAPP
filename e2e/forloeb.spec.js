@@ -869,3 +869,63 @@ test('skjult app uden noget i gang giver ingen notifikation', async () => {
   assert.deepEqual(await side.evaluate(() => window.vist), []);
   await kontekst.close();
 });
+
+// Notifikation, når optagelsen stopper i baggrunden, uanset hvilket signal der kommer først
+
+const STOPPET_NY = 'Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager.';
+
+async function gemStream(side) {
+  await side.addInitScript(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (krav) => { window.testStream = await original(krav); return window.testStream; };
+  });
+}
+
+async function startOptagelse(side) {
+  await logInd(side);
+  await side.evaluate(() => navigator.serviceWorker.ready);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+}
+
+const mute = (side) => side.evaluate(() => window.testStream.getAudioTracks()[0].dispatchEvent(new Event('mute')));
+
+test('mikrofonen stopper før appen skjules: én notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await gemStream(side);
+  await startOptagelse(side);
+  await mute(side);
+  await side.waitForTimeout(100);
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 5000 });
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), [STOPPET_NY]);
+  await kontekst.close();
+});
+
+test('appen skjules før mikrofonen stopper: én notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await gemStream(side);
+  await startOptagelse(side);
+  await skjul(side);
+  await mute(side);
+  await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 5000 });
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), [STOPPET_NY]);
+  await kontekst.close();
+});
+
+test('stop med knappen og skjul bagefter: ingen notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await startOptagelse(side);
+  await knap(side, 'Stop').click();
+  await side.getByLabel(FELT).waitFor();
+  await skjul(side);
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), []);
+  await kontekst.close();
+});

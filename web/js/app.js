@@ -347,6 +347,10 @@ const AFSLUT_BESKEDER = {
 
 optager.naarAfsluttet(({ id, grund }) => {
   clearInterval(urTimer);
+  if (grund === 'afbrudt') {
+    sidstAfbrudt = { id, tid: Date.now() };
+    if (document.visibilityState === 'hidden') advarStoppet(id);
+  }
   t.visning = 'start';
   if (AFSLUT_BESKEDER[grund]) visFejl(AFSLUT_BESKEDER[grund]);
   if (grund === 'tom' || grund === 'pladsTom') {
@@ -841,9 +845,28 @@ async function optagelserAndetSted() {
 
 // Telefonen kan stoppe appen i baggrunden. Så bliver referatet først færdigt, når appen åbnes igen.
 const IKKE_SENDT = 'Referatet er ikke sendt endnu — åbn appen igen, så det kan blive færdigt.';
+// På iPhone tager telefonen mikrofonen, før appen meldes skjult. Derfor regnes en afbrydelse lige før med.
+const STOPPET = 'Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager.';
+const STOPPET_VINDUE_MS = 10 * 1000;
+const advaretOm = new Set();
+let sidstAfbrudt = null; // { id, tid }
+
+function advarStoppet(id) {
+  if (!id || advaretOm.has(id)) return;
+  advaretOm.add(id);
+  visAdvarsel(STOPPET);
+}
+
 document.addEventListener('visibilitychange', () => {
-  // En optagelse, der stoppes, giver sin egen besked fra optageren.
-  if (document.visibilityState !== 'hidden' || optager.erAktiv()) return;
+  if (document.visibilityState !== 'hidden') return;
+  if (optager.erAktiv()) {
+    advarStoppet(optager.aktivId());
+    return;
+  }
+  if (sidstAfbrudt && Date.now() - sidstAfbrudt.tid < STOPPET_VINDUE_MS) {
+    advarStoppet(sidstAfbrudt.id);
+    return;
+  }
   const igang = t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
   if (igang) visAdvarsel(IKKE_SENDT);
 });

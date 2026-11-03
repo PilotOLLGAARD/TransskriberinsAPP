@@ -73,7 +73,6 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
     laase: 0,
     frigivet: 0,
     haendelser: [],
-    notifikationer: [],
   };
   const dokument = new EventTarget();
   dokument.visibilityState = 'visible';
@@ -84,7 +83,6 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
       return { getTracks: () => [spor] };
     },
     lavRecorder: (stream, valg) => { tilstand.recorder = new FalskRecorder(stream, valg); return tilstand.recorder; },
-    advar: (tekst) => tilstand.notifikationer.push(tekst),
     laas: async (navn) => {
       tilstand.haendelser.push(['laas', navn]);
       return () => tilstand.haendelser.push(['frigiv', navn]);
@@ -602,28 +600,6 @@ test('to optagere, der fortsætter samme note samtidig, overskriver ikke hinande
 // Notifikation, når optagelsen stopper, fordi appen skjules
 
 const STOPPET = 'Optagelsen er stoppet — hold appen åben, mens du optager.';
-
-test('skjult app under optagelse viser notifikationen', async () => {
-  const s = opsaet();
-  await s.optager.start();
-  s.tilstand.recorder.send('a');
-  s.dokument.visibilityState = 'hidden';
-  s.dokument.dispatchEvent(new Event('visibilitychange'));
-  await s.venTilAfsluttet();
-  assert.deepEqual(s.tilstand.notifikationer, [STOPPET]);
-});
-
-test('stop og andre afbrydelser viser ingen notifikation', async () => {
-  const s = opsaet();
-  await s.optager.start();
-  s.tilstand.recorder.send('a');
-  await s.optager.stop();
-  const t = opsaet();
-  await t.optager.start();
-  t.spor.dispatchEvent(new Event('mute'));
-  await t.venTilAfsluttet();
-  assert.deepEqual([...s.tilstand.notifikationer, ...t.tilstand.notifikationer], []);
-});
 
 test('visAdvarsel viser kun notifikationen med tilladelse og via service workeren', async () => {
   const vist = [];

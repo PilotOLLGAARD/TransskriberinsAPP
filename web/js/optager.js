@@ -26,9 +26,6 @@ export class OptageFejl extends Error {
   }
 }
 
-// Vises, når telefonen låses eller man skifter app under optagelse. Set virke på iPhone fra hjemmeskærmen.
-const STOPPET = 'Optagelsen er stoppet — hold appen åben, mens du optager.';
-
 /** Viser en notifikation via service workeren, hvis brugeren har givet lov. Giver true, hvis den blev vist. */
 export async function visAdvarsel(tekst, { notifikation = globalThis.Notification, serviceWorker = globalThis.navigator?.serviceWorker } = {}) {
   if (notifikation?.permission !== 'granted') return false;
@@ -63,7 +60,6 @@ export function browserMedier() {
     lavRecorder: (stream, valg) => new MediaRecorder(stream, valg),
     erUnderstoettet: (mime) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime),
     skaermlaas: () => navigator.wakeLock.request('screen'),
-    advar: (tekst) => visAdvarsel(tekst),
     /** Giver en funktion, der frigiver låsen, når den er taget. Uden Web Locks gives null. */
     laas: (navn) => new Promise((tildelt) => {
       if (!navigator.locks?.request) { tildelt(null); return; }
@@ -319,7 +315,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
           tagSkaermlaas(o);
           return;
         }
-        if (!o.afslutter) medier.advar?.(STOPPET);
+        // Notifikationen vises af appen, som også ser afbrydelser, der kommer før dette signal.
         afslut(o, 'afbrudt');
       };
       medier.dokument.addEventListener('visibilitychange', o.vedSynlighed);
