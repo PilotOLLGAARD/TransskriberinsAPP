@@ -826,3 +826,44 @@ test('Tidligere optagelser kan ses øverst uden at rulle, også med forklaringen
   assert.ok(r.x + r.width <= 360);
   await kontekst.close();
 });
+
+// Notifikation, hvis appen skjules, mens referatet laves eller sendes
+
+const IKKE_SENDT = 'Referatet er ikke sendt endnu — åbn appen igen, så det kan blive færdigt.';
+
+/** Giver lov til notifikationer og gemmer dem, appen viser, i window.vist. */
+async function fangNotifikationer(side) {
+  await side.addInitScript(() => {
+    window.vist = [];
+    Object.defineProperty(window, 'Notification', { value: { permission: 'granted', requestPermission: async () => 'granted' }, configurable: true });
+    ServiceWorkerRegistration.prototype.showNotification = async function (titel, valg) { window.vist.push(valg.body); };
+  });
+}
+
+test('skjult app, mens referatet laves, giver en notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await side.evaluate(() => navigator.serviceWorker.ready);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Langsom' });
+  await vis(side, 'Laver referat');
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 5000 });
+  assert.deepEqual(await side.evaluate(() => window.vist), [IKKE_SENDT]);
+  await synlig(side);
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
+test('skjult app uden noget i gang giver ingen notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await optag(side, { titel: 'Færdig' });
+  await vis(side, SENDT);
+  await skjul(side);
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), []);
+  await kontekst.close();
+});

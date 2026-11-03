@@ -6,7 +6,7 @@ import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { sendMail } from './mail.js';
-import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager } from './optager.js';
+import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
 import { STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
 import { STANDARD_TYPE, TYPER } from './typer.js';
@@ -838,6 +838,15 @@ async function optagelserAndetSted() {
     return null;
   }
 }
+
+// Telefonen kan stoppe appen i baggrunden. Så bliver referatet først færdigt, når appen åbnes igen.
+const IKKE_SENDT = 'Referatet er ikke sendt endnu — åbn appen igen, så det kan blive færdigt.';
+document.addEventListener('visibilitychange', () => {
+  // En optagelse, der stoppes, giver sin egen besked fra optageren.
+  if (document.visibilityState !== 'hidden' || optager.erAktiv()) return;
+  const igang = t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
+  if (igang) visAdvarsel(IKKE_SENDT);
+});
 
 async function start() {
   await login.init().catch(() => {});
