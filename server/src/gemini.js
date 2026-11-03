@@ -85,8 +85,10 @@ function nytFilnavn() {
 function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, oprydning, nu = Date.now }) {
   const hentKald = hent || ((...a) => fetch(...a));
   const hentTransskription = hentLangsom || hent || hentUdenGraense;
-  // Filer, der er startet hos Google og ikke slettet endnu.
+  // Filer, der er startet hos Google og ikke slettet endnu. Prøves igen ved nedlukning og oprydning.
   const aktive = new Set();
+  // Filer, et kald på denne server bruger lige nu. Kun dem springer oprydningen over.
+  const iBrug = new Set();
   let sidsteOprydning = -Infinity;
 
   async function upload(strom, bytes, mime, signal, navn, vedStart) {
@@ -179,7 +181,7 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
       if (!svar.ok) throw new Error(`status ${svar.status}`);
       const { files = [], nextPageToken } = await svar.json();
       for (const fil of files) {
-        if (aktive.has(fil.name) || !(Date.parse(fil.createTime) < nu() - oprydning.aeldreEndMs)) continue;
+        if (iBrug.has(fil.name) || !(Date.parse(fil.createTime) < nu() - oprydning.aeldreEndMs)) continue;
         await sletFil(fil.name);
       }
       side = nextPageToken || '';
@@ -202,16 +204,20 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
       const navn = nytFilnavn();
       const navne = new Set();
       try {
-        const fil = await upload(strom, bytes, type, samlet, navn, () => { navne.add(navn); aktive.add(navn); });
+        const husk = (n) => { navne.add(n); aktive.add(n); iBrug.add(n); };
+        const fil = await upload(strom, bytes, type, samlet, navn, () => husk(navn));
         // Google bør bruge vores navn. Gør den ikke, slettes begge.
-        if (fil.name !== navn) { navne.add(fil.name); aktive.add(fil.name); }
+        if (fil.name !== navn) husk(fil.name);
         return { tekst: await transskriberFil(fil, type, samlet) };
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.
         throw new GeminiFejl('tjeneste', `netværk ${e && e.name}`);
       } finally {
-        for (const n of navne) await sletFil(n);
+        for (const n of navne) {
+          await sletFil(n);
+          iBrug.delete(n);
+        }
       }
     },
 

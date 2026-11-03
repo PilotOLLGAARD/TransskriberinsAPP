@@ -400,3 +400,28 @@ test('oprydning er slået fra uden indstilling, og en fejl vælter ikke transskr
   await g.rydGamle.igang;
   assert.ok(advarsler.some((x) => x.startsWith('oprydning')));
 });
+
+test('en sletning, der fejler, prøves igen af oprydningen på samme server', async () => {
+  let tid = Date.UTC(2026, 10, 3, 12);
+  const filer = [];
+  const a = falskHent({ filer });
+  let foersteSletning = true;
+  const hent = async (url, v = {}) => {
+    if (v.method === 'DELETE' && foersteSletning) {
+      foersteSletning = false;
+      a.kald.push({ url: String(url), metode: 'DELETE', headers: v.headers || {} });
+      return json(500, {});
+    }
+    return a.hent(url, v);
+  };
+  const g = lav(hent, { nu: () => tid, oprydning: { hvertMs: 10 * MIN, aeldreEndMs: 20 * MIN } });
+  await g.transskriber(lyd(), valg());
+  await g.rydGamle.igang;
+  const navn = startNavn(a.kald);
+  filer.push({ name: navn, createTime: new Date(tid).toISOString() });
+  tid += 25 * MIN;
+  await g.transskriber(lyd(), valg());
+  await g.rydGamle.igang;
+  const sletninger = a.kald.filter((k) => k.metode === 'DELETE' && k.url.endsWith(`/v1beta/${navn}`));
+  assert.equal(sletninger.length, 2);
+});
