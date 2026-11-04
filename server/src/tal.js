@@ -238,4 +238,5 @@ function kontrollerTal(referat, kilde, { brugerTitel = '' } = {}) {
   return { referat: ud, rettet: taeller.n };
 }
 
-module.exports = { talIKilde, kontrollerTal, UKLART };
+// scanTalord, CIFRE, erEksponent og cifreSagt bruges også af testbænken (scripts/testbaenk/maal.js).
+module.exports = { talIKilde, kontrollerTal, UKLART, scanTalord, CIFRE, erEksponent, cifreSagt };
