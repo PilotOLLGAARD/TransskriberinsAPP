@@ -27,8 +27,18 @@ class NetFejl extends Error {
 const HAR_VAERET_LOGGET_IND = 'harVaeretLoggetInd';
 const SIDSTE_BRUGER = 'sidsteBruger';
 const SIDST_FORNYET = 'sidstForsoegtFornyelse';
+// Sat, når Microsoft svarede uden login, eller efter Log ud. Så fornyes der ikke, før man selv logger ind.
+const FORNY_IKKE = 'fornyIkke';
+// Efter Log ud skal næste login lade brugeren vælge konto.
+const VAELG_KONTO = 'vaelgKonto';
 // Fornyelse uden tryk forsøges højst så ofte, så appen aldrig sender brugeren i ring.
 const FORNY_MS = 10 * 60 * 1000;
+// Så længe må tjekket af nettet tage, før appen opgiver at forny.
+const NET_MS = 4000;
+// Er siden ikke skiftet til Microsoft efter så lang tid, opgives og stoppes skiftet.
+const SKIFT_MS = 10 * 1000;
+// Et svar fra Microsoft så kort efter et forsøg på at forny regnes som svaret på det.
+const SVAR_MS = 2 * 60 * 1000;
 
 /** Om man kan sende lige nu: 'ja', 'nej' (login kræves) eller 'ukendt' (intet net). */
 async function tjek(hentBevis) {
@@ -40,8 +50,15 @@ async function tjek(hentBevis) {
   }
 }
 
-export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.localStorage, nu = Date.now }) {
+export function lavLogin({
+  msal, entra, redirectUri,
+  hukommelse = globalThis.localStorage,
+  nu = Date.now,
+  hent = (...a) => globalThis.fetch(...a),
+  stopSide = () => globalThis.stop?.(),
+}) {
   const apiScope = `api://${entra.clientId}/access_as_user`;
+  const authority = `https://login.microsoftonline.com/${entra.tenantId}`;
   let app;
 
   // MSAL krypterer sit lager med en sessions-cookie, så kontoen kan være væk, efter telefonen har lukket appen.
@@ -58,24 +75,32 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
       app = new msal.PublicClientApplication({
         auth: {
           clientId: entra.clientId,
-          authority: `https://login.microsoftonline.com/${entra.tenantId}`,
+          authority,
           redirectUri,
           navigateToLoginRequestUrl: false,
         },
         cache: { cacheLocation: 'localStorage' },
+        system: { redirectNavigationTimeout: SKIFT_MS },
       });
       await app.initialize();
+      let afvist = false;
       try {
         // Efter et nyt login er det den konto, der skal bruges, også hvis en gammel ligger i lageret.
         const svar = await app.handleRedirectPromise();
         if (svar?.account) app.setActiveAccount(svar.account);
       } catch {
         // Et mislykket login må ikke forhindre appen i at starte. Optagelser skal kunne nås.
+        afvist = true;
       }
       const k = konto();
       if (k) {
         hukommelse.setItem(HAR_VAERET_LOGGET_IND, '1');
         if (k.username) hukommelse.setItem(SIDSTE_BRUGER, k.username);
+        hukommelse.removeItem(FORNY_IKKE);
+        hukommelse.removeItem(VAELG_KONTO);
+      } else if (afvist && nu() - Number(hukommelse.getItem(SIDST_FORNYET) || 0) < SVAR_MS) {
+        // Microsoft kunne ikke forny uden tryk. Så skiftes der ikke igen ved hver åbning.
+        hukommelse.setItem(FORNY_IKKE, '1');
       }
     },
 
@@ -104,7 +129,9 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
     },
 
     logInd() {
-      return app.loginRedirect({ scopes: [apiScope], extraScopesToConsent: [MAIL_SCOPE] });
+      const valg = { scopes: [apiScope], extraScopesToConsent: [MAIL_SCOPE] };
+      if (hukommelse.getItem(VAELG_KONTO)) valg.prompt = 'select_account';
+      return app.loginRedirect(valg);
     },
 
     tjekLogin() {
@@ -113,25 +140,44 @@ export function lavLogin({ msal, entra, redirectUri, hukommelse = globalThis.loc
 
     /**
      * Fornyer login uden tryk: et hurtigt skift til Microsoft og tilbage (prompt none).
-     * Lykkes det ikke (ingen session hos Microsoft), kommer appen tilbage uden login.
-     * Højst én gang pr. FORNY_MS. Giver false, hvis der ikke blev forsøgt.
+     * Lykkes skiftet, forlades siden, og funktionen vender aldrig tilbage. Vender den tilbage, blev der ikke fornyet.
+     * maaNavigere spørges lige før siden skifter. Er appen gået i gang med noget, skifter den ikke.
      */
-    async fornyStille() {
-      if (nu() - Number(hukommelse.getItem(SIDST_FORNYET) || 0) < FORNY_MS) return false;
-      hukommelse.setItem(SIDST_FORNYET, String(nu()));
+    async fornyStille(maaNavigere = () => true) {
+      if (hukommelse.getItem(FORNY_IKKE)) return;
+      if (nu() - Number(hukommelse.getItem(SIDST_FORNYET) || 0) < FORNY_MS) return;
+      // Kun med net, der virker. Ellers står appen på en fejlside hos Microsoft i stedet for i appen.
       try {
-        await app.acquireTokenRedirect({ scopes: [apiScope], prompt: 'none', loginHint: hukommelse.getItem(SIDSTE_BRUGER) || undefined });
-        return true;
+        const svar = await hent(`${authority}/v2.0/.well-known/openid-configuration`, { cache: 'no-store', signal: AbortSignal.timeout(NET_MS) });
+        if (!svar?.ok) return;
       } catch {
-        return false;
+        return;
       }
+      if (!maaNavigere()) return;
+      hukommelse.setItem(SIDST_FORNYET, String(nu()));
+      let skifter = false;
+      try {
+        await app.acquireTokenRedirect({
+          scopes: [apiScope],
+          prompt: 'none',
+          loginHint: hukommelse.getItem(SIDSTE_BRUGER) || undefined,
+          onRedirectNavigate: () => (skifter = maaNavigere()),
+        });
+      } catch {
+        // Fx failed_to_redirect, når siden ikke er skiftet efter SKIFT_MS.
+      }
+      // Er appen her stadig, blev skiftet ikke til noget. Et skift, der stadig venter, stoppes,
+      // så det ikke kan afbryde en optagelse senere.
+      if (skifter) stopSide();
     },
 
-    /** Logger kun ud af appen. Optagelser på telefonen bliver liggende. */
+    /** Logger kun ud af appen. Optagelser på telefonen bliver liggende. Appen logger ikke selv ind igen. */
     async logUd() {
       await app.clearCache();
       hukommelse.removeItem(HAR_VAERET_LOGGET_IND);
       hukommelse.removeItem(SIDSTE_BRUGER);
+      hukommelse.setItem(FORNY_IKKE, '1');
+      hukommelse.setItem(VAELG_KONTO, '1');
     },
   };
 }
@@ -154,6 +200,7 @@ export function lavLokalLogin() {
       }
     },
     async logInd() {
+      localStorage.removeItem('testFornyIkke');
       localStorage.setItem('testKonto', '1');
       localStorage.setItem('testTidligere', '1');
       // Efterligner sessionen hos Microsoft, som fornyelse uden tryk bruger.
@@ -164,19 +211,28 @@ export function lavLokalLogin() {
     tjekLogin() {
       return tjek((o) => this.hentBevis(o));
     },
-    async fornyStille() {
-      if (Date.now() - Number(localStorage.getItem('testFornyet') || 0) < FORNY_MS) return false;
+    async fornyStille(maaNavigere = () => true) {
+      if (localStorage.getItem('testFornyIkke')) return;
+      if (Date.now() - Number(localStorage.getItem('testFornyet') || 0) < FORNY_MS) return;
+      // Efterligner tiden, før siden skifter til Microsoft.
+      await new Promise((r) => setTimeout(r, Number(localStorage.getItem('testFornyVent') || 0)));
+      if (!maaNavigere()) return;
       localStorage.setItem('testFornyet', String(Date.now()));
       localStorage.setItem('testFornyelser', String(Number(localStorage.getItem('testFornyelser') || 0) + 1));
-      if (!localStorage.getItem('testSession')) return false;
+      // Uden session svarer Microsoft uden login, og der fornyes ikke igen før næste login.
+      if (!localStorage.getItem('testSession')) {
+        localStorage.setItem('testFornyIkke', '1');
+        return;
+      }
       localStorage.setItem('testKonto', '1');
       location.reload();
-      return true;
+      await new Promise(() => {});
     },
     // Som hos Microsoft: sessionen dér bliver, når man logger ud af appen.
     async logUd() {
       localStorage.removeItem('testKonto');
       localStorage.removeItem('testTidligere');
+      localStorage.setItem('testFornyIkke', '1');
     },
   };
 }

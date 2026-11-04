@@ -63,6 +63,7 @@ const t = {
   advarsel: false,
   starter: false,
   loginStatus: null, // 'ja' | 'nej' | null (ukendt). Login-boksen vises kun ved 'nej'.
+  fornyer: false, // under et stille skift til Microsoft kan Optag ikke trykkes
 };
 
 let urTimer = null;
@@ -130,8 +131,9 @@ function maerkbar() {
 async function opdater() {
   // Noter, der er ved at blive slettet, vises ikke. De kan stadig fortrydes.
   t.noter = (await lager.alleNoter()).filter((n) => !n.slettet);
-  // En afsendelse, der fejlede på login, betyder, at man ikke er logget ind.
-  if (t.noter.some((n) => n.fejlType === 'login')) t.loginStatus = 'nej';
+  // En afsendelse, der fejlede på login, betyder, at man ikke er logget ind. En mulig dobbelt mail tæller ikke:
+  // den venter på brugerens eget valg.
+  if (t.noter.some((n) => n.fejlType === 'login' && !n.maaskeSendt)) t.loginStatus = 'nej';
   tegn();
 }
 
@@ -158,7 +160,7 @@ async function logInd(efterLogin) {
 }
 
 async function optag() {
-  if (t.starter || optager.erAktiv()) return;
+  if (t.starter || t.fornyer || optager.erAktiv()) return;
   // Første gang: lov til at give besked, hvis optagelsen stopper. Venter ikke, så optagelsen starter straks.
   bedOmTilladelse();
   t.starter = true;
@@ -769,8 +771,8 @@ function skaermStart() {
     h(
       'div',
       { klasse: 'scene' },
-      h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter }, ikon('mikrofon'), 'Optag'),
-      h('p', { klasse: 'hjaelpetekst' }, 'Du får et referat på mail'),
+      h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter || t.fornyer }, ikon('mikrofon'), 'Optag'),
+      t.fornyer ? venter('Logger ind …') : h('p', { klasse: 'hjaelpetekst' }, 'Du får et referat på mail'),
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
@@ -1165,7 +1167,16 @@ async function tjekLoginVedStart() {
   let status = await login.tjekLogin();
   // Uden net kan login ikke ses eller fornys. Så vises intet.
   if (status === 'nej' && !navigator.onLine) status = 'ukendt';
-  if (status === 'nej' && !nogetIGang() && (await login.fornyStille())) return; // Appen skifter til Microsoft og kommer tilbage.
+  if (status === 'nej' && !nogetIGang()) {
+    // Appen skifter til Microsoft og tilbage. Imens kan Optag ikke trykkes, så skiftet aldrig afbryder en optagelse.
+    t.fornyer = true;
+    tegn();
+    try {
+      await login.fornyStille(() => !nogetIGang());
+    } finally {
+      t.fornyer = false;
+    }
+  }
   t.loginStatus = status === 'ukendt' ? null : status;
   if (status === 'ja') await forloeb.sendVentende();
   await opdater();

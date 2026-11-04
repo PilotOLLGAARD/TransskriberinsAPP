@@ -745,3 +745,26 @@ test('sendVentende sender noter, der fejlede på login, og intet andet', async (
   assert.equal(s.t.lydKald, 1);
   assert.equal(s.t.mailKald.length, 2);
 });
+
+test('sendVentende rydder alle ventende, før den sender, så en anden fane ikke tager dem', async () => {
+  let andenUnderSend;
+  const s = opsaet({
+    sendLyd: async () => { andenUnderSend = s.lager.kort.get('to').fejlType; return REFERAT_SVAR; },
+    noter: [
+      { id: 'en', status: STATUS.FEJL, fejlType: 'login', mime: 'audio/mp4', oprettet: 1 },
+      { id: 'to', status: STATUS.FEJL, fejlType: 'login', mime: 'audio/mp4', oprettet: 2 },
+    ],
+  });
+  await s.forloeb.sendVentende();
+  assert.equal(andenUnderSend, undefined);
+  assert.equal(s.lager.kort.get('en').status, STATUS.SENDT);
+  assert.equal(s.lager.kort.get('to').status, STATUS.SENDT);
+});
+
+test('sendVentende sender også Send referat igen, der fejlede på login', async () => {
+  const s = opsaet({ noter: [{ ...SENDT_NOTE, fejlType: 'login' }], nu: () => 5000 });
+  await s.forloeb.sendVentende();
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.lager.kort.get('a').fejlType, undefined);
+  assert.equal(s.lager.kort.get('a').sendtIgen, 5000);
+});

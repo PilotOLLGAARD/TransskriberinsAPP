@@ -184,11 +184,20 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
      * En mail, der måske er sendt, sendes ikke igen af sig selv.
      */
     async sendVentende() {
-      for (const note of await lager.alleNoter()) {
-        if (note.fejlType !== 'login' || note.slettet || note.maaskeSendt) continue;
-        await opdaterTrygt(note.id, { fejlType: undefined });
+      const venter = (n) => n?.fejlType === 'login' && !n.slettet && !n.maaskeSendt
+        && [STATUS.FEJL, STATUS.TEKST_KLAR, STATUS.SENDT].includes(n.status);
+      // Alle ryddes først. Så tager en anden fane dem ikke, og login-boksen vises ikke under afsendelsen.
+      const mine = [];
+      for (const { id } of (await lager.alleNoter()).filter(venter)) {
+        const note = await lager.hentNote(id);
+        if (!venter(note)) continue;
+        await opdaterTrygt(id, { fejlType: undefined });
+        mine.push(note);
+      }
+      for (const note of mine) {
         if (note.status === STATUS.FEJL) await forloeb.behandlOgSend(note.id);
         else if (note.status === STATUS.TEKST_KLAR) await forloeb.sendTilMig(note.id);
+        else await forloeb.sendIgen(note.id);
       }
     },
 

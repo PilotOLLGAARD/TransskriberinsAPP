@@ -22,11 +22,13 @@ function falskMsal({ konti = [KONTO], tilstille = async () => ({ accessToken: 'b
 
 function falskHukommelse() {
   const gemt = {};
-  return { getItem: (k) => gemt[k] ?? null, setItem: (k, v) => { gemt[k] = v; } };
+  return { getItem: (k) => gemt[k] ?? null, setItem: (k, v) => { gemt[k] = v; }, removeItem: (k) => { delete gemt[k]; } };
 }
 
-function lav(f, hukommelse = falskHukommelse()) {
-  return lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/', hukommelse });
+const NET_OK = async () => ({ ok: true });
+
+function lav(f, hukommelse = falskHukommelse(), ekstra = {}) {
+  return lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/', hukommelse, hent: NET_OK, stopSide: () => {}, ...ekstra });
 }
 
 test('husker tidligere login, selvom kontoen er væk efter koldstart', async () => {
@@ -72,6 +74,8 @@ test('init færdiggør et login og bruger localStorage og redirect-adressen', as
   assert.equal(f.opsaetning.cache.cacheLocation, 'localStorage');
   assert.equal(f.opsaetning.auth.redirectUri, 'https://x/app/');
   assert.equal(f.opsaetning.auth.authority, 'https://login.microsoftonline.com/t');
+  // Et skift til Microsoft, der ikke bliver til noget, opgives efter 10 s i stedet for 30.
+  assert.equal(f.opsaetning.system.redirectNavigationTimeout, 10000);
 });
 
 test('init må ikke vælte, hvis login fejlede', async () => {
@@ -190,7 +194,12 @@ function falskMsalMed(ekstra = {}) {
   f.ryddet = 0;
   const Klasse = f.PublicClientApplication;
   f.PublicClientApplication = class extends Klasse {
-    async acquireTokenRedirect(valg) { f.redirects.push(valg); }
+    // Som MSAL: spørger onRedirectNavigate. Skifter siden, men forlades den ikke, fejler kaldet efter tidsgrænsen.
+    async acquireTokenRedirect(valg) {
+      f.redirects.push(valg);
+      if (valg.onRedirectNavigate?.('https://login.microsoftonline.com/t') === false) return;
+      throw Object.assign(new Error('failed_to_redirect'), { errorCode: 'failed_to_redirect' });
+    }
     async clearCache() { f.ryddet++; }
   };
   return f;
@@ -217,7 +226,7 @@ test('fornyStille omdirigerer med prompt none og sidste bruger', async () => {
   const f = falskMsalMed({ konti: [] });
   const l = lav(f, hukommelse);
   await l.init();
-  assert.equal(await l.fornyStille(), true);
+  await l.fornyStille();
   assert.equal(f.redirects.length, 1);
   assert.equal(f.redirects[0].prompt, 'none');
   assert.equal(f.redirects[0].loginHint, 'a@ollgaard.dk');
@@ -228,14 +237,82 @@ test('fornyStille højst én gang pr. 10 minutter', async () => {
   const hukommelse = falskHukommelse();
   let tid = 1_000_000;
   const f = falskMsalMed({ konti: [] });
-  const l = lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/', hukommelse, nu: () => tid });
+  const l = lav(f, hukommelse, { nu: () => tid });
   await l.init();
-  assert.equal(await l.fornyStille(), true);
+  await l.fornyStille();
   tid += 5 * 60 * 1000;
-  assert.equal(await l.fornyStille(), false);
+  await l.fornyStille();
+  assert.equal(f.redirects.length, 1);
   tid += 6 * 60 * 1000;
-  assert.equal(await l.fornyStille(), true);
+  await l.fornyStille();
   assert.equal(f.redirects.length, 2);
+});
+
+test('fornyStille skifter ikke til Microsoft uden net, der virker', async () => {
+  let svar = async () => { throw new Error('timeout'); };
+  const f = falskMsalMed({ konti: [] });
+  const l = lav(f, falskHukommelse(), { hent: (...a) => svar(...a) });
+  await l.init();
+  await l.fornyStille();
+  svar = async () => ({ ok: false });
+  await l.fornyStille();
+  assert.equal(f.redirects.length, 0);
+  // Et forsøg uden net tæller ikke med i de 10 minutter.
+  let adresse;
+  svar = async (url, valg) => { adresse = url; assert.ok(valg.signal); return { ok: true }; };
+  await l.fornyStille();
+  assert.equal(f.redirects.length, 1);
+  assert.equal(adresse, 'https://login.microsoftonline.com/t/v2.0/.well-known/openid-configuration');
+});
+
+test('fornyStille skifter ikke, når appen er gået i gang med noget', async () => {
+  const f = falskMsalMed({ konti: [] });
+  let stoppet = 0;
+  const l = lav(f, falskHukommelse(), { stopSide: () => { stoppet++; } });
+  await l.init();
+  await l.fornyStille(() => false);
+  assert.equal(f.redirects.length, 0);
+  // Går appen i gang, lige før siden skifter, skifter den ikke.
+  let svar = true;
+  const l2 = lav(f, falskHukommelse(), { stopSide: () => { stoppet++; } });
+  await l2.init();
+  await l2.fornyStille(() => { const s = svar; svar = false; return s; });
+  assert.equal(f.redirects.length, 1);
+  assert.equal(stoppet, 0);
+});
+
+test('et skift til Microsoft, der ikke bliver til noget, stoppes, så det ikke kan afbryde senere', async () => {
+  const f = falskMsalMed({ konti: [] });
+  let stoppet = 0;
+  const l = lav(f, falskHukommelse(), { stopSide: () => { stoppet++; } });
+  await l.init();
+  await l.fornyStille();
+  assert.equal(f.redirects.length, 1);
+  assert.equal(stoppet, 1);
+});
+
+test('kommer appen tilbage fra Microsoft uden login, fornyes der ikke igen før næste login', async () => {
+  const hukommelse = falskHukommelse();
+  let tid = 1_000_000;
+  const forsoeg = lav(falskMsalMed({ konti: [] }), hukommelse, { nu: () => tid });
+  await forsoeg.init();
+  await forsoeg.fornyStille();
+  // Microsoft svarer interaction_required, og appen starter igen.
+  tid += 5000;
+  const f = falskMsalMed({ konti: [] });
+  f.PublicClientApplication.prototype.handleRedirectPromise = async () => { throw Object.assign(new Error(), { errorCode: 'interaction_required' }); };
+  const tilbage = lav(f, hukommelse, { nu: () => tid });
+  await tilbage.init();
+  tid += 60 * 60 * 1000;
+  await tilbage.fornyStille();
+  assert.equal(f.redirects.length, 0);
+  // Efter et login med tryk virker fornyelsen igen.
+  await lav(falskMsalMed(), hukommelse, { nu: () => tid }).init();
+  const igen = falskMsalMed({ konti: [] });
+  const senere = lav(igen, hukommelse, { nu: () => tid });
+  await senere.init();
+  await senere.fornyStille();
+  assert.equal(igen.redirects.length, 1);
 });
 
 test('brugerMail husker sidste bruger, også når kontoen er væk', async () => {
@@ -256,4 +333,27 @@ test('logUd rydder login og glemmer brugeren', async () => {
   assert.equal(f.ryddet, 1);
   assert.equal(l.harVaeretLoggetInd(), false);
   assert.equal(hukommelse.getItem('sidsteBruger'), null);
+});
+
+test('efter Log ud fornyes der ikke, og næste login lader brugeren vælge konto', async () => {
+  const hukommelse = falskHukommelse();
+  hukommelse.removeItem = (k) => { hukommelse.setItem(k, null); };
+  const f = falskMsalMed();
+  const l = lav(f, hukommelse);
+  await l.init();
+  await l.logUd();
+  const efter = falskMsalMed({ konti: [] });
+  const ny = lav(efter, hukommelse);
+  await ny.init();
+  await ny.fornyStille();
+  assert.equal(efter.redirects.length, 0);
+  await ny.logInd();
+  assert.equal(efter.omdirigeret[0].prompt, 'select_account');
+  // Når man er logget ind igen, spørges der ikke længere om konto.
+  await lav(falskMsalMed(), hukommelse).init();
+  const igen = falskMsalMed();
+  const tredje = lav(igen, hukommelse);
+  await tredje.init();
+  await tredje.logInd();
+  assert.equal(igen.omdirigeret[0].prompt, undefined);
 });

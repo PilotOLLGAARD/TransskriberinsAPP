@@ -1267,6 +1267,9 @@ test('uden net ved start: ingen fornyelse', async () => {
   await knap(side, 'Optag').waitFor();
   await side.waitForTimeout(500);
   assert.equal(await fornyelser(side), 0);
+  assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
   await kontekst.setOffline(false);
   await kontekst.close();
 });
@@ -1280,5 +1283,44 @@ test('login-boksen kan betjenes på 360 px', async () => {
   const r = await knap(side, 'Log ind med din ØLLGAARD-konto').boundingBox();
   assert.ok(r.height >= 72 && r.x + r.width <= 360);
   assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
+  await kontekst.close();
+});
+
+test('under fornyelsen kan Optag ikke trykkes, og går appen i gang med andet, skifter den ikke', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.setItem('testFornyVent', '1500'); });
+  await side.reload();
+  await vis(side, 'Logger ind …');
+  assert.equal(await knap(side, 'Optag').isDisabled(), true);
+  await knap(side, 'Information').click();
+  await side.waitForTimeout(2000);
+  assert.equal(await side.evaluate(() => localStorage.getItem('testKonto')), null);
+  assert.equal(await fornyelser(side), 0);
+  await knap(side, 'Tilbage').click();
+  await vis(side, IKKE_LOGGET_IND);
+  assert.equal(await knap(side, 'Optag').isDisabled(), false);
+  await kontekst.close();
+});
+
+test('to optagelser venter på login: begge sendes efter login, og boksen forsvinder', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.removeItem('testSession'); });
+  await side.reload();
+  await vis(side, IKKE_LOGGET_IND);
+  const foer = await tal(miljoe);
+  await optag(side, { titel: 'Første' });
+  await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+  await tilForsiden(side);
+  await optag(side, { titel: 'Anden' });
+  await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+  await tilForsiden(side);
+  await knap(side, 'Log ind med din ØLLGAARD-konto').click();
+  await knap(side, 'Optag').waitFor({ timeout: 15000 });
+  for (let i = 0; i < 150 && (await sendteUdenLyd(side)) !== 2; i++) await side.waitForTimeout(100);
+  assert.equal(await sendteUdenLyd(side), 2);
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald + 2);
+  assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
   await kontekst.close();
 });
