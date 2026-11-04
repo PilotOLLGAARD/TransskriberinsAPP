@@ -5,6 +5,7 @@ export const BESKEDER = {
   login: 'Du skal logge ind igen. Optagelsen er gemt.',
   adgang: 'Din konto har ikke adgang til appen. Optagelsen er gemt. Kontakt IT.',
   tjeneste: 'Transskriptionen mislykkedes. Optagelsen er gemt. Prøv igen.',
+  kvote: 'Grænsen for i dag hos Google er nået. Optagelsen er gemt på telefonen. Prøv igen i morgen.',
   kanIkkeBehandles: 'Optagelsen kunne ikke behandles. Den er gemt på telefonen. Kontakt IT, hvis det sker igen.',
   ingenTale: 'Der blev ikke fundet tale i optagelsen. Den er gemt på telefonen.',
   afbrudt: 'Optagelsen blev afbrudt — det optagede er gemt. Vil du fortsætte?',

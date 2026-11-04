@@ -42,15 +42,24 @@ function lavBevis() {
 const kontekst = new AsyncLocalStorage();
 function maaltHent(hent) {
   return async (url, v) => {
-    const s = await hent(url, v);
     const fil = kontekst.getStore();
+    let s;
+    try {
+      s = await hent(url, v);
+    } catch (e) {
+      // Netværksfejl gemmes med årsag, så de kan skelnes fra fejl hos Google.
+      if (fil) (fil.googleFejl ??= []).push(`kast ${e.name}: ${e.message} ${e.cause?.code ?? e.code ?? ''} ${e.cause?.message ?? ''}`.trim());
+      throw e;
+    }
     if (!fil || !s.json) return s;
     // Googles svar ved fejl gemmes i resultatet (kun status og fejlkode, ingen indhold), så årsagen kan ses.
     if (!s.ok) {
-      const t = await s.clone().text().catch(() => '');
-      const kode = /"status":\s*"([A-Z_]+)"/.exec(t)?.[1] ?? '';
+      // Svaret fra hentUdenGraense har ingen clone(). Kroppen læses én gang og gives videre uændret.
+      const krop = await s.json().catch(() => null);
+      s.json = async () => krop;
+      const kode = krop?.error?.status ?? krop?.error?.code ?? '';
       const sti = String(url).split('?')[0].replace(/.*\/v1beta\//, '').replace(/files\/[\w-]+/, 'files/ID');
-      (fil.googleFejl ??= []).push(`${s.status} ${kode} ${sti}`);
+      (fil.googleFejl ??= []).push(`${s.status} ${kode} ${sti}${/per day/i.test(krop?.error?.message ?? '') ? ' (dagsgrænse)' : ''}`);
     }
     return new Proxy(s, {
       get(mål, navn) {

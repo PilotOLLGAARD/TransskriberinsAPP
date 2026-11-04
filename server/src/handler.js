@@ -122,6 +122,7 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     log(linje);
     if (kode === 'format') return sendJson(res, cors, 422, { fejl: 'kan-ikke-behandles' });
     if (kode === 'noegle') return sendJson(res, cors, 500, { fejl: 'server-ikke-klar' });
+    if (kode === 'kvote') return sendJson(res, cors, 503, { fejl: 'kvote' });
     return sendJson(res, cors, 502, { fejl: 'tjeneste' });
   }
 

@@ -268,3 +268,9 @@ test('melder telefonen aldrig fremdrift (som måske på iPhone), afbrydes der ik
   const svar = await hentMedFremdrift('/x', { ...VALG, stilleMs: 50 }, tidsstyretXhr({ svarEfter: 300 }));
   assert.equal(svar.status, 200);
 });
+
+test('Googles dagsgrænse (503 med kvote) giver kvote, også for referatet af flere dele', async () => {
+  const kvote = async () => new Response(JSON.stringify({ fejl: 'kvote' }), { status: 503 });
+  await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, kvote), (e) => e.type === 'kvote');
+  await assert.rejects(sendReferat({ tekster: ['A'] }, 'b', kvote), (e) => e.type === 'kvote');
+});

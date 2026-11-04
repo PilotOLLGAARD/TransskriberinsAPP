@@ -700,3 +700,25 @@ test('mange kald, der rammer en minutgrænse, venter grænsen ud i stedet for at
   const g = lav(hent, { vent, nu: () => tid, timeoutMs: 840000 });
   for (let i = 0; i < 5; i++) assert.equal((await g.transskriber(lyd(), valg())).tekst, 'Hej');
 });
+
+// Googles dagsgrænse (Tier 1: 100 transskriptioner om dagen), som testbænken ramte 4. nov. 2026.
+const DAGSGRAENSE = {
+  error: {
+    message: 'Rate limit exceeded for model gemini-3.5-transcribe (limit: 100 requests per day on Tier 1). Please retry in 18h17m or upgrade your tier at https://ai.dev/rate-limit.',
+    code: 'too_many_requests',
+  },
+};
+
+test('dagsgrænsen hos Google genforsøges ikke og giver kvote med Googles kode', async () => {
+  const { hent, kald } = falskHent({ interaktion: () => json(429, DAGSGRAENSE) });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), valg()), (e) => {
+    assert.equal(e.kode, 'kvote');
+    assert.equal(e.status, 429);
+    assert.equal(e.googleKode, 'too_many_requests');
+    assert.ok(!JSON.stringify(e).includes('Rate limit'));
+    return true;
+  });
+  assert.equal(antal(kald, '/interactions'), 1);
+  assert.deepEqual(v.ventet, []);
+});

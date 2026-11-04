@@ -48,8 +48,10 @@ function httpFejl(status, hvor) {
 /** Som httpFejl, men med Googles faste fejlkode (fx RESOURCE_EXHAUSTED) fra svarets krop. */
 async function svarFejl(svar, hvor) {
   const e = httpFejl(svar.status, hvor);
-  const { googleKode } = await laesGoogleFejl(svar);
+  const { googleKode, dagsgraense } = await laesGoogleFejl(svar);
   if (googleKode) e.googleKode = googleKode;
+  // Googles grænse for i dag er nået. Brugeren skal vide, at det først virker igen i morgen.
+  if (svar.status === 429 && dagsgraense) e.kode = 'kvote';
   return e;
 }
 

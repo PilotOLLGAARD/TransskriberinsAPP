@@ -257,6 +257,13 @@ test('nøgle-fejl giver 500', async () => {
   assert.deepEqual(await svar.json(), { fejl: 'server-ikke-klar' });
 });
 
+test('Googles dagsgrænse giver 503 med fejlkoden kvote', async () => {
+  const s = await start({ gemini: falskGemini(async () => { throw new GeminiFejl('kvote', 'x'); }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 503);
+  assert.deepEqual(await svar.json(), { fejl: 'kvote' });
+});
+
 test('medarbejder får tekst, og lyden sendes uændret', async () => {
   const s = await start();
   const krop = Buffer.from([0, 1, 2, 255, 254]);

@@ -27,6 +27,15 @@ function laesRetryAfter(vaerdi, nuMs) {
 
 const fejlKroppe = new WeakMap();
 const GOOGLE_KODE = /^[A-Z][A-Z_]{1,39}$/;
+// Nyere fejlsvar har en kode med små bogstaver, fx too_many_requests.
+const GOOGLE_KODE_SMAA = /^[a-z][a-z_]{1,39}$/;
+
+/** 'Please retry in 18h17m' i Googles besked. Kun tallene læses, aldrig resten af beskeden. */
+function laesBeskedVent(besked) {
+  const m = /retry in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?/i.exec(String(besked || ''));
+  if (!m || !(m[1] || m[2] || m[3])) return null;
+  return Math.round(((Number(m[1] || 0) * 60 + Number(m[2] || 0)) * 60 + Number(m[3] || 0)) * 1000);
+}
 
 /** "37s" eller "1.5s" fra google.rpc.RetryInfo. */
 function laesVarighed(v) {
@@ -48,6 +57,11 @@ function laesGoogleFejl(svar) {
         if (!fejl || typeof fejl !== 'object') return {};
         const ud = {};
         if (typeof fejl.status === 'string' && GOOGLE_KODE.test(fejl.status)) ud.googleKode = fejl.status;
+        else if (typeof fejl.code === 'string' && GOOGLE_KODE_SMAA.test(fejl.code)) ud.googleKode = fejl.code;
+        // Dagsgrænsen (fx 100 kald om dagen på Tier 1) kan ikke ventes ud inden for tidsgrænsen.
+        if (/per day/i.test(String(fejl.message || ''))) ud.dagsgraense = true;
+        const beskedVent = laesBeskedVent(fejl.message);
+        if (beskedVent !== null) ud.retryMs = beskedVent;
         for (const d of Array.isArray(fejl.details) ? fejl.details : []) {
           const ms = d && String(d['@type'] || '').endsWith('google.rpc.RetryInfo') ? laesVarighed(d.retryDelay) : null;
           if (ms !== null) ud.retryMs = ms;

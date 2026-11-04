@@ -67,3 +67,8 @@ test('besked giver aldrig en tom tekst, heller ikke for en ukendt fejltype', () 
   assert.equal(besked('toString'), BESKEDER.tjeneste);
   assert.equal(besked('mailUkendt'), BESKEDER.maaskeSendt);
 });
+
+test('dagsgrænsen hos Google har en dansk besked, der siger, at optagelsen er gemt', () => {
+  assert.match(BESKEDER.kvote, /gemt/);
+  assert.match(BESKEDER.kvote, /i morgen/);
+});
