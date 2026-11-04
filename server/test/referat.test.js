@@ -34,7 +34,7 @@ function falskHent(svarFn = () => modelSvar(FULDT)) {
 }
 
 function lav(hent, ekstra = {}) {
-  return lavReferat({ noegle: NOEGLE, model: 'gemini-3.8-flash', timeoutMs: 1000, hent, ...ekstra });
+  return lavReferat({ noegle: NOEGLE, model: 'gemini-3.8-flash', timeoutMs: 1000, hent, vent: async () => {}, tilfaeldig: () => 0.5, ...ekstra });
 }
 
 const INPUT = { tekst: 'Vi skal have nyt tag. Peter bestiller tagpap til fredag.', titel: '', varighedSek: 120 };
@@ -295,4 +295,115 @@ test('en kort note kontrolleres også', async () => {
   const r = await lav(hent).lav({ tekst: 'Øh, husk at ringe til Kim klokken otte.', titel: '', varighedSek: 10, signal: signal() });
   assert.equal(r.renTekst, 'Ring til Kim kl. [uklart].');
   assert.deepEqual(r.huskeliste, ['Ring til Kim kl. [uklart]']);
+});
+
+// Genforsøg ved midlertidige fejl fra Google. Ingen rigtige pauser i tests.
+
+function svarMedHeader(status, krop, headers) {
+  return { ...svar(status, krop), headers: { get: (n) => headers[String(n).toLowerCase()] ?? null } };
+}
+
+function raekke(...liste) {
+  let i = 0;
+  return () => {
+    const s = liste[Math.min(i++, liste.length - 1)];
+    if (typeof s === 'function') return s();
+    return s === 200 ? modelSvar(FULDT) : svar(s, {});
+  };
+}
+
+function genLav(hent, ekstra = {}) {
+  const ventet = [];
+  const r = lav(hent, { timeoutMs: 50000, vent: async (ms) => { ventet.push(ms); }, tilfaeldig: () => 0.5, ...ekstra });
+  return { r, ventet };
+}
+
+test('referatet genforsøges ved 429, 500 og 503 med 2, 4 og 8 s', async () => {
+  const { hent, kald } = falskHent(raekke(429, 500, 503, 200));
+  const { r, ventet } = genLav(hent);
+  const ud = await r.lav({ ...INPUT, signal: signal() });
+  assert.equal(ud.opsummering, FULDT.opsummering);
+  assert.deepEqual(ventet, [2000, 4000, 8000]);
+  assert.equal(kald.length, 4);
+});
+
+test('referatet opgiver efter 3 genforsøg med status og trin', async () => {
+  const { hent, kald } = falskHent(raekke(503));
+  const { r, ventet } = genLav(hent);
+  await assert.rejects(r.lav({ ...INPUT, signal: signal() }), (e) => e.kode === 'tjeneste' && e.status === 503 && e.trin === 'referat');
+  assert.equal(kald.length, 4);
+  assert.equal(ventet.length, 3);
+});
+
+test('referatet medtager Googles fejlkode, men aldrig beskeden', async () => {
+  const krop = { error: { status: 'RESOURCE_EXHAUSTED', message: 'HEMMELIG kvote' } };
+  const { hent } = falskHent(() => svar(429, krop));
+  const { r } = genLav(hent, { timeoutMs: 1000 });
+  await assert.rejects(r.lav({ ...INPUT, signal: signal() }), (e) => {
+    assert.equal(e.googleKode, 'RESOURCE_EXHAUSTED');
+    assert.ok(!e.message.includes('HEMMELIG') && !JSON.stringify(e).includes('HEMMELIG'));
+    return true;
+  });
+});
+
+for (const status of [400, 401, 403, 404]) {
+  test(`referatet genforsøges aldrig ved ${status}`, async () => {
+    const { hent, kald } = falskHent(raekke(status, 200));
+    const { r, ventet } = genLav(hent);
+    await assert.rejects(r.lav({ ...INPUT, signal: signal() }), GeminiFejl);
+    assert.equal(kald.length, 1);
+    assert.deepEqual(ventet, []);
+  });
+}
+
+test('referatet respekterer Retry-After', async () => {
+  const { hent } = falskHent(raekke(() => svarMedHeader(429, {}, { 'retry-after': '9' }), 200));
+  const { r, ventet } = genLav(hent);
+  await r.lav({ ...INPUT, signal: signal() });
+  assert.deepEqual(ventet, [9000]);
+});
+
+test('referatets genforsøg holder sig inden for 50 s', async () => {
+  let tid = Date.UTC(2026, 10, 3, 12);
+  const { hent, kald } = falskHent(raekke(() => svarMedHeader(503, {}, { 'retry-after': '30' })));
+  const ventet = [];
+  const r = lav(hent, { timeoutMs: 50000, nu: () => tid, vent: async (ms) => { ventet.push(ms); tid += ms; }, tilfaeldig: () => 0.5 });
+  await assert.rejects(r.lav({ ...INPUT, signal: signal() }), (e) => e.status === 503);
+  // 30 s når inden for 50 s. 30 s mere ville ikke.
+  assert.deepEqual(ventet, [30000]);
+  assert.equal(kald.length, 2);
+});
+
+test('netværksfejl ved referatet genforsøges', async () => {
+  let n = 0;
+  const { hent, kald } = falskHent(() => {
+    if (n++ === 0) throw new TypeError('other side closed');
+    return modelSvar(FULDT);
+  });
+  const { r, ventet } = genLav(hent);
+  assert.equal((await r.lav({ ...INPUT, signal: signal() })).opsummering, FULDT.opsummering);
+  assert.equal(kald.length, 2);
+  assert.deepEqual(ventet, [2000]);
+});
+
+test('et afbrudt referat genforsøges ikke', async () => {
+  const ctrl = new AbortController();
+  let n = 0;
+  const hent = (_u, v) => new Promise((_, afvis) => {
+    n++;
+    v.signal.addEventListener('abort', () => afvis(v.signal.reason));
+    setTimeout(() => ctrl.abort(), 5);
+  });
+  const { r, ventet } = genLav(hent);
+  await assert.rejects(r.lav({ ...INPUT, signal: ctrl.signal }), (e) => e.kode === 'tjeneste' && e.trin === 'referat');
+  assert.equal(n, 1);
+  assert.deepEqual(ventet, []);
+});
+
+test('referatets genforsøg logges kun med koder og tal', async () => {
+  const { hent } = falskHent(raekke(503, 200));
+  const logs = [];
+  const { r } = genLav(hent, { log: (o) => logs.push(o) });
+  await r.lav({ ...INPUT, signal: signal() });
+  assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'referat', status: 503, forsoeg: 1, ventMs: 2000 }]);
 });

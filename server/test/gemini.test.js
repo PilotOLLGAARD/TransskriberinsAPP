@@ -44,8 +44,11 @@ function lav(hent, ekstra = {}) {
     sprog: 'da-DK',
     tilstand: 'smart',
     ordliste: ['ØLLGAARD', 'lægte'],
-    timeoutMs: 1000,
+    timeoutMs: 60000,
     hent,
+    // Ingen rigtige pauser i tests. Midten af spredningen giver præcis 2, 4 og 8 s.
+    vent: async () => {},
+    tilfaeldig: () => 0.5,
     ...ekstra,
   });
 }
@@ -424,4 +427,276 @@ test('en sletning, der fejler, prøves igen af oprydningen på samme server', as
   await g.rydGamle.igang;
   const sletninger = a.kald.filter((k) => k.metode === 'DELETE' && k.url.endsWith(`/v1beta/${navn}`));
   assert.equal(sletninger.length, 2);
+});
+
+// Genforsøg ved midlertidige fejl fra Google
+
+/** Svar i rækkefølge. Det sidste gentages. */
+function raekke(...svar) {
+  let i = 0;
+  return () => {
+    const s = svar[Math.min(i++, svar.length - 1)];
+    return typeof s === 'function' ? s() : json(s, s === 200 ? SVAR_OK : {});
+  };
+}
+
+function startOk() {
+  return new Response('{}', { status: 200, headers: { 'x-goog-upload-url': 'https://upload.example/u1' } });
+}
+
+function maaltVent() {
+  const ventet = [];
+  return { ventet, vent: async (ms) => { ventet.push(ms); } };
+}
+
+const antal = (kald, slut) => kald.filter((k) => k.url.endsWith(slut)).length;
+
+test('transskriptionen genforsøges ved 429, 503 og 500 med 2, 4 og 8 s', async () => {
+  const { hent, kald } = falskHent({ interaktion: raekke(429, 503, 500, 200) });
+  const v = maaltVent();
+  const svar = await lav(hent, { vent: v.vent }).transskriber(lyd(), valg());
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(v.ventet, [2000, 4000, 8000]);
+  assert.equal(antal(kald, '/v1beta/interactions'), 4);
+  // Lyden uploades kun én gang. Det er den samme fil, der transskriberes igen.
+  assert.equal(antal(kald, '/upload/v1beta/files'), 1);
+});
+
+test('ventetiden spredes tilfældigt omkring 2, 4 og 8 s', async () => {
+  const a = falskHent({ interaktion: raekke(503, 503, 200) });
+  const lavt = maaltVent();
+  await lav(a.hent, { vent: lavt.vent, tilfaeldig: () => 0 }).transskriber(lyd(), valg());
+  const b = falskHent({ interaktion: raekke(503, 503, 200) });
+  const hoejt = maaltVent();
+  await lav(b.hent, { vent: hoejt.vent, tilfaeldig: () => 0.999 }).transskriber(lyd(), valg());
+  assert.deepEqual(lavt.ventet, [1000, 2000]);
+  assert.ok(hoejt.ventet[0] > 2900 && hoejt.ventet[0] < 3000);
+  assert.ok(hoejt.ventet[1] > 5900 && hoejt.ventet[1] < 6000);
+});
+
+test('opgiver efter 3 genforsøg og giver tjeneste med status og sted', async () => {
+  const { hent, kald } = falskHent({ interaktion: raekke(503) });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), valg()), (e) => {
+    assert.equal(e.kode, 'tjeneste');
+    assert.equal(e.status, 503);
+    assert.equal(e.hvor, 'interactions');
+    return true;
+  });
+  assert.equal(antal(kald, '/v1beta/interactions'), 4);
+  assert.equal(v.ventet.length, 3);
+  assert.ok(kald.some((k) => k.metode === 'DELETE'));
+});
+
+test('Retry-After i sekunder respekteres', async () => {
+  const { hent } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '7' }), 200) });
+  const v = maaltVent();
+  await lav(hent, { vent: v.vent, timeoutMs: 60000 }).transskriber(lyd(), valg());
+  assert.deepEqual(v.ventet, [7000]);
+});
+
+test('Retry-After som dato respekteres', async () => {
+  const tid = Date.UTC(2026, 10, 3, 12);
+  const dato = new Date(tid + 12000).toUTCString();
+  const { hent } = falskHent({ interaktion: raekke(() => json(503, {}, { 'retry-after': dato }), 200) });
+  const v = maaltVent();
+  await lav(hent, { vent: v.vent, timeoutMs: 60000, nu: () => tid }).transskriber(lyd(), valg());
+  assert.deepEqual(v.ventet, [12000]);
+});
+
+test('en kortere Retry-After end den stigende ventetid giver den stigende ventetid', async () => {
+  const { hent } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '1' }), 200) });
+  const v = maaltVent();
+  await lav(hent, { vent: v.vent }).transskriber(lyd(), valg());
+  assert.deepEqual(v.ventet, [2000]);
+});
+
+for (const status of [400, 401, 403, 404, 409]) {
+  test(`${status} genforsøges aldrig`, async () => {
+    const a = falskHent({ interaktion: raekke(status, 200) });
+    const v = maaltVent();
+    await assert.rejects(lav(a.hent, { vent: v.vent }).transskriber(lyd(), valg()), GeminiFejl);
+    assert.equal(antal(a.kald, '/v1beta/interactions'), 1);
+    const b = falskHent({ startSvar: raekke(() => json(status, {}), startOk) });
+    await assert.rejects(lav(b.hent, { vent: v.vent }).transskriber(lyd(), valg()), GeminiFejl);
+    assert.equal(antal(b.kald, '/upload/v1beta/files'), 1);
+    assert.deepEqual(v.ventet, []);
+  });
+}
+
+test('genforsøg holder sig inden for den samlede tidsgrænse', async () => {
+  let tid = Date.UTC(2026, 10, 3, 12);
+  const { hent, kald } = falskHent({ interaktion: raekke(503) });
+  const ventet = [];
+  const vent = async (ms) => { ventet.push(ms); tid += ms; };
+  await assert.rejects(lav(hent, { vent, nu: () => tid, timeoutMs: 10000 }).transskriber(lyd(), valg()), GeminiFejl);
+  // 2 + 4 s når inden for 10 s. 8 s mere ville ikke.
+  assert.deepEqual(ventet, [2000, 4000]);
+  assert.equal(antal(kald, '/v1beta/interactions'), 3);
+});
+
+test('en Retry-After ud over tidsgrænsen giver straks fejl', async () => {
+  const { hent, kald } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '900' }), 200) });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent, timeoutMs: 840000 }).transskriber(lyd(), valg()), (e) => e.status === 429);
+  assert.deepEqual(v.ventet, []);
+  assert.equal(antal(kald, '/v1beta/interactions'), 1);
+});
+
+test('upload-start genforsøges ved 503 og netværksfejl', async () => {
+  let n = 0;
+  const { hent, kald } = falskHent({
+    startSvar: () => {
+      n++;
+      if (n === 1) return json(503, {});
+      if (n === 2) throw new TypeError('fetch failed');
+      return startOk();
+    },
+  });
+  const v = maaltVent();
+  assert.equal((await lav(hent, { vent: v.vent }).transskriber(lyd(), valg())).tekst, 'Hej');
+  assert.equal(antal(kald, '/upload/v1beta/files'), 3);
+  assert.deepEqual(v.ventet, [2000, 4000]);
+});
+
+test('selve lyden uploades aldrig igen, da strømmen ikke kan spoles tilbage', async () => {
+  const { hent, kald } = falskHent({ uploadSvar: () => json(503, {}) });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), valg()), (e) => e.kode === 'tjeneste' && e.hvor === 'upload');
+  assert.equal(kald.filter((k) => k.url === 'https://upload.example/u1').length, 1);
+  assert.deepEqual(v.ventet, []);
+  assert.ok(kald.some((k) => k.metode === 'DELETE'));
+});
+
+test('netværksfejl ved transskriptionen genforsøges', async () => {
+  let n = 0;
+  const { hent, kald } = falskHent({
+    interaktion: () => {
+      if (n++ === 0) throw new TypeError('other side closed');
+      return json(200, SVAR_OK);
+    },
+  });
+  const v = maaltVent();
+  assert.equal((await lav(hent, { vent: v.vent }).transskriber(lyd(), valg())).tekst, 'Hej');
+  assert.equal(antal(kald, '/v1beta/interactions'), 2);
+  assert.deepEqual(v.ventet, [2000]);
+});
+
+test('et afbrudt kald genforsøges ikke', async () => {
+  const ctrl = new AbortController();
+  const { hent, kald } = falskHent({
+    interaktion: (v) => new Promise((_, afvis) => {
+      v.signal.addEventListener('abort', () => afvis(v.signal.reason));
+      setTimeout(() => ctrl.abort(), 5);
+    }),
+  });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), { bytes: 3, mime: 'audio/mp4', signal: ctrl.signal }), GeminiFejl);
+  assert.equal(antal(kald, '/v1beta/interactions'), 1);
+  assert.deepEqual(v.ventet, []);
+});
+
+test('venten afbrydes, når klienten går, og hænger aldrig', async () => {
+  const ctrl = new AbortController();
+  const { hent, kald } = falskHent({ interaktion: raekke(503) });
+  // Den rigtige vente-funktion: 2 s, som skal afbrydes efter 20 ms.
+  const g = lav(hent, { vent: undefined, timeoutMs: 60000 });
+  setTimeout(() => ctrl.abort(), 20);
+  const start = Date.now();
+  await assert.rejects(g.transskriber(lyd(), { bytes: 3, mime: 'audio/mp4', signal: ctrl.signal }), GeminiFejl);
+  assert.ok(Date.now() - start < 1000);
+  assert.equal(antal(kald, '/v1beta/interactions'), 1);
+});
+
+test('genforsøg logges kun med koder og tal', async () => {
+  const { hent } = falskHent({ interaktion: raekke(429, 200) });
+  const logs = [];
+  await lav(hent, { log: (o) => logs.push(o) }).transskriber(lyd(), valg());
+  assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 429, forsoeg: 1, ventMs: 2000 }]);
+});
+
+test('hentUdenGraense giver svarets headere, så Retry-After kan læses', async () => {
+  const http = require('node:http');
+  const server = http.createServer((req, res) => { res.writeHead(429, { 'retry-after': '5' }); res.end('{}'); });
+  await new Promise((ok) => server.listen(0, ok));
+  try {
+    const svar = await hentUdenGraense(`http://localhost:${server.address().port}/x`, {
+      method: 'POST', headers: {}, body: '{}', signal: new AbortController().signal,
+    });
+    assert.equal(svar.status, 429);
+    assert.equal(svar.headers.get('Retry-After'), '5');
+    assert.equal(svar.headers.get('x-findes-ikke'), null);
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
+// Googles egen fejlkode, så årsagen kan ses i Cloud Logging. Aldrig beskeden.
+
+const KVOTE = {
+  error: {
+    code: 429,
+    message: 'HEMMELIG-BESKED Quota exceeded for metric generate_content_input_token_count',
+    status: 'RESOURCE_EXHAUSTED',
+    details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' }],
+  },
+};
+
+test('fejlen har Googles status, fejlkode og trin, men aldrig beskeden', async () => {
+  const { hent } = falskHent({ interaktion: () => json(429, KVOTE) });
+  await assert.rejects(lav(hent, { timeoutMs: 1000 }).transskriber(lyd(), valg()), (e) => {
+    assert.equal(e.kode, 'tjeneste');
+    assert.equal(e.status, 429);
+    assert.equal(e.googleKode, 'RESOURCE_EXHAUSTED');
+    assert.equal(e.trin, 'transskription');
+    assert.ok(!e.message.includes('HEMMELIG'));
+    assert.ok(!JSON.stringify(e).includes('HEMMELIG'));
+    return true;
+  });
+});
+
+test('en fejlkode, der ikke ligner Googles faste koder, medtages ikke', async () => {
+  const { hent } = falskHent({ interaktion: () => json(503, { error: { status: 'hej med dig, Peter' } }) });
+  await assert.rejects(lav(hent, { timeoutMs: 1000 }).transskriber(lyd(), valg()), (e) => {
+    assert.equal(e.status, 503);
+    assert.equal(e.googleKode, undefined);
+    return true;
+  });
+});
+
+test('fejl ved upload-start og ved selve lyden har trin upload', async () => {
+  const a = falskHent({ startSvar: () => json(403, { error: { status: 'PERMISSION_DENIED' } }) });
+  await assert.rejects(lav(a.hent).transskriber(lyd(), valg()), (e) => e.trin === 'upload' && e.googleKode === 'PERMISSION_DENIED' && e.kode === 'noegle');
+  const b = falskHent({ uploadSvar: () => json(500, { error: { status: 'INTERNAL' } }) });
+  await assert.rejects(lav(b.hent).transskriber(lyd(), valg()), (e) => e.trin === 'upload' && e.googleKode === 'INTERNAL' && e.status === 500);
+});
+
+test('netværksfejl har trin og fejltype, men ingen besked', async () => {
+  const { hent } = falskHent({ interaktion: () => { throw new TypeError('HEMMELIG fetch failed'); } });
+  await assert.rejects(lav(hent, { timeoutMs: 1000 }).transskriber(lyd(), valg()), (e) => {
+    assert.equal(e.trin, 'transskription');
+    assert.equal(e.fejltype, 'TypeError');
+    assert.ok(!JSON.stringify(e).includes('HEMMELIG') && !e.message.includes('HEMMELIG'));
+    return true;
+  });
+});
+
+test('retryDelay i Googles fejlsvar respekteres', async () => {
+  const { hent } = falskHent({ interaktion: raekke(() => json(429, KVOTE), 200) });
+  const v = maaltVent();
+  const logs = [];
+  await lav(hent, { vent: v.vent, log: (o) => logs.push(o) }).transskriber(lyd(), valg());
+  assert.deepEqual(v.ventet, [37000]);
+  assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 429, googleKode: 'RESOURCE_EXHAUSTED', forsoeg: 1, ventMs: 37000 }]);
+});
+
+test('mange kald, der rammer en minutgrænse, venter grænsen ud i stedet for at fejle', async () => {
+  // Som testbænken: Google svarer 429 i et minut og derefter igen normalt.
+  let tid = Date.UTC(2026, 10, 3, 12);
+  const aabner = tid + 60000;
+  const { hent } = falskHent({ interaktion: () => (tid < aabner ? json(429, KVOTE) : json(200, SVAR_OK)) });
+  const vent = async (ms) => { tid += ms; };
+  const g = lav(hent, { vent, nu: () => tid, timeoutMs: 840000 });
+  for (let i = 0; i < 5; i++) assert.equal((await g.transskriber(lyd(), valg())).tekst, 'Hej');
 });
