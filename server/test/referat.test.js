@@ -208,7 +208,7 @@ test('felter uden for typen tømmes, selvom modellen udfylder dem', async () => 
 
 test('byggenotat beholder mål og mængder præcis som sagt', async () => {
   const { hent } = falskHent(() => modelSvar({ titel: 'Gåtur', opsummering: 'o', hovedpunkter: [], fejlOgMangler: ['Revne i væg'], maalOgMaengder: ['12,5 m² gips', '40 stk. søm'], opgaver: [] }));
-  const r = await lav(hent).lav({ ...INPUT, type: 'byggenotat', signal: signal() });
+  const r = await lav(hent).lav({ ...INPUT, tekst: 'Vi skal bruge 12,5 kvadratmeter gips og fyrre søm. Der er en revne i væggen.', type: 'byggenotat', signal: signal() });
   assert.deepEqual(r.maalOgMaengder, ['12,5 m² gips', '40 stk. søm']);
   assert.deepEqual(r.fejlOgMangler, ['Revne i væg']);
 });
@@ -259,4 +259,39 @@ test('prompten bevarer reglerne mod opfundne roller og Mig for alle typer med op
     assert.ok(p.includes('Tilføj ikke roller'), type);
     assert.ok(p.includes('"Mig"'), type);
   }
+});
+
+// Tal må aldrig gættes
+
+test('prompten kræver [uklart] ved usikre tal, kun det rettede tal og ingen omregning eller sum', () => {
+  const p = lavPrompt({ tekst: 'x', titel: '', kort: false });
+  for (const del of [
+    'Er du i tvivl om et tal',
+    'skriv "[uklart]" i stedet for tallet',
+    'Retter taleren sig selv',
+    'Omregn ikke enheder',
+    'læg ikke tal sammen',
+    'årstal',
+  ]) assert.ok(p.includes(del), del);
+});
+
+test('tal i referatet, der ikke står i transskriptionen, bliver [uklart]', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, opsummering: 'Peter bestiller 12 ruller tagpap til fredag.', hovedpunkter: ['Taget er 89 år gammelt'] }));
+  const r = await lav(hent).lav({ ...INPUT, signal: signal() });
+  assert.equal(r.opsummering, 'Peter bestiller [uklart] ruller tagpap til fredag.');
+  assert.deepEqual(r.hovedpunkter, ['Taget er [uklart] år gammelt']);
+});
+
+test('tal fra brugerens titel og fra transskriptionen bliver stående', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, opsummering: 'Byggemøde 7: Peter bestiller 4 ruller.' }));
+  const r = await lav(hent).lav({ ...INPUT, tekst: 'Peter bestiller fire ruller tagpap.', titel: 'Byggemøde 7', signal: signal() });
+  assert.equal(r.titel, 'Byggemøde 7');
+  assert.equal(r.opsummering, 'Byggemøde 7: Peter bestiller 4 ruller.');
+});
+
+test('en kort note kontrolleres også', async () => {
+  const { hent } = falskHent(() => modelSvar({ titel: 'Ring til Kim', type: 'paamindelse', renTekst: 'Ring til Kim kl. 9.', huskeliste: ['Ring til Kim kl. 9'] }));
+  const r = await lav(hent).lav({ tekst: 'Øh, husk at ringe til Kim klokken otte.', titel: '', varighedSek: 10, signal: signal() });
+  assert.equal(r.renTekst, 'Ring til Kim kl. [uklart].');
+  assert.deepEqual(r.huskeliste, ['Ring til Kim kl. [uklart]']);
 });

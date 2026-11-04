@@ -8,6 +8,7 @@
 
 const { BASE, GeminiFejl, httpFejl, udtraekTekst, hentUdenGraense } = require('./gemini.js');
 const { TYPER, ETIKET, BESKRIVELSE, FELTER, AFSNIT, laesType } = require('./typer.js');
+const { kontrollerTal } = require('./tal.js');
 
 const KORT_SEKUNDER = 30;
 const STANDARD_TITEL = 'Optagelse';
@@ -50,6 +51,9 @@ const REGLER = [
   'Tilføj ikke roller, titler, årsager eller sammenhænge, der ikke blev sagt.',
   'Er noget uklart eller utydeligt, så skriv "[uklart]" i stedet for at gætte.',
   'Gengiv tal, mål, mængder, datoer, frister, adresser, navne og fagudtryk præcist, som de blev sagt.',
+  'Er du i tvivl om et tal, et mål, en dato eller en frist, så skriv "[uklart]" i stedet for tallet. Gæt aldrig, og ret aldrig et tal, der lyder forkert eller ufuldstændigt.',
+  'Retter taleren sig selv (fx "tre meter, nej fire meter"), så brug kun det rettede tal.',
+  'Omregn ikke enheder, og læg ikke tal sammen. Tilføj ikke årstal, ugedage eller datoer, der ikke blev sagt.',
   'Tilføj ingen egne vurderinger, anbefalinger eller konklusioner.',
   'Skriv på dansk i en kort, saglig referatstil.',
   'Fjern fyldord, gentagelser, small talk og afbrydelser.',
@@ -186,7 +190,8 @@ function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense }) {
         } catch {
           throw new GeminiFejl('tjeneste', 'referat: ugyldig JSON');
         }
-        return normaliser(raa, { titel: renTitel, kort, tekst, type: valgtType });
+        // Hvert tal i referatet skal kunne findes i transskriptionen. Ellers bliver det [uklart].
+        return kontrollerTal(normaliser(raa, { titel: renTitel, kort, tekst, type: valgtType }), tekst, { brugerTitel: renTitel }).referat;
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.
