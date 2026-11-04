@@ -172,6 +172,9 @@ function talIKilde(tekst) {
     for (const v of tolkninger(m[0])) tal.add(v);
     for (const g of m[0].split(/[.,: ]/)) tal.add(Number(g));
   }
+  // Telefonnumre skrives både "12 34 56 78" og "12345678".
+  for (const [m] of kilde.matchAll(/(?<!\d)\d{2}(?: \d{2}){3,5}(?!\d)/g)) tal.add(Number(m.replace(/ /g, '')));
+  for (const [m] of kilde.matchAll(/(?<!\d|\d[.,])\d{8,12}(?!\d|[.,]\d)/g)) for (const par of m.match(/\d{2}/g)) tal.add(Number(par));
   const { sekvenser, ekstra } = scanTalord(kilde);
   for (const s of sekvenser) tal.add(s.vaerdi);
   for (const v of ekstra) tal.add(v);

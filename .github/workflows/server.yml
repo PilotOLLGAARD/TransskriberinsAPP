@@ -37,6 +37,6 @@ jobs:
             TILLADT_OPRINDELSE=https://pilotollgaard.github.io
             GEMINI_MODEL=gemini-3.5-transcribe
             SPROG=da-DK
-            TRANSSKRIPTION_TILSTAND=smart
+            TRANSSKRIPTION_TILSTAND=verbatim
           secrets: |-
             GEMINI_API_KEY=gemini-api-key:latest

@@ -45,6 +45,13 @@ function maaltHent(hent) {
     const s = await hent(url, v);
     const fil = kontekst.getStore();
     if (!fil || !s.json) return s;
+    // Googles svar ved fejl gemmes i resultatet (kun status og fejlkode, ingen indhold), så årsagen kan ses.
+    if (!s.ok) {
+      const t = await s.clone().text().catch(() => '');
+      const kode = /"status":\s*"([A-Z_]+)"/.exec(t)?.[1] ?? '';
+      const sti = String(url).split('?')[0].replace(/.*\/v1beta\//, '').replace(/files\/[\w-]+/, 'files/ID');
+      (fil.googleFejl ??= []).push(`${s.status} ${kode} ${sti}`);
+    }
     return new Proxy(s, {
       get(mål, navn) {
         if (navn !== 'json') {
@@ -75,7 +82,7 @@ async function startServer(logge) {
     konfig: { tilladtOprindelse: 'http://localhost', maxBytes: 157286400 },
     tjekAdgang: lavAdgangsTjek({ tenantId: TENANT, clientId: CLIENT, hent: async () => new Response(JSON.stringify({ keys: [jwk] })) }),
     gemini: lavGemini({
-      noegle, model: 'gemini-3.5-transcribe', sprog: 'da-DK', tilstand: 'smart', ordliste, timeoutMs: 840000,
+      noegle, model: 'gemini-3.5-transcribe', sprog: 'da-DK', tilstand: 'verbatim', ordliste, timeoutMs: 840000,
       hent: maaltHent((...a) => fetch(...a)), hentLangsom: maaltHent(hentUdenGraense),
       advar: (besked) => logge.push({ haendelse: 'advarsel', besked }),
     }),
@@ -117,7 +124,7 @@ async function koerFil(miljoe, f) {
   const ms = Date.now() - start;
   const usd = pris({ sek: status === 200 || status === 502 ? f.sek : 0, tekstTokens: maal.tokens.tekst, referat: maal.tokens.referat });
   tilfoejForbrug({ hvad: `baenk ${f.fil}`, usd });
-  const r = { fil: f.fil, kilde: f.kilde, id: f.id, forhold: f.forhold, format: f.format, sek: f.sek, status, ms, usd, fejl: svar?.fejl };
+  const r = { fil: f.fil, kilde: f.kilde, id: f.id, forhold: f.forhold, format: f.format, sek: f.sek, status, ms, usd, fejl: svar?.fejl, googleFejl: maal.googleFejl };
   if (svar?.tekst && f.facit) r.wer = wer(f.facit, svar.tekst);
   if (svar?.referat && f.facit) {
     r.tal = talNoejagtighed(svar.referat, f.facit, f.forkerte);

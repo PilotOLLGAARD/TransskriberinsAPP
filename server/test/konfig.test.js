@@ -20,14 +20,15 @@ test('hentKonfig bruger standardværdier', () => {
   const k = hentKonfig(FULD);
   assert.equal(k.model, 'gemini-3.5-transcribe');
   assert.equal(k.sprog, 'da-DK');
-  assert.equal(k.tilstand, 'smart');
+  // Smart springer replikker over (testbænken 4. nov. 2026: samme fire sætninger manglede hver gang). Verbatim tager alt med.
+  assert.equal(k.tilstand, 'verbatim');
   assert.equal(k.maxBytes, 157286400);
   assert.equal(k.timeoutMs, 840000);
 });
 
-test('ukendt tilstand bliver smart', () => {
-  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'x' }).tilstand, 'smart');
-  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'verbatim' }).tilstand, 'verbatim');
+test('ukendt tilstand bliver verbatim, og smart kun når den vælges', () => {
+  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'x' }).tilstand, 'verbatim');
+  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_TILSTAND: 'smart' }).tilstand, 'smart');
 });
 
 test('referatets model har standard og kan ændres', () => {

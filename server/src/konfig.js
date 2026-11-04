@@ -27,7 +27,8 @@ function hentKonfig(env) {
     model: env.GEMINI_MODEL || 'gemini-3.5-transcribe',
     referatModel: env.REFERAT_MODEL || 'gemini-3.8-flash',
     sprog: env.SPROG || 'da-DK',
-    tilstand: env.TRANSSKRIPTION_TILSTAND === 'verbatim' ? 'verbatim' : 'smart',
+    // Verbatim som standard: smart springer replikker over (testbænken, 4. nov. 2026).
+    tilstand: env.TRANSSKRIPTION_TILSTAND === 'smart' ? 'smart' : 'verbatim',
     maxBytes: tal(env.MAX_LYD_BYTES, STANDARD_MAX_BYTES),
     timeoutMs: tal(env.GEMINI_TIMEOUT_MS, STANDARD_TIMEOUT_MS),
   };
