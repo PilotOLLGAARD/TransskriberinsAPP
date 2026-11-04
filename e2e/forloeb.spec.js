@@ -560,8 +560,8 @@ test('forklaringen kan skjules og forbliver skjult efter genindlæsning', async 
   await side.reload();
   await knap(side, 'Optag').waitFor();
   assert.equal(await side.getByText('Sådan gør du').count(), 0);
-  await knap(side, 'Vis forklaring').click();
-  await vis(side, 'Sådan gør du');
+  assert.equal(await knap(side, 'Vis forklaring').count(), 0);
+  await knap(side, 'Information').waitFor();
   await kontekst.close();
 });
 
@@ -714,11 +714,11 @@ test('Tidligere optagelser kan betjenes på 360 px', async () => {
   await aabnTidligere(side);
   const m = await side.evaluate(() => ({
     bred: document.documentElement.scrollWidth,
-    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height), b.className]),
     tekst: [...document.querySelectorAll('button, p, h1, h2')].map((e) => parseFloat(getComputedStyle(e).fontSize)),
   }));
   assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
-  for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `"${tekst}" er ${hoejde} px`);
+  for (const [tekst, hoejde, klasse] of m.knapper) assert.ok(hoejde >= (klasse.includes('top-knap') ? 44 : 72), `"${tekst}" er ${hoejde} px`);
   for (const s of m.tekst) assert.ok(s >= 16, `tekst på ${s} px`);
   await kontekst.close();
 });
@@ -1131,5 +1131,54 @@ test('Fortryd-bjælken er den samme, mens skærmen tegnes igen, og glider derfor
   assert.equal(await side.evaluate(() => document.querySelector('.toast') === window.foersteBjaelke), true);
   await knap(side, 'Fortryd').click();
   assert.equal(await side.locator('.toast').count(), 0);
+  await kontekst.close();
+});
+
+// Tilbage i toppen og Information
+
+test('Information viser afsnittene og en klikbar mailadresse, og Tilbage fører til forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Information').click();
+  await side.getByRole('heading', { name: 'Information', exact: true }).waitFor();
+  for (const overskrift of ['Hvad appen kan bruges til', 'Sådan bruger du den', 'Vigtigt at vide', 'Kontakt']) {
+    await side.getByRole('heading', { name: overskrift }).waitFor();
+  }
+  await vis(side, 'Brug appen fra hjemmeskærmen');
+  await vis(side, 'Tjek altid vigtige tal, mål og frister.');
+  const link = side.getByRole('link', { name: 'rw@ollgaard.dk' });
+  assert.equal(await link.getAttribute('href'), 'mailto:rw@ollgaard.dk');
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Optag').waitFor();
+  await kontekst.close();
+});
+
+test('Tilbage sidder øverst og ens på Tidligere, Læs og Information', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await optag(side, { titel: 'Tilbage øverst' });
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  const maal = async () => {
+    const tilbage = knap(side, 'Tilbage');
+    assert.equal(await tilbage.count(), 1, 'præcis én Tilbage');
+    const r = await tilbage.boundingBox();
+    assert.ok(r.y >= 0 && r.y < 80 && r.x < 60, `Tilbage sidder ${Math.round(r.x)},${Math.round(r.y)}`);
+    assert.ok(r.height >= 44);
+    return { klasse: await tilbage.getAttribute('class'), hoejde: Math.round(r.height) };
+  };
+  await aabnTidligere(side);
+  const tidligere = await maal();
+  await knap(side, 'Læs').click();
+  await vis(side, 'Testreferat af');
+  const laes = await maal();
+  await knap(side, 'Tilbage').click();
+  await side.getByRole('heading', { name: TIDLIGERE }).waitFor();
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Information').click();
+  const information = await maal();
+  assert.deepEqual(laes, tidligere);
+  assert.deepEqual(information, tidligere);
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
   await kontekst.close();
 });

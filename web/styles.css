@@ -588,3 +588,15 @@ button svg { width: 26px; height: 26px; }
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: none; }
 }
+
+/* Tilbage øverst til venstre på alle skærme, man kan gå tilbage fra. */
+.tilbage-knap { padding-left: 10px; }
+
+/* Information: korte afsnit med luft og stor tekst. */
+.info-afsnit { margin-top: 22px; }
+.info-afsnit h2 { margin-bottom: 8px; }
+.info-afsnit p, .info-afsnit li { font-size: 19px; }
+.info-liste { margin: 0; padding-left: 22px; }
+.info-liste li { margin: 8px 0; padding-left: 2px; }
+.info-afsnit a { color: var(--blaa-dyb); font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.info-afsnit:last-child { margin-bottom: 24px; }

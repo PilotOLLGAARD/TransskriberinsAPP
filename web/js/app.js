@@ -267,9 +267,15 @@ function aabnNavn(id) {
   tegn();
 }
 
-function visForklaring(vis) {
-  t.forklaringSkjult = !vis;
-  husk(SKJUL_FORKLARING, vis ? null : '1');
+function skjulForklaring() {
+  t.forklaringSkjult = true;
+  husk(SKJUL_FORKLARING, '1');
+  tegn();
+}
+
+function aabnInformation() {
+  t.besked = null;
+  t.visning = 'information';
   tegn();
 }
 
@@ -437,6 +443,16 @@ function opdaterUr() {
 
 // Byggeklodser
 
+/** Toppen på skærme, man kan gå tilbage fra. Samme sted og udseende overalt. */
+function topMedTilbage(vedTryk) {
+  return h(
+    'header',
+    { klasse: 'top' },
+    h('button', { type: 'button', klasse: 'top-knap tilbage-knap', vedTryk }, ikon('tilbage'), 'Tilbage'),
+    ordmaerke(),
+  );
+}
+
 function ordmaerke() {
   return h('img', { klasse: 'ordmaerke', src: 'ordmaerke.svg', alt: 'ØLLGAARD' });
 }
@@ -496,7 +512,7 @@ function forklaring() {
       ...TYPER.filter((x) => x.noegle !== STANDARD_TYPE).flatMap(({ navn, forklaring: tekst }) => [h('dt', {}, navn), h('dd', {}, tekst)]),
     ),
     h('p', { klasse: 'lille' }, 'Vælger du Automatisk, finder appen selv typen.'),
-    knap('Skjul forklaringen', () => visForklaring(false), { klasse: 'hvid' }),
+    knap('Skjul forklaringen', skjulForklaring, { klasse: 'hvid' }),
   );
 }
 
@@ -732,7 +748,7 @@ function skaermStart() {
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
-    t.forklaringSkjult ? knap('Vis forklaring', () => visForklaring(true), { klasse: 'hvid' }) : null,
+    knap('Information', aabnInformation, { klasse: 'hvid', ikonNavn: 'info' }),
     hjaelpTilHjemmeskaerm(),
   ];
 }
@@ -828,17 +844,55 @@ function skaermFremdrift() {
   ];
 }
 
+function skaermInformation() {
+  const afsnit = (titel, ...indhold) => h('section', { klasse: 'info-afsnit' }, h('h2', {}, titel), ...indhold);
+  return [
+    topMedTilbage(tilForsiden),
+    h('h1', { klasse: 'titel' }, 'Information'),
+    afsnit(
+      'Hvad appen kan bruges til',
+      h('p', {}, 'Indtal byggenotater, møder, påmindelser til dig selv og andet. Du får et referat på din egen mail.'),
+    ),
+    afsnit(
+      'Sådan bruger du den',
+      h(
+        'ol',
+        { klasse: 'trin' },
+        h('li', {}, 'Vælg type, og skriv evt. et navn.'),
+        h('li', {}, 'Tryk Optag, og tryk Stop, når du er færdig.'),
+        h('li', {}, 'Giv optagelsen et navn, og tryk Send.'),
+        h('li', {}, 'Du får et referat på mail med PDF. Det kan tage et par minutter.'),
+      ),
+    ),
+    afsnit(
+      'Vigtigt at vide',
+      h(
+        'ul',
+        { klasse: 'info-liste' },
+        h('li', {}, 'Brug appen fra hjemmeskærmen, ikke fra en fane i Safari eller Chrome.'),
+        h('li', {}, 'Hold appen åben og skærmen tændt, mens du optager, og indtil referatet er sendt.'),
+        h('li', {}, 'Lyden slettes fra telefonen, når referatet er sendt. Referatet og PDF\'en gemmes på telefonen i 7 dage under Tidligere. Optagelser, der ikke er sendt, gemmes, indtil de er sendt.'),
+        h('li', {}, 'Referatet laves af AI. Tjek altid vigtige tal, mål og frister. Hele transskriptionen ligger bagerst i PDF\'en.'),
+        h('li', {}, 'Lyd og tekst behandles af Google for at lave transskription og referat. De bruges ikke til at træne AI-modeller. Mailen sendes fra din egen Outlook.'),
+      ),
+    ),
+    afsnit(
+      'Kontakt',
+      h('p', {}, 'Hvis noget ikke virker, så kontakt Rasmus Winther på ', h('a', { href: 'mailto:rw@ollgaard.dk' }, 'rw@ollgaard.dk'), '.'),
+    ),
+  ];
+}
+
 function skaermTidligere() {
   const noter = t.noter.filter((n) => n.id !== optager.aktivId());
   return [
-    h('header', { klasse: 'top' }, ordmaerke()),
+    topMedTilbage(tilbage),
     h('h1', { klasse: 'titel' }, 'Tidligere optagelser'),
     h('p', { klasse: 'undertitel' }, 'Her finder du dine optagelser fra de sidste 7 dage. Optagelser, der endnu ikke er sendt, gemmes, indtil de er sendt.'),
     beskedElement(),
     noter.length
       ? h('div', { klasse: 'liste historik-liste' }, ...noter.map(historikKort))
       : h('p', { klasse: 'tom-liste' }, 'Ingen optagelser endnu.'),
-    knap('Tilbage', tilbage, { klasse: 'hvid', ikonNavn: 'tilbage' }),
   ];
 }
 
@@ -929,7 +983,7 @@ function skaermTekst() {
     h(
       'div',
       { klasse: 'tekst-skaerm' },
-      h('header', { klasse: 'top' }, ordmaerke()),
+      topMedTilbage(tilbage),
       h('h1', { klasse: 'titel' }, note.titel || 'Teksten'),
       h('p', { klasse: 'undertitel' }, formaterDato(note.oprettet)),
       beskedElement(),
@@ -945,11 +999,12 @@ function skaermTekst() {
         : [
           note.maaskeSendt && !sendt ? knap('Jeg har fået mailen', () => bekraeftSendt(note.id), { klasse: 'tonet', ikonNavn: 'tjek' }) : null,
           send,
-          knap('Tilbage', tilbage, { klasse: 'hvid', ikonNavn: 'tilbage' }),
         ]),
     ),
   ];
 }
+
+let forrigeVisning = null;
 
 function tegn() {
   let indhold;
@@ -958,6 +1013,7 @@ function tegn() {
   else if (t.visning === 'navn') indhold = skaermNavn();
   else if (t.visning === 'tidligere') indhold = skaermTidligere();
   else if (t.visning === 'fremdrift') indhold = skaermFremdrift();
+  else if (t.visning === 'information') indhold = skaermInformation();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
@@ -966,6 +1022,10 @@ function tegn() {
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
   app.replaceChildren(...indhold.filter(Boolean));
+  if (t.visning !== forrigeVisning) {
+    forrigeVisning = t.visning;
+    window.scrollTo(0, 0);
+  }
   // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
   if (t.visning === 'navn') document.getElementById('titel')?.focus();
   else if (markering) {
