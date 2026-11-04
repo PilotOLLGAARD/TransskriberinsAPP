@@ -18,7 +18,7 @@ const LAGER_VENTETID_MS = 5000;
 export const LAAS_PRAEFIKS = 'optag-';
 
 export class OptageFejl extends Error {
-  /** @param {'mikrofonNaegtet'|'kanIkkeOptage'|'ingenFlereDele'} type */
+  /** @param {'mikrofonNaegtet'|'kanIkkeOptage'|'ingenFlereDele'|'plads'|'pladsTom'} type */
   constructor(type) {
     super(type);
     this.type = type;
@@ -283,7 +283,10 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       } catch (e) {
         frigivLaas?.();
         stopSpor(stream);
-        throw e instanceof OptageFejl ? e : new OptageFejl('kanIkkeOptage');
+        if (e instanceof OptageFejl) throw e;
+        // Fuldt lager: En ny optagelse har intet gemt. En fortsat har stadig lyden fra de tidligere dele.
+        if (e?.name === 'QuotaExceededError') throw new OptageFejl(ny ? 'pladsTom' : 'plads');
+        throw new OptageFejl('kanIkkeOptage');
       }
 
       const o = {

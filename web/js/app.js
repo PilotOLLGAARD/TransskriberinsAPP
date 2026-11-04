@@ -1,6 +1,6 @@
 // Kun brugerflade. Logikken ligger i forloeb.js og optager.js.
 
-import { BESKEDER } from './beskeder.js';
+import { BESKEDER, besked } from './beskeder.js';
 import { ENTRA, LOKAL } from './konfig.js';
 import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
@@ -110,15 +110,24 @@ function maerkbar() {
 
 async function opdater() {
   // Noter, der er ved at blive slettet, vises ikke. De kan stadig fortrydes.
-  t.noter = (await lager.alleNoter()).filter((n) => !n.slettet);
+  // Ændringer, der ikke kunne gemmes (fx fuldt lager), vises alligevel, så intet hænger i "sender".
+  t.noter = (await lager.alleNoter()).map(forloeb.medUgemt).filter((n) => !n.slettet);
   // En afsendelse, der fejlede på login, betyder, at man ikke er logget ind. En mulig dobbelt mail tæller ikke:
   // den venter på brugerens eget valg.
   if (t.noter.some((n) => n.fejlType === 'login' && !n.maaskeSendt)) t.loginStatus = 'nej';
   tegn();
 }
 
-function visFejl(noegle) {
-  t.besked = { tekst: BESKEDER[noegle], type: 'fejl' };
+/** Viser en fejl. En ukendt fejltype giver reservens tekst, aldrig en tom besked. */
+function visFejl(noegle, reserve) {
+  t.besked = { tekst: besked(noegle, reserve), type: 'fejl' };
+}
+
+/** Hvorfor en færdig note ikke blev mailet. */
+function mailFejlTekst(note) {
+  if (note.maaskeSendt) return BESKEDER.maaskeSendt;
+  if (note.fejlType === 'login' || note.fejlType === 'plads') return BESKEDER[note.fejlType];
+  return BESKEDER.mailFejl;
 }
 
 // Handlinger
@@ -158,7 +167,7 @@ async function optag() {
       urTimer = setInterval(opdaterUr, 1000);
     }
   } catch (e) {
-    visFejl(e?.type || 'kanIkkeOptage');
+    visFejl(e?.type, 'kanIkkeOptage');
   } finally {
     t.starter = false;
   }
@@ -187,7 +196,7 @@ async function fortsaetOptagelse(id) {
       urTimer = setInterval(opdaterUr, 1000);
     }
   } catch (e) {
-    visFejl(e?.type || 'kanIkkeOptage');
+    visFejl(e?.type, 'kanIkkeOptage');
   } finally {
     t.starter = false;
   }
@@ -205,7 +214,7 @@ async function stop() {
 }
 
 async function efterAfsendelse(id) {
-  if ((await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
+  if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   await opdater();
 }
 
@@ -269,7 +278,7 @@ async function sendTilMig(id) {
   } finally {
     t.igang.delete(id);
   }
-  if ((await lager.hentNote(id))?.status === STATUS.SENDT) {
+  if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) {
     t.visning = 'start';
     t.aabenNote = null;
     t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
@@ -517,8 +526,7 @@ function kortIndhold(note) {
         handlinger: [knap('Læs og send', () => aabnTekst(note.id))], laes: false,
       };
     }
-    const forklaring = note.fejlType === 'mailFejl' ? BESKEDER.mailFejl
-      : note.fejlType === 'login' ? BESKEDER.login : 'Referatet er klar.';
+    const forklaring = note.fejlType ? mailFejlTekst(note) : 'Referatet er klar.';
     const send = note.fejlType === 'login'
       ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: 'send' }), { ikonNavn: 'person' })
       : knap('Send igen', () => behandlOgSend(note.id), { ikonNavn: 'send' });
@@ -549,7 +557,7 @@ function kortIndhold(note) {
 
   return {
     klasse: 'kort fejl', ikonNavn: 'advarsel', ikonKlasse: 'fejl',
-    forklaring: BESKEDER[note.fejlType] || BESKEDER.tjeneste,
+    forklaring: besked(note.fejlType),
     handlinger: [proevIgen],
     laes: false,
   };
@@ -597,7 +605,7 @@ function historikKort(note) {
   const sendt = note.status === STATUS.SENDT;
   const indhold = sendt ? null : kortIndhold(note);
   const advarsel = sendt
-    ? (note.maaskeSendt ? BESKEDER.maaskeSendt : note.fejlType === 'login' ? BESKEDER.login : note.fejlType ? BESKEDER.mailFejl : null)
+    ? (note.maaskeSendt || note.fejlType ? mailFejlTekst(note) : null)
     : indhold.forklaring;
   // Typen, AI'en valgte. Før afsendelsen er der ingen.
   const type = typeNavn(note.type);
@@ -729,13 +737,12 @@ function fremdriftFejl(note) {
   if (t.igang.has(note.id)) return null;
   if (note.status === STATUS.FEJL) {
     if (note.fremdrift === 'laver' || note.fejlType === 'ingenTale') {
-      return { trin: 3, titel: 'Referatet kunne ikke laves lige nu', tekst: BESKEDER[note.fejlType] || BESKEDER.tjeneste };
+      return { trin: 3, titel: 'Referatet kunne ikke laves lige nu', tekst: besked(note.fejlType) };
     }
-    return { trin: 2, titel: 'Lyden kunne ikke sendes', tekst: BESKEDER[note.fejlType] || BESKEDER.tjeneste };
+    return { trin: 2, titel: 'Lyden kunne ikke sendes', tekst: besked(note.fejlType) };
   }
   if (note.status === STATUS.TEKST_KLAR && (note.fejlType || note.maaskeSendt)) {
-    const tekst = note.maaskeSendt ? BESKEDER.maaskeSendt : note.fejlType === 'login' ? BESKEDER.login : BESKEDER.mailFejl;
-    return { trin: 4, titel: 'Mailen blev ikke sendt', tekst };
+    return { trin: 4, titel: 'Mailen blev ikke sendt', tekst: mailFejlTekst(note) };
   }
   return null;
 }
@@ -930,7 +937,7 @@ function skaermTekst() {
     return skaermStart();
   }
   const sender = t.igang.has(note.id) || note.status === STATUS.SENDER_MAIL;
-  const fejl = note.fejlType === 'login' ? BESKEDER.login : note.fejlType === 'mailFejl' ? BESKEDER.mailFejl : null;
+  const fejl = note.fejlType ? mailFejlTekst({ ...note, maaskeSendt: false }) : null;
   const sendt = note.status === STATUS.SENDT;
   const send = note.fejlType === 'login'
     ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: sendt ? 'sendIgen' : 'send' }), { ikonNavn: 'person' })

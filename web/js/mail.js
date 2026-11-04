@@ -60,8 +60,12 @@ export function lavBesked(note) {
   };
 }
 
-/** Sender noten fra brugerens egen konto til brugeren selv. Kun 202 er succes. */
-export async function sendMail({ note, til, bevis, signal, hent = (...a) => fetch(...a) }) {
+/**
+ * Sender noten fra brugerens egen konto til brugeren selv. Kun 202 er succes.
+ * online er telefonens egen melding om net. Uden net forlader mailen aldrig telefonen, så den kan sendes igen.
+ */
+export async function sendMail({ note, til, bevis, signal, hent = (...a) => fetch(...a), online = globalThis.navigator?.onLine }) {
+  if (online === false) throw new SendFejl('mailFejl');
   let svar;
   try {
     svar = await hent(`${GRAPH_URL}/me/sendMail`, {

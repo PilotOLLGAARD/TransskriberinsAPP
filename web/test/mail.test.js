@@ -105,3 +105,22 @@ test('sendMail virker uden AbortSignal.any (iOS 16 og 17.0–17.3)', async () =>
     AbortSignal.any = any;
   }
 });
+
+test('uden net forlader mailen aldrig telefonen: mailFejl, ikke mailUkendt, og intet kald', async () => {
+  const { kald, hent } = lavHent();
+  await assert.rejects(sendMail({ note: NY, til: 'a@b.dk', bevis: 'b', hent, online: false }), (e) => e.type === 'mailFejl');
+  assert.equal(kald.length, 0);
+});
+
+test('online som standard: telefonens egen melding om net bruges', async () => {
+  const foer = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: { onLine: false }, configurable: true });
+  try {
+    const { kald, hent } = lavHent();
+    await assert.rejects(sendMail({ note: NY, til: 'a@b.dk', bevis: 'b', hent }), (e) => e.type === 'mailFejl');
+    assert.equal(kald.length, 0);
+  } finally {
+    if (foer) Object.defineProperty(globalThis, 'navigator', foer);
+    else delete globalThis.navigator;
+  }
+});

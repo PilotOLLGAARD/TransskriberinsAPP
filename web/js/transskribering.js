@@ -6,7 +6,11 @@ const TIDSGRAENSE_MS = 16 * 60 * 1000;
 // Referat og PDF af færdige tekster tager under et minut på serveren.
 const REFERAT_TIDSGRAENSE_MS = 2 * 60 * 1000;
 
-const FEJLTYPER = { 401: 'login', 403: 'adgang', 411: 'kanIkkeBehandles', 413: 'kanIkkeBehandles', 415: 'kanIkkeBehandles', 422: 'kanIkkeBehandles' };
+// Står uploaden helt stille så længe, er forbindelsen død (fx uden dækning). Så kan noten prøves igen
+// med det samme i stedet for at vente på TIDSGRAENSE_MS. Kun når telefonen selv melder fremdrift.
+const STILLE_MS = 90 * 1000;
+
+export const FEJLTYPER = { 401: 'login', 403: 'adgang', 411: 'kanIkkeBehandles', 413: 'kanIkkeBehandles', 415: 'kanIkkeBehandles', 422: 'kanIkkeBehandles' };
 
 /** Som AbortSignal.any, som først findes i Safari 17.4. Ældre telefoner får en håndlavet udgave. */
 export function kombinerSignaler(signaler) {
@@ -51,23 +55,38 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
  * Som fetch, men med XMLHttpRequest, som kan melde, når hele lyden er sendt (vedSendt).
  * fetch kan ikke vise fremdrift for upload i alle browsere.
  */
-export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt }, Xhr = globalThis.XMLHttpRequest) {
+export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt, stilleMs = STILLE_MS }, Xhr = globalThis.XMLHttpRequest) {
   if (typeof Xhr !== 'function') return fetch(url, { method, headers, body, signal });
   return new Promise((ok, fejl) => {
     const x = new Xhr();
     // Præcis én melding. Melder telefonen ikke selv, at lyden er sendt, meldes det, når svaret kommer.
     let meldt = false;
+    // Vagten startes først ved den første melding om fremdrift og stoppes, når hele lyden er sendt.
+    let vagt = null;
+    const stopVagt = () => clearTimeout(vagt);
     const meldSendt = () => {
+      stopVagt();
       if (meldt) return;
       meldt = true;
       vedSendt?.();
     };
     const afbryd = () => x.abort();
-    const faerdig = () => signal?.removeEventListener('abort', afbryd);
+    const faerdig = () => {
+      stopVagt();
+      signal?.removeEventListener('abort', afbryd);
+    };
     x.open(method, url);
     for (const [navn, vaerdi] of Object.entries(headers)) x.setRequestHeader(navn, vaerdi);
     x.upload.addEventListener('load', meldSendt);
-    x.upload.addEventListener('progress', (e) => { if (e.lengthComputable && e.loaded >= e.total) meldSendt(); });
+    x.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && e.loaded >= e.total) {
+        meldSendt();
+        return;
+      }
+      if (meldt) return;
+      stopVagt();
+      vagt = setTimeout(afbryd, stilleMs);
+    });
     x.onload = () => {
       faerdig();
       meldSendt();

@@ -623,3 +623,24 @@ test('bedOmTilladelse spørger kun, når tilladelsen ikke er afgjort', async () 
   await bedOmTilladelse({ notifikation: lav('default') });
   assert.equal(spurgt, 1);
 });
+
+test('fuldt lager, når optagelsen skal starte, giver pladsTom og lukker mikrofonen', async () => {
+  const s = opsaet();
+  s.lager.opretNote = async () => { throw new DOMException('fuld', 'QuotaExceededError'); };
+  await assert.rejects(s.optager.start(), (e) => e.type === 'pladsTom');
+  assert.ok(s.spor.stoppet);
+  assert.equal(s.optager.erAktiv(), false);
+});
+
+test('fuldt lager, når en afbrudt optagelse skal fortsættes, giver plads, og den gemte lyd røres ikke', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s, 60000);
+  const stykker = s.lager.stykker.length;
+  const opdater = s.lager.opdaterNote;
+  s.lager.opdaterNote = async () => { throw new DOMException('fuld', 'QuotaExceededError'); };
+  await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'plads');
+  s.lager.opdaterNote = opdater;
+  assert.equal(s.lager.stykker.length, stykker);
+  assert.equal(s.lager.noter.get(id).status, 'gemt');
+  assert.equal(s.optager.erAktiv(), false);
+});

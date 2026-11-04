@@ -210,3 +210,61 @@ test('progress under 100 % kalder ikke vedSendt før tid', async () => {
   await hentMedFremdrift('/x', { method: 'POST', headers: {}, body: 'lyd', vedSendt: () => raekke.push('sendt') }, falskXhr([{ type: 'progress', lengthComputable: true, loaded: 5, total: 10 }, { type: 'load' }]));
   assert.deepEqual(raekke, ['sendt']);
 });
+
+/** Falsk XMLHttpRequest, der melder upload-fremdrift på bestemte tidspunkter og svarer efter svarEfter ms (eller aldrig). */
+function tidsstyretXhr({ fremdrift = [], svarEfter = null }) {
+  return class {
+    constructor() { this.upload = new EventTarget(); this.status = 0; this.responseText = ''; this.timere = []; }
+    open() {}
+    setRequestHeader() {}
+    abort() { for (const t of this.timere) clearTimeout(t); this.onabort?.(); }
+    send() {
+      for (const [ms, loaded] of fremdrift) {
+        this.timere.push(setTimeout(() => {
+          const e = new Event('progress');
+          Object.assign(e, { lengthComputable: true, loaded, total: 100 });
+          this.upload.dispatchEvent(e);
+        }, ms));
+      }
+      if (svarEfter !== null) {
+        this.timere.push(setTimeout(() => {
+          this.status = 200;
+          this.responseText = JSON.stringify({ tekst: 'Hej' });
+          this.onload?.();
+        }, svarEfter));
+      }
+    }
+  };
+}
+
+const VALG = { method: 'POST', headers: {}, body: 'lyd' };
+
+test('upload, der går i stå, afbrydes, så noten kan prøves igen i stedet for at hænge i 16 minutter', { timeout: 2000 }, async () => {
+  const start = Date.now();
+  await assert.rejects(
+    hentMedFremdrift('/x', { ...VALG, stilleMs: 50 }, tidsstyretXhr({ fremdrift: [[5, 10]] })),
+    (e) => e.name === 'AbortError',
+  );
+  assert.ok(Date.now() - start < 1000);
+});
+
+test('upload, der går i stå, giver net fra sendLyd', { timeout: 2000 }, async () => {
+  const hent = (url, valg) => hentMedFremdrift(url, { ...valg, stilleMs: 50 }, tidsstyretXhr({ fremdrift: [[5, 10]] }));
+  await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, hent), (e) => e.type === 'net');
+});
+
+test('langsom upload, der hele tiden kommer videre, afbrydes ikke', async () => {
+  const fremdrift = [[10, 10], [40, 20], [70, 30], [100, 40], [130, 50], [160, 100]];
+  const svar = await hentMedFremdrift('/x', { ...VALG, stilleMs: 50 }, tidsstyretXhr({ fremdrift, svarEfter: 400 }));
+  assert.equal(svar.status, 200);
+});
+
+test('når hele lyden er sendt, venter appen på serveren uden at afbryde', async () => {
+  const svar = await hentMedFremdrift('/x', { ...VALG, stilleMs: 50 }, tidsstyretXhr({ fremdrift: [[5, 100]], svarEfter: 300 }));
+  assert.equal(svar.status, 200);
+});
+
+test('melder telefonen aldrig fremdrift (som måske på iPhone), afbrydes der ikke', async () => {
+  const svar = await hentMedFremdrift('/x', { ...VALG, stilleMs: 50 }, tidsstyretXhr({ svarEfter: 300 }));
+  assert.equal(svar.status, 200);
+});

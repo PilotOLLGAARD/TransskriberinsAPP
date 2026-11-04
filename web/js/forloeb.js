@@ -5,6 +5,11 @@ const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.
 // En optagelse, der har gemt lyd for nylig, kan stadig køre i en anden fane.
 const FRISK_MS = 30 * 1000;
 
+/** Fuldt lager hedder plads, så brugeren får at vide, hvad der skal til. */
+function fejlTypeFor(e, reserve) {
+  return e?.name === 'QuotaExceededError' ? 'plads' : (e?.type || reserve);
+}
+
 /**
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
@@ -13,6 +18,9 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
   const igang = new Set();
   // Afsendelser, der kan stoppes, når brugeren sletter noten.
   const afbrydere = new Map();
+  // Ændringer, der ikke kunne gemmes (fx fuldt lager). De vises, så skærmen aldrig hænger i "sender",
+  // og forsvinder, når noten gemmes igen. Efter en genstart retter genoptag noten.
+  const ugemte = new Map();
 
   function nyAfbryder(id) {
     const ctrl = new AbortController();
@@ -31,11 +39,22 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     return nu() - (note.sidstAktiv ?? note.oprettet ?? 0) < FRISK_MS;
   }
 
+  /** Gemmer og glemmer ændringer, der ikke kunne gemmes før. */
+  async function skriv(id, felter) {
+    await lager.opdaterNote(id, felter);
+    ugemte.delete(id);
+  }
+
+  function huskUgemt(id, felter) {
+    ugemte.set(id, { ...ugemte.get(id), ...felter });
+  }
+
   async function opdaterTrygt(id, felter) {
     try {
-      await lager.opdaterNote(id, felter);
+      await skriv(id, felter);
     } catch {
-      // Lyden er stadig gemt, og noten rettes ved næste start.
+      // Lyden er stadig gemt, og noten rettes ved næste start. Indtil da vises ændringen alligevel.
+      huskUgemt(id, felter);
     }
   }
 
@@ -92,6 +111,12 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
   }
 
   const forloeb = {
+    /** Noten, som den skal vises: med ændringer, der ikke kunne gemmes. */
+    medUgemt(note) {
+      if (!note || !ugemte.has(note.id)) return note;
+      return { ...note, ...ugemte.get(note.id) };
+    },
+
     behandl: (id) => eneAdgang(id, async () => {
       // Oprettes før alt andet, så Slet altid kan stoppe afsendelsen, også i de første millisekunder.
       const signal = nyAfbryder(id);
@@ -103,7 +128,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
       }
       try {
-        await lager.opdaterNote(id, { status: STATUS.SENDER, fejlType: undefined, fremdrift: 'sender' });
+        await skriv(id, { status: STATUS.SENDER, fejlType: undefined, fremdrift: 'sender' });
         vedAendring(id);
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const bevis = await login.hentBevis('api');
@@ -121,7 +146,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'emne', 'html']) if (svar[k] !== undefined) felter[k] = svar[k];
         await lager.opdaterNote(id, felter);
       } catch (e) {
-        await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: e?.type || 'tjeneste' });
+        await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: fejlTypeFor(e, 'tjeneste') });
       }
       } finally {
         afbrydere.delete(id);
@@ -133,7 +158,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       if (!note || note.slettet || note.status !== STATUS.TEKST_KLAR) return;
       const signal = nyAfbryder(id);
       try {
-        await lager.opdaterNote(id, { status: STATUS.SENDER_MAIL, fejlType: undefined, fremdrift: 'mailer' });
+        await skriv(id, { status: STATUS.SENDER_MAIL, fejlType: undefined, fremdrift: 'mailer' });
         vedAendring(id);
         const bevis = await login.hentBevis('mail');
         if (signal.aborted) throw Object.assign(new Error('mailFejl'), { type: 'mailFejl' });
@@ -146,7 +171,7 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         }
         await opdaterTrygt(id, {
           status: STATUS.TEKST_KLAR,
-          fejlType: e?.type === 'login' ? 'login' : 'mailFejl',
+          fejlType: e?.type === 'login' ? 'login' : e?.name === 'QuotaExceededError' ? 'plads' : 'mailFejl',
         });
         return;
       } finally {
@@ -156,6 +181,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         await markerSendt(id);
       } catch {
         // Noten står som sender-mail og får advarslen om mulig afsendelse ved næste start.
+        // Indtil da vises den som sendt, for Microsoft har modtaget mailen. Lyden bliver liggende.
+        huskUgemt(id, { status: STATUS.SENDT, sendt: nu(), fejlType: undefined, maaskeSendt: undefined, fremdrift: undefined });
       }
     }),
 
@@ -212,7 +239,13 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     async navngivOgSend(id, titel) {
       // Afkortes i hele tegn, så en emoji aldrig deles.
       const ren = [...String(titel || '').trim()].slice(0, 120).join('').trim();
-      await lager.opdaterNote(id, { titel: ren, navngivet: true });
+      try {
+        await skriv(id, { titel: ren, navngivet: true });
+      } catch (e) {
+        // Intet sendes uden navnet. Optagelsen er gemt og kan sendes, når der er plads.
+        huskUgemt(id, { status: STATUS.FEJL, fejlType: fejlTypeFor(e, 'lager') });
+        return;
+      }
       await forloeb.behandlOgSend(id);
     },
 

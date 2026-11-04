@@ -778,3 +778,80 @@ test('sendVentende sender også Send referat igen, der fejlede på login', async
   assert.equal(s.lager.kort.get('a').fejlType, undefined);
   assert.equal(s.lager.kort.get('a').sendtIgen, 5000);
 });
+
+// Fuld lagerplads. Lyden må aldrig gå tabt, og skærmen må aldrig hænge i "sender".
+
+const FULD = () => new DOMException('fuld', 'QuotaExceededError');
+
+/** Lageret fejler for skrivninger, hvor fuld(felter) er sand. */
+function fuldtLager(s, fuld = () => true) {
+  const opdater = s.lager.opdaterNote;
+  s.lager.opdaterNote = async (id, felter) => {
+    if (fuld(felter)) throw FULD();
+    return opdater.call(s.lager, id, felter);
+  };
+  return () => { s.lager.opdaterNote = opdater; };
+}
+
+test('fuldt lager, når referatet gemmes: Fejlet med plads, og lyden bevares', async () => {
+  const s = opsaet({ sendLyd: async () => REFERAT_SVAR });
+  fuldtLager(s, (f) => 'pdf' in f);
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.FEJL);
+  assert.equal(n.fejlType, 'plads');
+  assert.equal(s.lager.lydSlettet.size, 0);
+});
+
+test('kan intet skrives, vises fejlen alligevel, og Prøv igen virker, når der er plads', async () => {
+  const s = opsaet({ sendLyd: async () => REFERAT_SVAR });
+  const fri = fuldtLager(s);
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.mailKald.length, 0);
+  const vist = s.forloeb.medUgemt(await s.lager.hentNote('a'));
+  assert.equal(vist.status, STATUS.FEJL);
+  assert.equal(vist.fejlType, 'plads');
+  assert.equal(s.lager.lydSlettet.size, 0);
+  fri();
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
+  assert.equal(s.forloeb.medUgemt(await s.lager.hentNote('a')).status, STATUS.SENDT);
+});
+
+test('fuldt lager før mailen: mailen sendes ikke, og noten viser plads i stedet for at hænge', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.TEKST_KLAR, mime: 'audio/mp4', oprettet: 1, tekst: 'x', referat: {}, pdf: 'p' }] });
+  fuldtLager(s);
+  await s.forloeb.sendTilMig('a');
+  assert.equal(s.t.mailKald.length, 0);
+  const vist = s.forloeb.medUgemt(await s.lager.hentNote('a'));
+  assert.equal(vist.status, STATUS.TEKST_KLAR);
+  assert.equal(vist.fejlType, 'plads');
+  assert.equal(s.lager.lydSlettet.size, 0);
+});
+
+test('mailen er modtaget, men status kan ikke gemmes: vises som sendt, og lyden bevares til næste start', async () => {
+  const s = opsaet({ noter: [{ id: 'a', status: STATUS.TEKST_KLAR, mime: 'audio/mp4', oprettet: 1, tekst: 'x', referat: {}, pdf: 'p' }] });
+  fuldtLager(s, (f) => f.status === STATUS.SENDT);
+  await s.forloeb.sendTilMig('a');
+  assert.equal(s.t.mailKald.length, 1);
+  assert.equal(s.forloeb.medUgemt(await s.lager.hentNote('a')).status, STATUS.SENDT);
+  assert.equal(s.lager.lydSlettet.size, 0);
+});
+
+test('navnet kan ikke gemmes: intet sendes, ingen fejl kastes, og noten viser plads', async () => {
+  const s = opsaet();
+  fuldtLager(s);
+  await s.forloeb.navngivOgSend('a', 'Tag');
+  assert.equal(s.t.lydKald, 0);
+  const vist = s.forloeb.medUgemt(await s.lager.hentNote('a'));
+  assert.equal(vist.status, STATUS.FEJL);
+  assert.equal(vist.fejlType, 'plads');
+});
+
+test('medUgemt ændrer ikke noter uden ugemte ændringer', async () => {
+  const s = opsaet();
+  const n = await s.lager.hentNote('a');
+  assert.equal(s.forloeb.medUgemt(n), n);
+  assert.equal(s.forloeb.medUgemt(null), null);
+});
