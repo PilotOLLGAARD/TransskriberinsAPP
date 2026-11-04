@@ -173,10 +173,10 @@ export function lavLokalLogin() {
       location.reload();
       return true;
     },
+    // Som hos Microsoft: sessionen dér bliver, når man logger ud af appen.
     async logUd() {
       localStorage.removeItem('testKonto');
       localStorage.removeItem('testTidligere');
-      localStorage.removeItem('testSession');
     },
   };
 }

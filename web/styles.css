@@ -600,3 +600,18 @@ button svg { width: 26px; height: 26px; }
 .info-liste li { margin: 8px 0; padding-left: 2px; }
 .info-afsnit a { color: var(--blaa-dyb); font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .info-afsnit:last-child { margin-bottom: 24px; }
+
+/* Login-boks på forsiden, kun når man ikke er logget ind. */
+.login-boks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: var(--radius-stor);
+  color: var(--blaa-dyb);
+  background: var(--blaa-tone);
+}
+.login-boks p { margin: 0; font-size: 19px; font-weight: 550; }
+.info-afsnit .konto { overflow-wrap: anywhere; }
+.info-afsnit .konto + button, .info-afsnit p + button { margin-top: 12px; }

@@ -273,7 +273,8 @@ test('app dræbt før første stykke efterlader ingen tom note', async () => {
 test('koldstart, hvor login er væk: kan stadig optage, og login gør arbejdet færdigt', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  await side.evaluate(() => localStorage.removeItem('testKonto'));
+  // Hverken login i appen eller session hos Microsoft: det kan ikke fornyes uden tryk.
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.removeItem('testSession'); });
   await side.reload();
   await optag(side);
   await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
@@ -1179,6 +1180,105 @@ test('Tilbage sidder øverst og ens på Tidligere, Læs og Information', async (
   const information = await maal();
   assert.deepEqual(laes, tidligere);
   assert.deepEqual(information, tidligere);
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
+  await kontekst.close();
+});
+
+// Login, der fornyes af sig selv
+
+const IKKE_LOGGET_IND = 'Du er ikke logget ind. Du kan stadig optage. Log ind for at få dine referater sendt.';
+const fornyelser = (side) => side.evaluate(() => Number(localStorage.getItem('testFornyelser') || 0));
+
+test('logget ud med session hos Microsoft: logges ind af sig selv uden tryk', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => localStorage.removeItem('testKonto'));
+  await side.reload();
+  await side.waitForFunction(() => localStorage.getItem('testKonto') === '1', null, { timeout: 15000 });
+  await knap(side, 'Optag').waitFor();
+  await side.waitForTimeout(500);
+  assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
+  assert.equal(await fornyelser(side), 1);
+  await kontekst.close();
+});
+
+test('logget ud uden session: boksen vises, ingen løkke, optagelse virker, og login via boksen sender den', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.removeItem('testSession'); });
+  await side.reload();
+  await vis(side, IKKE_LOGGET_IND);
+  await side.reload();
+  await vis(side, IKKE_LOGGET_IND);
+  assert.equal(await fornyelser(side), 1, 'højst ét forsøg på at forny');
+  const foer = await tal(miljoe);
+  await optag(side, { titel: 'Venter på login' });
+  await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+  assert.equal(await antalNoter(side), 1);
+  await tilForsiden(side);
+  await knap(side, 'Log ind med din ØLLGAARD-konto').click();
+  await knap(side, 'Optag').waitFor({ timeout: 15000 });
+  // Lageret læses asynkront, så der ventes i en løkke. Et async-udtryk i waitForFunction er altid sandt.
+  for (let i = 0; i < 150 && (await sendteUdenLyd(side)) !== 1; i++) await side.waitForTimeout(100);
+  assert.equal(await sendteUdenLyd(side), 1);
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald + 1);
+  assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
+  await kontekst.close();
+});
+
+test('logget ind: ingen login-boks', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.waitForTimeout(500);
+  assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
+  await kontekst.close();
+});
+
+test('Information viser kontoen, og Log ud viser boksen og beholder optagelser', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Bliver' });
+  await vis(side, 'Referatet kunne ikke laves lige nu');
+  await tilForsiden(side);
+  await knap(side, 'Information').click();
+  await vis(side, 'Logget ind som test@ollgaard.dk');
+  await vis(side, 'Vil du forblive logget på?');
+  await knap(side, 'Log ud').click();
+  await knap(side, 'Optag').waitFor();
+  await vis(side, IKKE_LOGGET_IND);
+  assert.equal(await antalNoter(side), 1);
+  // Efter Log ud logger appen ikke selv ind igen, selv om sessionen hos Microsoft findes.
+  await side.reload();
+  await vis(side, IKKE_LOGGET_IND);
+  assert.equal(await fornyelser(side), 0);
+  await knap(side, 'Information').click();
+  await vis(side, 'Du er ikke logget ind.');
+  await knap(side, 'Log ind med din ØLLGAARD-konto').waitFor();
+  await kontekst.close();
+});
+
+test('uden net ved start: ingen fornyelse', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.removeItem('testKonto'); });
+  await kontekst.setOffline(true);
+  await side.reload();
+  await knap(side, 'Optag').waitFor();
+  await side.waitForTimeout(500);
+  assert.equal(await fornyelser(side), 0);
+  await kontekst.setOffline(false);
+  await kontekst.close();
+});
+
+test('login-boksen kan betjenes på 360 px', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
+  await logInd(side);
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.removeItem('testSession'); });
+  await side.reload();
+  await vis(side, IKKE_LOGGET_IND);
+  const r = await knap(side, 'Log ind med din ØLLGAARD-konto').boundingBox();
+  assert.ok(r.height >= 72 && r.x + r.width <= 360);
   assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
   await kontekst.close();
 });

@@ -62,6 +62,7 @@ const t = {
   startTid: 0,
   advarsel: false,
   starter: false,
+  loginStatus: null, // 'ja' | 'nej' | null (ukendt). Login-boksen vises kun ved 'nej'.
 };
 
 let urTimer = null;
@@ -129,6 +130,8 @@ function maerkbar() {
 async function opdater() {
   // Noter, der er ved at blive slettet, vises ikke. De kan stadig fortrydes.
   t.noter = (await lager.alleNoter()).filter((n) => !n.slettet);
+  // En afsendelse, der fejlede på login, betyder, at man ikke er logget ind.
+  if (t.noter.some((n) => n.fejlType === 'login')) t.loginStatus = 'nej';
   tegn();
 }
 
@@ -270,6 +273,14 @@ function aabnNavn(id) {
 function skjulForklaring() {
   t.forklaringSkjult = true;
   husk(SKJUL_FORKLARING, '1');
+  tegn();
+}
+
+/** Logger kun ud af appen. Optagelser på telefonen bliver liggende. */
+async function logUd() {
+  await login.logUd().catch(() => {});
+  t.loginStatus = 'nej';
+  t.visning = 'start';
   tegn();
 }
 
@@ -719,6 +730,20 @@ function skaermLogin() {
   ];
 }
 
+function loginKnap() {
+  return knap('Log ind med din ØLLGAARD-konto', () => logInd(), { ikonNavn: 'person' });
+}
+
+function loginBoks() {
+  if (t.loginStatus !== 'nej') return null;
+  return h(
+    'section',
+    { klasse: 'login-boks', 'aria-label': 'Login' },
+    h('p', {}, 'Du er ikke logget ind. Du kan stadig optage. Log ind for at få dine referater sendt.'),
+    loginKnap(),
+  );
+}
+
 function skaermStart() {
   // Sendte noter venter ikke på noget. De ligger under Tidligere optagelser.
   const afventer = t.noter.filter((n) => n.id !== optager.aktivId() && n.status !== STATUS.SENDT);
@@ -732,6 +757,7 @@ function skaermStart() {
     ),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
+    loginBoks(),
     forklaring(),
     h(
       'div',
@@ -870,11 +896,21 @@ function skaermInformation() {
         'ul',
         { klasse: 'info-liste' },
         h('li', {}, 'Brug appen fra hjemmeskærmen, ikke fra en fane i Safari eller Chrome.'),
+        h('li', {}, 'Svar Ja, når Microsoft spørger \'Vil du forblive logget på?\'.'),
         h('li', {}, 'Hold appen åben og skærmen tændt, mens du optager, og indtil referatet er sendt.'),
         h('li', {}, 'Lyden slettes fra telefonen, når referatet er sendt. Referatet og PDF\'en gemmes på telefonen i 7 dage under Tidligere. Optagelser, der ikke er sendt, gemmes, indtil de er sendt.'),
         h('li', {}, 'Referatet laves af AI. Tjek altid vigtige tal, mål og frister. Hele transskriptionen ligger bagerst i PDF\'en.'),
         h('li', {}, 'Lyd og tekst behandles af Google for at lave transskription og referat. De bruges ikke til at træne AI-modeller. Mailen sendes fra din egen Outlook.'),
       ),
+    ),
+    afsnit(
+      'Konto',
+      ...(t.loginStatus === 'nej' || !login.harVaeretLoggetInd()
+        ? [h('p', {}, 'Du er ikke logget ind.'), loginKnap()]
+        : [
+          h('p', { klasse: 'konto' }, 'Logget ind som ', h('strong', {}, login.brugerMail())),
+          knap('Log ud', logUd, { klasse: 'hvid' }),
+        ]),
     ),
     afsnit(
       'Kontakt',
@@ -1113,6 +1149,28 @@ document.addEventListener('visibilitychange', () => {
 // En afbrudt optagelse åbnes direkte ved start, hvis den er fra den sidste halve time. Ældre ligger i Afventer.
 const NYLIG_AFBRUDT_MS = 30 * 60 * 1000;
 
+/** Er appen i gang med noget, må den ikke skifte til Microsoft. */
+function nogetIGang() {
+  return t.visning !== 'start' || t.starter || optager.erAktiv() || t.igang.size > 0
+    || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
+}
+
+async function tjekLoginVedStart() {
+  // Aldrig logget ind eller logget ud: ingen fornyelse uden tryk. Uden optagelser vises login-skærmen.
+  if (!login.harVaeretLoggetInd()) {
+    t.loginStatus = 'nej';
+    await opdater();
+    return;
+  }
+  let status = await login.tjekLogin();
+  // Uden net kan login ikke ses eller fornys. Så vises intet.
+  if (status === 'nej' && !navigator.onLine) status = 'ukendt';
+  if (status === 'nej' && !nogetIGang() && (await login.fornyStille())) return; // Appen skifter til Microsoft og kommer tilbage.
+  t.loginStatus = status === 'ukendt' ? null : status;
+  if (status === 'ja') await forloeb.sendVentende();
+  await opdater();
+}
+
 async function start() {
   await login.init().catch(() => {});
   try {
@@ -1134,6 +1192,7 @@ async function start() {
   navigator.storage?.persist?.().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   await genoptagEfterLogin();
+  await tjekLoginVedStart().catch(() => {});
 }
 
 start();
