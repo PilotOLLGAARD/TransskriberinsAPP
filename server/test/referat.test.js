@@ -407,3 +407,8 @@ test('referatets genforsøg logges kun med koder og tal', async () => {
   await r.lav({ ...INPUT, signal: signal() });
   assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'referat', status: 503, forsoeg: 1, ventMs: 2000 }]);
 });
+
+test('prompten forbyder steder, lande, personer og firmaer, der ikke blev sagt', () => {
+  const p = lavPrompt({ tekst: 'x', titel: '', kort: false });
+  assert.ok(p.includes('Nævn ikke steder, lande, personer, firmaer eller årstal, der ikke står i transskriptionen, heller ikke når de virker indlysende.'));
+});

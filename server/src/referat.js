@@ -50,6 +50,7 @@ function lavSkema({ type, kort }) {
 const REGLER = [
   'Intet må opfindes. Medtag kun det, der faktisk blev sagt i transskriptionen.',
   'Tilføj ikke roller, titler, årsager eller sammenhænge, der ikke blev sagt.',
+  'Nævn ikke steder, lande, personer, firmaer eller årstal, der ikke står i transskriptionen, heller ikke når de virker indlysende.',
   'Er noget uklart eller utydeligt, så skriv "[uklart]" i stedet for at gætte.',
   'Gengiv tal, mål, mængder, datoer, frister, adresser, navne og fagudtryk præcist, som de blev sagt.',
   'Er du i tvivl om et tal, et mål, en dato eller en frist, så skriv "[uklart]" i stedet for tallet. Gæt aldrig, og ret aldrig et tal, der lyder forkert eller ufuldstændigt.',
