@@ -272,6 +272,7 @@ test('prompten kræver [uklart] ved usikre tal, kun det rettede tal og ingen omr
     'Omregn ikke enheder',
     'læg ikke tal sammen',
     'årstal',
+    'ikke er et gyldigt dansk tal',
   ]) assert.ok(p.includes(del), del);
 });
 

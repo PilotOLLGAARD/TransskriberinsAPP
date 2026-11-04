@@ -150,3 +150,10 @@ test('snes og dusin er tal', () => {
   assert.ok(t.has(20));
   assert.ok(t.has(12));
 });
+
+test('fælde: et talord, der ikke er et gyldigt dansk tal, bliver [uklart] i referatet', () => {
+  const kilde = 'Tagrenden er sænket nittenogtres millimeter, og der mangler niogfirs sten.';
+  assert.equal(tjek(kilde, 'Sænket nittenogtres millimeter.'), `Sænket ${U} millimeter.`);
+  assert.equal(tjek(kilde, 'Mangler niogfirs sten.'), 'Mangler niogfirs sten.');
+  assert.equal(tjek(kilde, 'Sænket tolvogtyve millimeter.'), `Sænket ${U} millimeter.`);
+});

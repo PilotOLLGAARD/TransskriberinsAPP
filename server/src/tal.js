@@ -27,6 +27,9 @@ const BROEK = { halvanden: 1.5, halvandet: 1.5, halv: 0.5, halvt: 0.5, kvart: 0.
 const ANTAL = { snes: 20, dusin: 12 };
 const SAMMENSAT = new RegExp(`^(${Object.keys(ENERE).filter((o) => ENERE[o] > 0).join('|')})og(${[...Object.keys(TIERE), 'tyvende', 'tredivte', 'tredvte'].join('|')})$`);
 
+// Et ord, der er bygget som et tal (fx 'nittenogtres'), men ikke er et gyldigt dansk tal.
+const UGYLDIGT_TALORD = new RegExp(`^\\p{L}+og(${[...Object.keys(TIERE), 'tyvende', 'tredivte', 'tredvte'].join('|')})$`, 'u');
+
 /** Værdien af ét ord, eller null. Fx "fire" 4, "niogfirs" 89, "enogtyvende" 21. */
 function ordVaerdi(ord) {
   for (const tabel of [ENERE, TEENS, TIERE, GANGE, ORDENSTAL, BROEK, ANTAL]) if (Object.hasOwn(tabel, ord)) return tabel[ord];
@@ -145,7 +148,8 @@ function kontrollerTekst(tekst, sagt, taeller) {
   });
   return medCifre.replace(/\p{L}+/gu, (w) => {
     const lille = w.toLowerCase();
-    if (!KONTROLLEREDE_ORD(lille) || sagt.has(ordVaerdi(lille))) return w;
+    const ugyldigt = UGYLDIGT_TALORD.test(lille) && ordVaerdi(lille) === null;
+    if (!ugyldigt && (!KONTROLLEREDE_ORD(lille) || sagt.has(ordVaerdi(lille)))) return w;
     taeller.n++;
     return UKLART;
   });

@@ -53,6 +53,7 @@ const REGLER = [
   'Gengiv tal, mål, mængder, datoer, frister, adresser, navne og fagudtryk præcist, som de blev sagt.',
   'Er du i tvivl om et tal, et mål, en dato eller en frist, så skriv "[uklart]" i stedet for tallet. Gæt aldrig, og ret aldrig et tal, der lyder forkert eller ufuldstændigt.',
   'Retter taleren sig selv (fx "tre meter, nej fire meter"), så brug kun det rettede tal.',
+  'Et talord, der ikke er et gyldigt dansk tal, eller et tal, der kan være hørt forkert, er uklart: skriv "[uklart]". Lav det ikke om til et tal, der ligner.',
   'Omregn ikke enheder, og læg ikke tal sammen. Tilføj ikke årstal, ugedage eller datoer, der ikke blev sagt.',
   'Tilføj ingen egne vurderinger, anbefalinger eller konklusioner.',
   'Skriv på dansk i en kort, saglig referatstil.',
