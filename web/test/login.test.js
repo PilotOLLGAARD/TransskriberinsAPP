@@ -181,3 +181,79 @@ test('logInd beder om begge tilladelser på én gang', async () => {
   assert.deepEqual(f.omdirigeret[0].scopes, ['api://c/access_as_user']);
   assert.deepEqual(f.omdirigeret[0].extraScopesToConsent, ['https://graph.microsoft.com/Mail.Send']);
 });
+
+// Login, der fornyes af sig selv
+
+function falskMsalMed(ekstra = {}) {
+  const f = falskMsal(ekstra);
+  f.redirects = [];
+  f.ryddet = 0;
+  const Klasse = f.PublicClientApplication;
+  f.PublicClientApplication = class extends Klasse {
+    async acquireTokenRedirect(valg) { f.redirects.push(valg); }
+    async clearCache() { f.ryddet++; }
+  };
+  return f;
+}
+
+test('tjekLogin giver ja, nej og ukendt', async () => {
+  const ja = lav(falskMsalMed());
+  await ja.init();
+  assert.equal(await ja.tjekLogin(), 'ja');
+  const nej = lav(falskMsalMed({ konti: [] }));
+  await nej.init();
+  assert.equal(await nej.tjekLogin(), 'nej');
+  const udloebet = lav(falskMsalMed({ tilstille: async () => { throw Object.assign(new Error(), { errorCode: 'interaction_required' }); } }));
+  await udloebet.init();
+  assert.equal(await udloebet.tjekLogin(), 'nej');
+  const udenNet = lav(falskMsalMed({ tilstille: async () => { throw Object.assign(new Error(), { errorCode: 'no_network_connectivity' }); } }));
+  await udenNet.init();
+  assert.equal(await udenNet.tjekLogin(), 'ukendt');
+});
+
+test('fornyStille omdirigerer med prompt none og sidste bruger', async () => {
+  const hukommelse = falskHukommelse();
+  await lav(falskMsalMed(), hukommelse).init();
+  const f = falskMsalMed({ konti: [] });
+  const l = lav(f, hukommelse);
+  await l.init();
+  assert.equal(await l.fornyStille(), true);
+  assert.equal(f.redirects.length, 1);
+  assert.equal(f.redirects[0].prompt, 'none');
+  assert.equal(f.redirects[0].loginHint, 'a@ollgaard.dk');
+  assert.deepEqual(f.redirects[0].scopes, ['api://c/access_as_user']);
+});
+
+test('fornyStille højst én gang pr. 10 minutter', async () => {
+  const hukommelse = falskHukommelse();
+  let tid = 1_000_000;
+  const f = falskMsalMed({ konti: [] });
+  const l = lavLogin({ msal: f, entra: ENTRA, redirectUri: 'https://x/app/', hukommelse, nu: () => tid });
+  await l.init();
+  assert.equal(await l.fornyStille(), true);
+  tid += 5 * 60 * 1000;
+  assert.equal(await l.fornyStille(), false);
+  tid += 6 * 60 * 1000;
+  assert.equal(await l.fornyStille(), true);
+  assert.equal(f.redirects.length, 2);
+});
+
+test('brugerMail husker sidste bruger, også når kontoen er væk', async () => {
+  const hukommelse = falskHukommelse();
+  await lav(falskMsalMed(), hukommelse).init();
+  const efter = lav(falskMsalMed({ konti: [] }), hukommelse);
+  await efter.init();
+  assert.equal(efter.brugerMail(), 'a@ollgaard.dk');
+});
+
+test('logUd rydder login og glemmer brugeren', async () => {
+  const hukommelse = falskHukommelse();
+  hukommelse.removeItem = (k) => { hukommelse.setItem(k, null); };
+  const f = falskMsalMed();
+  const l = lav(f, hukommelse);
+  await l.init();
+  await l.logUd();
+  assert.equal(f.ryddet, 1);
+  assert.equal(l.harVaeretLoggetInd(), false);
+  assert.equal(hukommelse.getItem('sidsteBruger'), null);
+});
