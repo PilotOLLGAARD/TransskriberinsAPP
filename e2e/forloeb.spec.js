@@ -459,7 +459,7 @@ test('kan betjenes på 360 px', async () => {
     assert.ok(m.bred <= 360, `${navn}: vandret rulning, ${m.bred}`);
     assert.ok(m.knapper.length > 0, navn);
     for (const [tekst, hoejde, rolle, hoejre, klasse] of m.knapper) {
-      const mindst = rolle === 'radio' ? 56 : klasse.includes('top-knap') ? 44 : 72;
+      const mindst = klasse.includes('top-knap') ? 44 : 72;
       assert.ok(Math.round(hoejde) >= mindst, `${navn}: "${tekst}" er ${hoejde} px`);
       assert.ok(hoejre <= 360, `${navn}: "${tekst}" går ud over kanten`);
     }
@@ -484,55 +484,66 @@ test('kan betjenes på 360 px', async () => {
   await kontekst.close();
 });
 
-// Typer og navn før optagelsen
+// Navn før optagelsen. Typen vælger AI'en.
 
-const radio = (side, navn) => side.getByRole('radio', { name: navn, exact: true });
 const STARTNAVN = 'Navn (valgfrit)';
 
-test('navn og type før optagelse følger med til navneskærmen og mailen', async () => {
+test('ingen typevalg nogen steder: forsiden og navneskærmen har kun navnet', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'true');
-  await radio(side, 'Møde').click();
-  assert.equal(await radio(side, 'Møde').getAttribute('aria-checked'), 'true');
-  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'false');
+  await vis(side, 'Indtal noter, møder og påmindelser. Du får et referat med PDF på din mail.');
+  assert.equal(await side.getByRole('radio').count(), 0);
+  assert.equal(await side.getByText('Type', { exact: true }).count(), 0);
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).waitFor();
+  assert.equal(await side.getByRole('radio').count(), 0);
+  await vis(side, 'Appen finder også selv ud af, om det er et møde, et byggenotat, en påmindelse eller andet.');
+  await kontekst.close();
+});
+
+test('navn før optagelse følger med til navneskærmen og mailen, og AI\'en vælger typen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
   await side.getByLabel(STARTNAVN).fill('Tagrenovering');
   await stopOptagelse(side);
   await side.getByLabel(FELT).waitFor();
   assert.equal(await side.getByLabel(FELT).inputValue(), 'Tagrenovering');
-  assert.equal(await radio(side, 'Møde').getAttribute('aria-checked'), 'true');
   await knap(side, 'Send').click();
   await vis(side, SENDT);
   const t = await tal(miljoe);
-  assert.equal(t.sidsteReferat.type, 'moede');
+  // Ingen type sendt: serveren vælger selv (den falske AI vælger Andet).
+  assert.equal(t.sidsteReferat.type, 'automatisk');
   assert.equal(t.sidsteReferat.titel, 'Tagrenovering');
-  assert.match(t.sidsteMail.message.subject, /^Møde: Tagrenovering – \d{1,2}\. \S+ \d{4}$/);
-  await kontekst.close();
-});
-
-test('type kan skiftes på navneskærmen uden at miste det skrevne navn', async () => {
-  const { kontekst, side } = await nyTelefon(miljoe);
-  await logInd(side);
-  await stopOptagelse(side);
-  await side.getByLabel(FELT).fill('Ring til VVS');
-  await radio(side, 'Påmindelse').click();
-  assert.equal(await side.getByLabel(FELT).inputValue(), 'Ring til VVS');
-  await knap(side, 'Send').click();
-  await vis(side, SENDT);
-  assert.match((await tal(miljoe)).sidsteMail.message.subject, /^Påmindelse: Ring til VVS – /);
-  await kontekst.close();
-});
-
-test('navn og type nulstilles, når optagelsen er startet', async () => {
-  const { kontekst, side } = await nyTelefon(miljoe);
-  await logInd(side);
-  await radio(side, 'Byggenotat').click();
-  await side.getByLabel(STARTNAVN).fill('Gåtur');
-  await optag(side, { titel: 'Gåtur' });
-  await vis(side, SENDT);
+  assert.match(t.sidsteMail.message.subject, /^Andet: Tagrenovering – \d{1,2}\. \S+ \d{4}$/);
   await tilForsiden(side);
-  assert.equal(await radio(side, 'Automatisk').getAttribute('aria-checked'), 'true');
   assert.equal(await side.getByLabel(STARTNAVN).inputValue(), '');
+  await knap(side, 'Tidligere optagelser').click();
+  await vis(side, 'Andet ·');
+  await kontekst.close();
+});
+
+test('en gammel optagelse med valgt type sendes med typen, og en uden type vises uden typenavn', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const gammel = await l.opretNote({ mime: 'audio/webm' });
+    await l.gemStykke(gammel, 0, new Uint8Array(4000));
+    await l.opdaterNote(gammel, { status: 'fejl', fejlType: 'net', type: 'moede', titel: 'Gammelt møde', navngivet: true, varighedMs: 5000 });
+    const auto = await l.opretNote({ mime: 'audio/webm' });
+    await l.gemStykke(auto, 0, new Uint8Array(4000));
+    await l.opdaterNote(auto, { status: 'fejl', fejlType: 'net', type: 'automatisk', titel: 'Uden type før', navngivet: true, varighedMs: 5000 });
+  });
+  await side.reload();
+  await knap(side, 'Tidligere optagelser').click();
+  await vis(side, 'Gammelt møde');
+  assert.equal(await side.getByText('Automatisk', { exact: false }).count(), 0, 'automatisk vises ikke som type');
+  const meta = await side.locator('.meta').allTextContents();
+  assert.ok(meta.some((m) => m.startsWith('Møde · ')), 'den gamle valgte type vises');
+  assert.ok(meta.some((m) => m.startsWith('I dag')), 'uden type: intet typenavn foran');
+  await side.locator('.kort', { hasText: 'Gammelt møde' }).getByRole('button', { name: 'Prøv igen' }).click();
+  for (let i = 0; i < 100 && (await tal(miljoe)).sidsteReferat?.titel !== 'Gammelt møde'; i++) await side.waitForTimeout(100);
+  assert.equal((await tal(miljoe)).sidsteReferat.type, 'moede');
   await kontekst.close();
 });
 
@@ -546,23 +557,6 @@ test('navnet på startskærmen bevares, når en note bliver færdig i baggrunden
   await vis(side, SENDT);
   assert.equal(await side.getByLabel(STARTNAVN).inputValue(), 'Næste no');
   assert.equal(await side.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.id), 'startnavn');
-  await kontekst.close();
-});
-
-test('forklaringen kan skjules og forbliver skjult efter genindlæsning', async () => {
-  const { kontekst, side } = await nyTelefon(miljoe);
-  await logInd(side);
-  await vis(side, 'Sådan gør du');
-  await vis(side, 'Du får et referat på mail.');
-  for (const navn of ['Byggenotat', 'Møde', 'Påmindelse', 'Andet']) {
-    assert.ok(await side.locator('.forklaring-kort').getByText(navn, { exact: true }).count(), navn);
-  }
-  await knap(side, 'Skjul forklaringen').click();
-  await side.reload();
-  await knap(side, 'Optag').waitFor();
-  assert.equal(await side.getByText('Sådan gør du').count(), 0);
-  assert.equal(await knap(side, 'Vis forklaring').count(), 0);
-  await knap(side, 'Information').waitFor();
   await kontekst.close();
 });
 
@@ -826,14 +820,14 @@ test('navneskærmen med Fortsæt optagelsen kan betjenes på 360 px', async () =
   await afbrydOptagelse(side);
   const m = await side.evaluate(() => ({
     bred: document.documentElement.scrollWidth,
-    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height), b.getAttribute('role')]),
+    knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
   }));
   assert.ok(m.bred <= 360, `vandret rulning: ${m.bred}`);
-  for (const [tekst, hoejde, rolle] of m.knapper) assert.ok(hoejde >= (rolle === 'radio' ? 56 : 72), `"${tekst}" er ${hoejde} px`);
+  for (const [tekst, hoejde] of m.knapper) assert.ok(hoejde >= 72, `"${tekst}" er ${hoejde} px`);
   await kontekst.close();
 });
 
-test('Tidligere optagelser kan ses øverst uden at rulle, også med forklaringen', async () => {
+test('Tidligere optagelser kan ses øverst uden at rulle', async () => {
   const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
   await logInd(side);
   const r = await knap(side, TIDLIGERE).boundingBox();
@@ -1324,3 +1318,22 @@ test('to optagelser venter på login: begge sendes efter login, og boksen forsvi
   assert.equal(await side.getByText(IKKE_LOGGET_IND).count(), 0);
   await kontekst.close();
 });
+
+// Forsiden kan ses uden at rulle
+
+for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['stor iPhone', { width: 393, height: 759 }]]) {
+  test(`forsiden kan ses uden at rulle på ${navn}`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe, { viewport });
+    // Som den installerede app på hjemmeskærmen: uden hjælpen til at lægge den der.
+    await side.addInitScript(() => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
+    await logInd(side);
+    await side.waitForTimeout(300);
+    const m = await side.evaluate(() => ({ rul: document.documentElement.scrollHeight - innerHeight, hoejde: innerHeight }));
+    assert.ok(m.rul <= 0, `${navn}: rul ${m.rul} px`);
+    for (const k of [knap(side, 'Optag'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
+      const r = await k.boundingBox();
+      assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde, `${navn}: knap uden for skærmen`);
+    }
+    await kontekst.close();
+  });
+}

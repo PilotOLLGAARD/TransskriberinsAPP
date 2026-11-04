@@ -9,26 +9,9 @@ import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
-import { STANDARD_TYPE, TYPER } from './typer.js';
+import { typeNavn } from './typer.js';
 
 const EFTER_LOGIN = 'efterLogin';
-const SKJUL_FORKLARING = 'skjulForklaring';
-
-// Lageret kan være slået fra i privat tilstand. Så vises forklaringen bare igen.
-function husk(noegle, vaerdi) {
-  try {
-    if (vaerdi) localStorage.setItem(noegle, vaerdi);
-    else localStorage.removeItem(noegle);
-  } catch { /* Kun en bekvemmelighed. */ }
-}
-
-function huskes(noegle) {
-  try {
-    return Boolean(localStorage.getItem(noegle));
-  } catch {
-    return false;
-  }
-}
 
 const login = LOKAL
   ? lavLokalLogin()
@@ -53,10 +36,7 @@ const t = {
   fortryd: null, // { id, tekst, timer } mens en sletning kan fortrydes
   navnNote: null,
   navnUdkast: null, // det, brugeren har skrevet på navneskærmen, så det overlever en ny tegning
-  navnType: null, // typen valgt på navneskærmen; null betyder den, der blev valgt før optagelsen
-  valgtNavn: '', // navn og type valgt på startskærmen, til optagelsen er startet
-  valgtType: STANDARD_TYPE,
-  forklaringSkjult: huskes(SKJUL_FORKLARING),
+  valgtNavn: '', // navnet skrevet på startskærmen, til optagelsen er startet
   besked: null, // { tekst, type: 'fejl' | 'ok' }
   igang: new Set(),
   startTid: 0,
@@ -167,11 +147,10 @@ async function optag() {
   t.besked = null;
   tegn();
   try {
-    nyDelStartet(await optager.start({ titel: t.valgtNavn.trim(), type: t.valgtType }));
+    nyDelStartet(await optager.start({ titel: t.valgtNavn.trim() }));
     maerkbar();
-    // Valget gælder kun denne optagelse. Det ligger nu på noten.
+    // Navnet gælder kun denne optagelse. Det ligger nu på noten.
     t.valgtNavn = '';
-    t.valgtType = STANDARD_TYPE;
     if (optager.erAktiv()) {
       t.visning = 'optager';
       t.startTid = Date.now();
@@ -186,18 +165,15 @@ async function optag() {
   await opdater();
 }
 
-/** Optager en ny del på en afbrudt note. Navn og type fra navneskærmen gemmes først. */
+/** Optager en ny del på en afbrudt note. Navnet fra navneskærmen gemmes først. */
 async function fortsaetOptagelse(id) {
   if (t.starter || optager.erAktiv()) return;
   bedOmTilladelse();
   t.starter = true;
   t.besked = null;
   try {
-    if (t.visning === 'navn' && t.navnNote === id) {
-      const felter = {};
-      if (t.navnUdkast !== null) felter.titel = [...t.navnUdkast.trim()].slice(0, 120).join('').trim();
-      if (t.navnType) felter.type = t.navnType;
-      if (Object.keys(felter).length) await lager.opdaterNote(id, felter);
+    if (t.visning === 'navn' && t.navnNote === id && t.navnUdkast !== null) {
+      await lager.opdaterNote(id, { titel: [...t.navnUdkast.trim()].slice(0, 120).join('').trim() });
     }
     const note = await lager.hentNote(id);
     await optager.fortsaet(id);
@@ -246,17 +222,16 @@ async function behandlOgSend(id) {
   await efterAfsendelse(id);
 }
 
-async function navngivOgSend(id, titel, type) {
+async function navngivOgSend(id, titel) {
   t.visning = 'fremdrift';
   t.fremdriftNote = id;
   t.navnNote = null;
   t.navnUdkast = null;
-  t.navnType = null;
   t.besked = null;
   t.igang.add(id);
   await opdater().catch(() => {});
   try {
-    await forloeb.navngivOgSend(id, titel, type);
+    await forloeb.navngivOgSend(id, titel);
   } finally {
     t.igang.delete(id);
   }
@@ -268,13 +243,6 @@ function aabnNavn(id) {
   t.visning = 'navn';
   t.navnNote = id;
   t.navnUdkast = null;
-  t.navnType = null;
-  tegn();
-}
-
-function skjulForklaring() {
-  t.forklaringSkjult = true;
-  husk(SKJUL_FORKLARING, '1');
   tegn();
 }
 
@@ -440,7 +408,6 @@ optager.naarAfsluttet(({ id, grund }) => {
   t.visning = 'navn';
   t.navnNote = id;
   t.navnUdkast = null;
-  t.navnType = null;
   opdater();
 });
 
@@ -489,46 +456,6 @@ function knap(tekst, vedTryk, { klasse, ikonNavn } = {}) {
   return h('button', { klasse, vedTryk }, ikonNavn ? ikon(ikonNavn) : null, tekst);
 }
 
-/**
- * De fem typer som én valggruppe. Valget skifter på stedet uden ny tegning, så tastaturet
- * og det skrevne navn bliver, hvor de er.
- */
-function typeVaelger(valgt, vedValg) {
-  const gruppe = h('div', { klasse: 'typer', role: 'radiogroup', 'aria-label': 'Type' });
-  for (const { noegle, navn } of TYPER) {
-    const valg = h('button', { type: 'button', role: 'radio', 'aria-checked': String(noegle === valgt) }, ikon('tjek'), navn);
-    valg.addEventListener('click', () => {
-      for (const andet of gruppe.children) andet.setAttribute('aria-checked', String(andet === valg));
-      vedValg(noegle);
-    });
-    gruppe.append(valg);
-  }
-  return gruppe;
-}
-
-function forklaring() {
-  if (t.forklaringSkjult) return null;
-  return h(
-    'section',
-    { klasse: 'forklaring-kort', 'aria-labelledby': 'forklaring-titel' },
-    h('h2', { id: 'forklaring-titel' }, 'Sådan gør du'),
-    h(
-      'ol',
-      { klasse: 'trin' },
-      h('li', {}, 'Vælg type, og skriv evt. et navn.'),
-      h('li', {}, 'Tryk Optag, og læg telefonen med skærmen opad.'),
-      h('li', {}, 'Tryk Stop. Du får et referat på mail.'),
-    ),
-    h(
-      'dl',
-      { klasse: 'typeliste' },
-      ...TYPER.filter((x) => x.noegle !== STANDARD_TYPE).flatMap(({ navn, forklaring: tekst }) => [h('dt', {}, navn), h('dd', {}, tekst)]),
-    ),
-    h('p', { klasse: 'lille' }, 'Vælger du Automatisk, finder appen selv typen.'),
-    knap('Skjul forklaringen', skjulForklaring, { klasse: 'hvid' }),
-  );
-}
-
 function startNavn() {
   const felt = h('input', {
     id: 'startnavn',
@@ -544,7 +471,7 @@ function startNavn() {
   felt.addEventListener('input', () => { t.valgtNavn = felt.value; });
   // Enter lukker tastaturet. Optagelsen startes kun med Optag.
   felt.addEventListener('keydown', (e) => { if (e.key === 'Enter') felt.blur(); });
-  return h('div', { klasse: 'felt' }, h('label', { for: 'startnavn', klasse: 'felt-titel' }, 'Navn (valgfrit)'), felt);
+  return h('div', { klasse: 'felt start-navn' }, h('label', { for: 'startnavn', klasse: 'felt-titel' }, 'Navn (valgfrit)'), felt);
 }
 
 function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
@@ -672,7 +599,8 @@ function historikKort(note) {
   const advarsel = sendt
     ? (note.maaskeSendt ? BESKEDER.maaskeSendt : note.fejlType === 'login' ? BESKEDER.login : note.fejlType ? BESKEDER.mailFejl : null)
     : indhold.forklaring;
-  const type = TYPER.find((x) => x.noegle === note.type)?.navn ?? 'Automatisk';
+  // Typen, AI'en valgte. Før afsendelsen er der ingen.
+  const type = typeNavn(note.type);
   return h(
     'section',
     { klasse: `kort historik${status.klasse === 'fejl' ? ' fejl' : ''}` },
@@ -759,24 +687,18 @@ function skaermStart() {
     ),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
-    loginBoks(),
-    forklaring(),
-    h(
-      'div',
-      { klasse: 'valg' },
-      h('p', { klasse: 'felt-titel', 'aria-hidden': 'true' }, 'Type'),
-      typeVaelger(t.valgtType, (type) => { t.valgtType = type; }),
-      startNavn(),
-    ),
+    // Er man ikke logget ind, står det i stedet for introen.
+    loginBoks() ?? h('p', { klasse: 'intro' }, 'Indtal noter, møder og påmindelser. Du får et referat med PDF på din mail.'),
+    h('button', { klasse: 'top-knap info-knap', vedTryk: aabnInformation }, ikon('info'), 'Information'),
+    startNavn(),
     h(
       'div',
       { klasse: 'scene' },
       h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter || t.fornyer }, ikon('mikrofon'), 'Optag'),
-      t.fornyer ? venter('Logger ind …') : h('p', { klasse: 'hjaelpetekst' }, 'Du får et referat på mail'),
+      t.fornyer ? venter('Logger ind …') : null,
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
-    knap('Information', aabnInformation, { klasse: 'hvid', ikonNavn: 'info' }),
     hjaelpTilHjemmeskaerm(),
   ];
 }
@@ -839,7 +761,7 @@ function skaermFremdrift() {
       : p === 4 ? trinPunkt('faerdig', `Referatet er sendt til ${mail}`)
         : trinPunkt(p === 3 && !fejl ? 'igang' : 'venter', 'Referatet sendes til din mail'),
   ];
-  const type = TYPER.find((x) => x.noegle === note.type)?.navn;
+  const type = typeNavn(note.type);
   const meta = [type, formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ');
   let nederst;
   if (fejl) {
@@ -886,7 +808,7 @@ function skaermInformation() {
       h(
         'ol',
         { klasse: 'trin' },
-        h('li', {}, 'Vælg type, og skriv evt. et navn.'),
+        h('li', {}, 'Skriv evt. et navn.'),
         h('li', {}, 'Tryk Optag, og tryk Stop, når du er færdig.'),
         h('li', {}, 'Giv optagelsen et navn, og tryk Send.'),
         h('li', {}, 'Du får et referat på mail med PDF. Det kan tage et par minutter.'),
@@ -989,16 +911,14 @@ function skaermNavn() {
     note.status === STATUS.GEMT && note.afbrudt ? fortsaetKnap(note.id) : null,
     h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
     felt,
-    h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel.'),
-    h('p', { klasse: 'felt-titel', 'aria-hidden': 'true' }, 'Type'),
-    typeVaelger(t.navnType ?? note.type ?? STANDARD_TYPE, (type) => { t.navnType = type; }),
+    h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel. Appen finder også selv ud af, om det er et møde, et byggenotat, en påmindelse eller andet.'),
     h('button', { type: 'submit' }, ikon('send'), 'Send'),
     // En afbrudt optagelse kan vente. Den ligger i Afventer.
     note.afbrudt ? h('button', { type: 'button', klasse: 'hvid', vedTryk: tilForsiden }, ikon('tilbage'), 'Til forsiden') : null,
   );
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    navngivOgSend(note.id, felt.value, t.navnType ?? note.type);
+    navngivOgSend(note.id, felt.value);
   });
   return [h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
 }

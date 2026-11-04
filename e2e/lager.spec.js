@@ -81,7 +81,7 @@ test('opdaterNote fletter felter', async () => {
   await kontekst.close();
 });
 
-test('opretNote gemmer titel og type', async () => {
+test('opretNote gemmer titel og ingen type – typen vælges af AI', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await side.goto(`${miljoe.adresse}/test/tom`);
   const note = await side.evaluate(async () => {
@@ -89,7 +89,7 @@ test('opretNote gemmer titel og type', async () => {
     return l.hentNote(await l.opretNote({ mime: 'audio/mp4', titel: 'Tagrenovering', type: 'moede' }));
   });
   assert.equal(note.titel, 'Tagrenovering');
-  assert.equal(note.type, 'moede');
+  assert.equal('type' in note, false);
   await kontekst.close();
 });
 

@@ -1,16 +1,12 @@
-// Optagelsens typer. Nøglerne er de samme som serverens (server/src/typer.js) og sendes i x-type.
+// Referatets typer. Brugeren vælger ikke typen: serveren lader AI'en vælge ud fra navn og indhold
+// og svarer med den valgte type. Nøglerne er de samme som serverens (server/src/typer.js).
+// Gamle noter med en valgt type sendes stadig med den i x-type.
 
-export const STANDARD_TYPE = 'automatisk';
+export const TYPER = ['automatisk', 'byggenotat', 'moede', 'paamindelse', 'andet'];
 
-export const TYPER = [
-  { noegle: 'automatisk', navn: 'Automatisk', forklaring: 'Appen vælger selv typen ud fra indholdet.' },
-  { noegle: 'byggenotat', navn: 'Byggenotat', forklaring: 'Fejl og mangler, mål og mængder.' },
-  { noegle: 'moede', navn: 'Møde', forklaring: 'Beslutninger, opgaver og åbne spørgsmål.' },
-  { noegle: 'paamindelse', navn: 'Påmindelse', forklaring: 'En huskeliste.' },
-  { noegle: 'andet', navn: 'Andet', forklaring: 'Opsummering og hovedpunkter.' },
-];
+const NAVNE = { byggenotat: 'Byggenotat', moede: 'Møde', paamindelse: 'Påmindelse', andet: 'Andet' };
 
-/** Ukendt eller manglende type bliver Automatisk. */
-export function rensType(raa) {
-  return TYPER.some((t) => t.noegle === raa) ? raa : STANDARD_TYPE;
+/** Typens navn til visning. null, før AI'en har valgt (automatisk), og for ukendte typer. */
+export function typeNavn(noegle) {
+  return Object.hasOwn(NAVNE, noegle ?? '') ? NAVNE[noegle] : null;
 }

@@ -8,9 +8,9 @@ function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}
   const l = {
     noter: new Map(),
     stykker: [],
-    async opretNote({ id, mime, titel, type }) {
-      l.noter.set(id, { id, mime, titel, type, status: 'optager' });
-      return id;
+    async opretNote(valg) {
+      l.noter.set(valg.id, { ...valg, status: 'optager' });
+      return valg.id;
     },
     async gemStykke(id, nr, bytes) {
       if (nr >= fejlFraStykke) throw new DOMException('fuld', 'QuotaExceededError');
@@ -430,18 +430,17 @@ test('gemmer varighed ved afslutning', async () => {
   assert.equal(s.lager.noter.get(id).varighedMs, 12000);
 });
 
-test('start gemmer valgt navn og type på noten', async () => {
+test('start gemmer valgt navn og ingen type', async () => {
   const s = opsaet();
-  const id = await s.optager.start({ titel: 'Tagrenovering', type: 'moede' });
+  const id = await s.optager.start({ titel: 'Tagrenovering' });
   assert.equal(s.lager.noter.get(id).titel, 'Tagrenovering');
-  assert.equal(s.lager.noter.get(id).type, 'moede');
+  assert.equal('type' in s.lager.noter.get(id), false);
 });
 
-test('start uden valg giver tomt navn og Automatisk', async () => {
+test('start uden navn giver tomt navn', async () => {
   const s = opsaet();
   const id = await s.optager.start();
   assert.equal(s.lager.noter.get(id).titel, '');
-  assert.equal(s.lager.noter.get(id).type, 'automatisk');
 });
 
 test('låsen tages, før noten oprettes, og frigives, når optagelsen er gemt', async () => {

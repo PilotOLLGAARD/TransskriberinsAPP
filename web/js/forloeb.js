@@ -1,5 +1,4 @@
 import { FORTRYD_MS, OPBEVARING_MS, STATUS, efterGenstart } from './tilstand.js';
-import { rensType } from './typer.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
 const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.SENDER]);
@@ -210,11 +209,10 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     },
 
     /** Gemmer navnet, før noget sendes, så det overlever netværksfejl og genforsøg. */
-    async navngivOgSend(id, titel, type) {
+    async navngivOgSend(id, titel) {
       // Afkortes i hele tegn, så en emoji aldrig deles.
       const ren = [...String(titel || '').trim()].slice(0, 120).join('').trim();
-      // Uden ny type beholdes den, der blev valgt før optagelsen.
-      await lager.opdaterNote(id, { titel: ren, navngivet: true, ...(type === undefined ? {} : { type: rensType(type) }) });
+      await lager.opdaterNote(id, { titel: ren, navngivet: true });
       await forloeb.behandlOgSend(id);
     },
 

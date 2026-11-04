@@ -394,19 +394,19 @@ test('svarets type, emne og html gemmes', async () => {
   assert.equal(n.html, '<p>x</p>');
 });
 
-test('navngivOgSend gemmer type og sender den med', async () => {
+test('navngivOgSend gemmer navnet og sender ingen type for nye noter', async () => {
   const s = opsaet({ sendLyd: fejl('net') });
   await s.forloeb.navngivOgSend('a', 'Tag', 'byggenotat');
-  assert.equal(s.lager.kort.get('a').type, 'byggenotat');
-  assert.equal(s.t.lydArgs[3].type, 'byggenotat');
+  assert.equal(s.lager.kort.get('a').titel, 'Tag');
+  assert.equal(s.lager.kort.get('a').type, undefined);
+  assert.equal(s.t.lydArgs[3].type, undefined);
 });
 
-test('navngivOgSend uden type beholder notens type, og ukendt type bliver automatisk', async () => {
+test('en gammel note med valgt type beholder den og sendes med den', async () => {
   const s = opsaet({ noter: [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1, type: 'moede' }], sendLyd: fejl('net') });
   await s.forloeb.navngivOgSend('a', 'Tag');
   assert.equal(s.lager.kort.get('a').type, 'moede');
-  await s.forloeb.navngivOgSend('a', 'Tag', 'ond');
-  assert.equal(s.lager.kort.get('a').type, 'automatisk');
+  assert.equal(s.t.lydArgs[3].type, 'moede');
 });
 
 // Optagelser, der måske kører i en anden fane, må aldrig røres

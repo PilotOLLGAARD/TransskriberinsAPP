@@ -39,7 +39,7 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
     h['x-titel'] = encodeURIComponent(typeof hel.toWellFormed === 'function' ? hel.toWellFormed() : hel);
   }
   // Kun kendte typer, så headeren aldrig kan indeholde andet end en nøgle.
-  if (TYPER.some((t) => t.noegle === type)) h['x-type'] = type;
+  if (TYPER.includes(type)) h['x-type'] = type;
   if (Number.isFinite(varighedMs)) h['x-varighed'] = String(Math.round(varighedMs / 1000));
   if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
   // En del af en afbrudt optagelse: kun teksten. Referatet laves af alle dele via /referat.
