@@ -65,7 +65,11 @@ function laesGoogleFejl(svar) {
         for (const d of Array.isArray(fejl.details) ? fejl.details : []) {
           const ms = d && String(d['@type'] || '').endsWith('google.rpc.RetryInfo') ? laesVarighed(d.retryDelay) : null;
           if (ms !== null) ud.retryMs = ms;
+          // QuotaFailure med en dagskvote, fx GenerateRequestsPerDayPerProjectPerModel.
+          for (const v of Array.isArray(d?.violations) ? d.violations : []) if (/PerDay/i.test(String(v?.quotaId || ''))) ud.dagsgraense = true;
         }
+        // Beder Google os vente over en time, er det ikke en minutgrænse.
+        if ((ud.retryMs ?? 0) > 60 * 60 * 1000) ud.dagsgraense = true;
         return ud;
       } catch {
         return {};
@@ -87,15 +91,20 @@ function standardVent(ms, signal) {
  */
 async function medGenforsoeg(kald, {
   signal, frist, nu = Date.now, vent = standardVent, tilfaeldig = Math.random, vedGenforsoeg = () => {},
+  // Højst så meget ventetid i alt. Upload-start: telefonens upload står stille imens.
+  maksVentMs = Infinity,
 }) {
+  let ventetIalt = 0;
   for (let forsoeg = 1; ; forsoeg++) {
     let svar = null;
     let fejl = null;
+    const startet = nu();
     try {
       svar = await kald();
     } catch (e) {
       fejl = e;
     }
+    const varighed = nu() - startet;
     const opgiv = () => {
       if (fejl) throw fejl;
       return svar;
@@ -109,6 +118,10 @@ async function medGenforsoeg(kald, {
     // Aldrig kortere end Google beder om (header eller RetryInfo), og aldrig ud over tidsgrænsen.
     const ventMs = Math.max(stigende, header ?? 0, google.retryMs ?? 0);
     if (nu() + ventMs >= frist) return opgiv();
+    if (ventetIalt + ventMs > maksVentMs) return opgiv();
+    // 5xx og netfejl: kun igen, hvis et nyt forsøg kan nå at blive færdigt. Hvert forsøg kan koste og tæller i dagskvoten.
+    if ((!svar || svar.status !== 429) && frist - (nu() + ventMs) < varighed) return opgiv();
+    ventetIalt += ventMs;
 
     const info = { forsoeg, status: svar ? svar.status : 0, ventMs };
     if (google.googleKode) info.googleKode = google.googleKode;

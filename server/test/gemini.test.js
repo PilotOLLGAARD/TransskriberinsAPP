@@ -722,3 +722,36 @@ test('dagsgrænsen hos Google genforsøges ikke og giver kvote med Googles kode'
   assert.equal(antal(kald, '/interactions'), 1);
   assert.deepEqual(v.ventet, []);
 });
+
+// Fund fra den afsluttende gennemgang
+
+test('upload-start venter højst 45 s i alt, så telefonens vagt på 90 s ikke afbryder', async () => {
+  const retry37 = () => json(429, { error: { status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' }] } });
+  const { hent, kald } = falskHent({ startSvar: raekke(retry37, retry37, retry37, startOk) });
+  const v = maaltVent();
+  await assert.rejects(lav(hent, { vent: v.vent, timeoutMs: 840000 }).transskriber(lyd(), valg()), (e) => e.status === 429 && e.trin === 'upload');
+  assert.ok(v.ventet.reduce((s, x) => s + x, 0) <= 45000, `ventede ${v.ventet}`);
+  assert.equal(antal(kald, '/upload/v1beta/files'), 2);
+});
+
+test('en lang transskription, der fejler med 503, genforsøges ikke uden tid nok til et nyt forsøg', async () => {
+  let tid = Date.UTC(2026, 10, 3, 12);
+  // Første forsøg tager 500 s og fejler. Der er kun ca. 340 s tilbage af 840.
+  const { hent, kald } = falskHent({ interaktion: () => { tid += 500000; return json(503, {}); } });
+  const v = { ventet: [], vent: async (ms) => { v.ventet.push(ms); tid += ms; } };
+  await assert.rejects(lav(hent, { vent: v.vent, nu: () => tid, timeoutMs: 840000 }).transskriber(lyd(), valg()), (e) => e.status === 503);
+  assert.equal(antal(kald, '/v1beta/interactions'), 1);
+});
+
+test('dagsgrænsen genkendes også uden teksten "per day": lang ventetid eller quotaId PerDay', async () => {
+  const lang = { error: { code: 'too_many_requests', message: 'Limit reached. Please retry in 18h17m.' } };
+  const a = falskHent({ interaktion: () => json(429, lang) });
+  await assert.rejects(lav(a.hent, { vent: async () => {} }).transskriber(lyd(), valg()), (e) => e.kode === 'kvote');
+  const quota = { error: { status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel' }] }] } };
+  const b = falskHent({ interaktion: () => json(429, quota) });
+  await assert.rejects(lav(b.hent, { vent: async () => {} }).transskriber(lyd(), valg()), (e) => e.kode === 'kvote');
+  // En minutgrænse er ikke en dagsgrænse.
+  const minut = { error: { status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }] } };
+  const c = falskHent({ interaktion: raekke(() => json(429, minut), 200) });
+  assert.equal((await lav(c.hent, { vent: async () => {} }).transskriber(lyd(), valg())).tekst, 'Hej');
+});

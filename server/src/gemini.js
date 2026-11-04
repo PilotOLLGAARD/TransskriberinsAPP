@@ -124,9 +124,9 @@ function lavGemini({
   let sidsteOprydning = -Infinity;
 
   /** Genforsøg inden for kaldets samlede frist. Kun sikre kald: kroppen er en færdig tekst. */
-  function genforsoeg(hvor, kald, signal, frist) {
+  function genforsoeg(hvor, kald, signal, frist, ekstra = {}) {
     return medGenforsoeg(kald, {
-      signal, frist, nu, vent, tilfaeldig,
+      signal, frist, nu, vent, tilfaeldig, ...ekstra,
       vedGenforsoeg: (t) => log({ haendelse: 'gemini-genforsoeg', hvor, ...t }),
     });
   }
@@ -144,7 +144,8 @@ function lavGemini({
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ file: { name: navn, display_name: 'optagelse' } }),
-    }), signal, frist);
+      // Telefonens upload står stille, mens der ventes. Appen giver op efter 90 s stilstand.
+    }), signal, frist, { maksVentMs: 45000 });
     if (!start.ok) throw await svarFejl(start, 'upload-start');
     // Fra nu af kan filen findes hos Google, også hvis resten af upload går galt.
     vedStart();
