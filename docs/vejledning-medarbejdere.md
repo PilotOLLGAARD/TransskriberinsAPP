@@ -14,20 +14,21 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 ## Sådan gør du
 
 1. Log ind med din ØLLGAARD-konto.
-2. Vælg typen, og skriv evt. et navn, fx "Møde omkring SAS Lounge". Begge dele er valgfrie og kan også vælges efter optagelsen.
+2. Skriv evt. et navn, fx "Møde omkring SAS Lounge". Det er valgfrit og kan også skrives efter optagelsen.
 3. Tryk på **Optag**. Skærmen bliver mørk med en rød prik, og uret tæller.
 4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele. Har du givet appen lov til notifikationer (den spørger første gang, du trykker Optag), får du beskeden "Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager." Når du åbner appen igen, står optagelsen klar med Fortsæt optagelsen og Send.
 5. Tryk på **Stop**.
-6. Ret navnet og typen, hvis du vil, og tryk **Send**. Skærmen viser trin for trin, hvor langt referatet er, og hvilken mailadresse det sendes til. Er navnet tomt, finder appen selv på en titel. **Hold appen åben, til der står "Referatet er sendt".** Lukker du den før, bliver referatet først færdigt, når du åbner appen igen og trykker Prøv igen. Har du givet lov til notifikationer, får du en besked, hvis det sker.
+6. Ret navnet, hvis du vil, og tryk **Send**. Skærmen viser trin for trin, hvor langt referatet er, og hvilken mailadresse det sendes til. Er navnet tomt, finder appen selv på en titel. **Hold appen åben, til der står "Referatet er sendt".** Lukker du den før, bliver referatet først færdigt, når du åbner appen igen og trykker Prøv igen. Har du givet lov til notifikationer, får du en besked, hvis det sker.
 7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
 
-Forklaringen øverst på startskærmen kan skjules med **Skjul forklaringen**. Under **Information** nederst på startskærmen står det hele igen.
+Under **Information** øverst på startskærmen står en kort forklaring.
 
 ## Typer
 
+Du vælger ikke typen. Appen finder selv ud af ud fra navnet og indholdet, om optagelsen er et byggenotat, et møde, en påmindelse eller andet, og bygger referatet op efter det. Typen står i mailens emne, i PDF'en og under **Tidligere**.
+
 | Type | Referatet indeholder |
 |---|---|
-| Automatisk | Appen vælger selv en af de fire typer ud fra indholdet. Standard |
 | Byggenotat | Hovedpunkter, fejl og mangler, mål og mængder, opgaver og aftaler |
 | Møde | Hovedpunkter, beslutninger, opgaver og aftaler, åbne spørgsmål |
 | Påmindelse | En huskeliste |
