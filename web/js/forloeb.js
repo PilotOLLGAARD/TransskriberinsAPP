@@ -179,6 +179,19 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       await opdaterTrygt(id, { sendtIgen: nu(), fejlType: undefined, maaskeSendt: undefined });
     }),
 
+    /**
+     * Efter login: sender noter, der stoppede, fordi login manglede. Brugeren havde allerede trykket Send.
+     * En mail, der måske er sendt, sendes ikke igen af sig selv.
+     */
+    async sendVentende() {
+      for (const note of await lager.alleNoter()) {
+        if (note.fejlType !== 'login' || note.slettet || note.maaskeSendt) continue;
+        await opdaterTrygt(note.id, { fejlType: undefined });
+        if (note.status === STATUS.FEJL) await forloeb.behandlOgSend(note.id);
+        else if (note.status === STATUS.TEKST_KLAR) await forloeb.sendTilMig(note.id);
+      }
+    },
+
     /** Laver referatet, hvis det mangler, og sender det derefter selv. Bruges også af Prøv igen. */
     async behandlOgSend(id) {
       await forloeb.behandl(id);

@@ -720,3 +720,28 @@ test('slet i de første millisekunder af en afsendelse: lyden sendes slet ikke',
   assert.equal(s.t.lydKald, 0);
   assert.equal(s.t.mailKald.length, 0);
 });
+
+// Efter login sendes det, der ventede på login
+
+test('sendVentende sender noter, der fejlede på login, og intet andet', async () => {
+  const s = opsaet({
+    sendLyd: async () => REFERAT_SVAR,
+    noter: [
+      { id: 'login-lyd', status: STATUS.FEJL, fejlType: 'login', mime: 'audio/mp4', oprettet: 1 },
+      { id: 'login-mail', status: STATUS.TEKST_KLAR, fejlType: 'login', tekst: 'T', referat: { opsummering: 'O' }, pdf: 'x', oprettet: 2 },
+      { id: 'net', status: STATUS.FEJL, fejlType: 'net', mime: 'audio/mp4', oprettet: 3 },
+      { id: 'gemt', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 4 },
+      { id: 'maaske', status: STATUS.TEKST_KLAR, fejlType: 'login', maaskeSendt: true, pdf: 'x', oprettet: 5 },
+      { id: 'slettet', status: STATUS.FEJL, fejlType: 'login', slettet: 1, mime: 'audio/mp4', oprettet: 6 },
+    ],
+  });
+  await s.forloeb.sendVentende();
+  assert.equal(s.lager.kort.get('login-lyd').status, STATUS.SENDT);
+  assert.equal(s.lager.kort.get('login-mail').status, STATUS.SENDT);
+  assert.equal(s.lager.kort.get('net').status, STATUS.FEJL);
+  assert.equal(s.lager.kort.get('gemt').status, STATUS.GEMT);
+  assert.equal(s.lager.kort.get('maaske').status, STATUS.TEKST_KLAR);
+  assert.equal(s.lager.kort.get('slettet').status, STATUS.FEJL);
+  assert.equal(s.t.lydKald, 1);
+  assert.equal(s.t.mailKald.length, 2);
+});
