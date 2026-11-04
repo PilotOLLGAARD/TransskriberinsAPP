@@ -122,6 +122,13 @@ test('sendReferat sender JSON med tekster, titel, type, varighed og tidspunkt', 
   assert.ok(kald.valg.signal instanceof AbortSignal);
 });
 
+test('uden type sender sendReferat intet typefelt, så serveren selv vælger', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'A', titel: 'T' }), { status: 200 }); };
+  await sendReferat({ tekster: ['A'], titel: '', type: undefined }, 'b', hent);
+  assert.equal('type' in JSON.parse(kald.body), false);
+});
+
 test('sendReferat giver samme fejltyper som sendLyd', async () => {
   for (const [status, type] of [[401, 'login'], [403, 'adgang'], [400, 'tjeneste'], [502, 'tjeneste']]) {
     await assert.rejects(sendReferat({ tekster: ['a'] }, 'b', async () => new Response('{}', { status })), (e) => e.type === type, String(status));

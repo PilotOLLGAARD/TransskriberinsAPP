@@ -588,6 +588,16 @@ test('tre dele giver tre lydkald med kunTekst og ét referatkald', async () => {
   assert.equal(s.t.mailKald.length, 1);
 });
 
+test('en afbrudt ny optagelse uden type sendes til referatet uden type, og den valgte type gemmes', async () => {
+  const { type, ...udenType } = DELT;
+  const s = opsaet({ noter: [udenType], sendLyd: delTekst, sendReferat: async () => ({ ...REFERAT_SVAR, type: 'moede' }) });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.referatKald.length, 1);
+  assert.equal(s.t.referatKald[0][0].type, undefined);
+  for (const [, , , meta] of s.t.lydListe) assert.equal(meta.type, undefined);
+  assert.equal(s.lager.kort.get('a').type, 'moede');
+});
+
 test('genforsøg sender ikke dele, der allerede er transskriberet', async () => {
   let kald = 0;
   const s = opsaet({ noter: [DELT], sendLyd: async (del) => { kald++; if (kald === 2) throw Object.assign(new Error(), { type: 'net' }); return delTekst(del); } });
