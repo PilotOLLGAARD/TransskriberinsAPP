@@ -157,3 +157,47 @@ test('fælde: et talord, der ikke er et gyldigt dansk tal, bliver [uklart] i ref
   assert.equal(tjek(kilde, 'Mangler niogfirs sten.'), 'Mangler niogfirs sten.');
   assert.equal(tjek(kilde, 'Sænket tolvogtyve millimeter.'), `Sænket ${U} millimeter.`);
 });
+
+// Fund fra gennemgangen
+
+test('talord afsluttes ved tegnsætning og ved en ny størrelsesorden', () => {
+  assert.equal(tjek('Vi har fem tusind. To tusind til stilladset.', '5.000 kr og 2.000 kr.'), '5.000 kr og 2.000 kr.');
+  assert.equal(tjek('Vi har fem tusind. To tusind til stilladset.', 'I alt 7.000 kr.'), `I alt ${U} kr.`);
+  assert.equal(tjek('fem hundrede, tre hundrede', '500 og 300'), '500 og 300');
+  assert.equal(tjek('to hundrede og to hundrede', '200 og 200, ikke 20200'), `200 og 200, ikke ${U}`);
+  assert.equal(tjek('fem tusind to tusind', '5000 og 2000, ikke 7000'), `5000 og 2000, ikke ${U}`);
+});
+
+test('talord med hundrede og tusind i referatet kontrolleres som hele tal', () => {
+  assert.equal(tjek('Det koster fem hundrede kroner.', 'Det koster fem tusind kroner.'), `Det koster ${U} kroner.`);
+  assert.equal(tjek('Det koster fem hundrede kroner.', 'Det koster fem millioner kroner.'), `Det koster ${U} kroner.`);
+  assert.equal(tjek('tre hundrede og to sten', 'to hundrede sten'), `${U} sten`);
+  assert.equal(tjek('tre hundrede og to sten', 'tre hundrede og to sten'), 'tre hundrede og to sten');
+});
+
+test('enheder med eksponent og CO2 er ikke tal', () => {
+  assert.equal(tjek('tolv kvadratmeter og fem kubikmeter CO to', '12 m2 og 5 m3 CO2, 12 cm2'), '12 m2 og 5 m3 CO2, 12 cm2');
+  // Et tal med bogstaver foran, som ikke er en enhed, er stadig et tal.
+  assert.equal(tjek('opgang tolv', 'Opgang B13'), `Opgang B${U}`);
+});
+
+test('målestok som 1:100', () => {
+  assert.equal(tjek('tegningen er i en til hundrede', 'Tegning i 1:100'), 'Tegning i 1:100');
+  assert.equal(tjek('tegningen er i en til hundrede', 'Tegning i 1:50'), `Tegning i ${U}`);
+});
+
+test('årstal sagt i par og datoer med måned som tal', () => {
+  assert.equal(tjek('det var i tyve seksogtyve', 'I 2026.'), 'I 2026.');
+  assert.equal(tjek('bygget i nitten seksoghalvfems', 'Bygget 1996.'), 'Bygget 1996.');
+  assert.equal(tjek('den tredje november', 'Den 3/11 og 3.11.'), 'Den 3/11 og 3.11.');
+  assert.equal(tjek('den tredje november', 'Den 3/12.'), `Den 3/${U}.`);
+});
+
+test('klokkeslæt efter middag og halve timer', () => {
+  assert.equal(tjek('vi mødes halv tre', 'Møde kl. 14.30.'), 'Møde kl. 14.30.');
+  assert.equal(tjek('vi mødes klokken to', 'Møde kl. 14.00.'), 'Møde kl. 14.00.');
+  assert.equal(tjek('vi mødes halv et', 'Møde kl. 12.30.'), 'Møde kl. 12.30.');
+  assert.equal(tjek('vi mødes kvart i en', 'Møde kl. 12.45.'), 'Møde kl. 12.45.');
+  // "halv tre" er 2.30, ikke 2.50.
+  assert.equal(tjek('vi mødes halv tre', 'Møde kl. 2.50.'), `Møde kl. ${U}.`);
+});
