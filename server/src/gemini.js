@@ -25,8 +25,11 @@ const TRANSCRIBE = 'transcribe';
 const FLASH = 'flash';
 // Flash tager kun over efter 5xx fra Transcribe, hvis der er mindst så meget tid tilbage.
 const FLASH_MIN_MS = 60 * 1000;
-const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter, '
-  + 'talernavne eller tidskoder. Skriv tal, som de bliver sagt. Skriv "[uklart]", hvor noget ikke kan høres. Opfind aldrig noget.';
+// Tidspunkterne bruges kun til at dele bilaget i PDF'en op og fjernes fra teksten bagefter (afsnit.js).
+const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter '
+  + 'eller talernavne. Del teksten i afsnit ved naturlige pauser eller nyt emne, og start hvert afsnit på en ny linje '
+  + 'med tidspunktet i lyden som [mm:ss], eller [t:mm:ss] efter den første time. '
+  + 'Skriv tal, som de bliver sagt. Skriv "[uklart]", hvor noget ikke kan høres. Opfind aldrig noget.';
 // Det trin, en fejl skete i, som det står i loggen.
 const TRIN = { 'upload-start': 'upload', upload: 'upload', interactions: 'transskription', referat: 'referat' };
 
@@ -317,11 +320,18 @@ function lavGemini({
           try {
             return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
           } catch (e) {
-            // Transcribe er kun reserve for korte optagelser: længere er over dens grænse pr. minut.
-            const grund = lang ? null : flashSkiftGrund(e, startetFlash, frist, samlet);
+            const grund = flashSkiftGrund(e, startetFlash, frist, samlet);
+            // Blokeret indhold kan ikke slås fra hos Flash: Transcribe prøver uanset længde.
+            // Overbelastning: kun korte optagelser, da længere er over Transcribes grænse pr. minut.
+            if (lang && grund !== 'blokeret') throw e;
             if (!grund) throw e;
             log({ haendelse: 'model-skift', grund, fra: FLASH, til: TRANSCRIBE });
-            return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+            try {
+              return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+            } catch (fejl) {
+              // Blokeret indhold er ikke midlertidigt: brugeren skal have den fejl, ikke en, der lokker til nye betalte forsøg.
+              throw grund === 'blokeret' ? e : fejl;
+            }
           }
         }
         const startet = nu();

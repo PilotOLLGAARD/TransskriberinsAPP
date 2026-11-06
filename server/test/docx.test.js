@@ -212,3 +212,81 @@ test('dokumentets egenskaber har titlen', () => {
   assert.ok(kerne.includes('<dc:title>Tag &amp; tårn</dc:title>'));
 });
 
+
+// Bilaget delt i emner med tidspunkter
+
+const { laesAfsnit, samletTekst, knytEmner, lavBilag } = require('../src/afsnit.js');
+
+const RAA = [
+  '[00:00] Velkommen til mødet om taget.',
+  '[04:26] Taget er utæt ved kippen,',
+  '[04:31] og der mangler 12 lægter.',
+  '[16:35] Facaden mangler fuger mod nord.',
+  '[1:04:12] Vi ses fredag.',
+].join('\n');
+const AFSNIT = laesAfsnit(RAA);
+const EMNER = knytEmner(AFSNIT, [{ tid: '00:00', undertitel: 'Tag og kip' }, { tid: '16:35', undertitel: 'Facade & fuger' }]);
+const bilagDel = (xml) => {
+  const a = afsnitAf(xml);
+  return a.slice(a.indexOf('Bilag: Fuld transskription') + 2);
+};
+const bilagXml = (xml) => xml.slice(xml.indexOf('Bilag: Fuld transskription'));
+
+test('bilag med emner: tid, tabulator og undertitel som ét afsnit, teksten indrykket under', () => {
+  const xml = dokument({ tekst: samletTekst(AFSNIT), bilag: lavBilag(AFSNIT, EMNER) });
+  tjekVelformet(xml, 'document.xml');
+  assert.deepEqual(bilagDel(xml), [
+    '00:00\tTag og kip',
+    'Velkommen til mødet om taget.',
+    'Taget er utæt ved kippen, og der mangler 12 lægter.',
+    '16:35\tFacade & fuger',
+    'Facaden mangler fuger mod nord.',
+    'Vi ses fredag.',
+  ]);
+  const del = bilagXml(xml);
+  assert.match(del, /<w:pStyle w:val="Emne"\/><\/w:pPr><w:r><w:rPr><w:rStyle w:val="Tid"\/><\/w:rPr><w:t xml:space="preserve">16:35<\/w:t><\/w:r><w:r><w:tab\/><w:t xml:space="preserve">Facade &amp; fuger<\/w:t><\/w:r>/);
+  assert.equal((del.match(/w:val="Bilagtekst"/g) || []).length, 4);
+});
+
+test('bilag over en time viser t:mm:ss', () => {
+  const xml = dokument({ tekst: samletTekst(AFSNIT), bilag: lavBilag(AFSNIT, []) });
+  assert.ok(bilagDel(xml).includes('1:04:12\tVi ses fredag.'));
+});
+
+test('kort optagelse: kun tid og tekst i hvert afsnit, ingen undertitler', () => {
+  const kort = laesAfsnit('[00:00] Taget er utæt.\n[00:42] Facaden mangler fuger.');
+  const xml = dokument({ tekst: samletTekst(kort), bilag: lavBilag(kort, []) });
+  assert.deepEqual(bilagDel(xml), ['00:00\tTaget er utæt.', '00:42\tFacaden mangler fuger.']);
+  assert.ok(!bilagXml(xml).includes('w:val="Emne"'));
+  assert.equal((bilagXml(xml).match(/w:val="Tidsafsnit"/g) || []).length, 2);
+});
+
+test('hele teksten er med i bilaget ord for ord', () => {
+  const ord = (t) => t.split(/\s+/).filter(Boolean);
+  const xml = dokument({ tekst: samletTekst(AFSNIT), bilag: lavBilag(AFSNIT, EMNER) });
+  const tekst = bilagDel(xml).filter((l) => !/^\d{1,2}(:\d{2}){1,2}\t/.test(l)).join(' ');
+  assert.deepEqual(ord(tekst), ord(samletTekst(AFSNIT)));
+});
+
+test('tekst uden tidspunkter vises som før', () => {
+  const xml = dokument({ bilag: null });
+  assert.deepEqual(bilagDel(xml), ['Første linje af mødet.', 'Anden linje med æøå ÆØÅ.', 'Tredje afsnit efter en tom linje.']);
+});
+
+test('typografierne til bilaget: emnet holdes med teksten, tiden er grå, undertitlen fed og knapblå', () => {
+  const stil = unzip(lav()).get('word/styles.xml');
+  const emne = stil.match(/<w:style [^>]*w:styleId="Emne".*?<\/w:style>/)[0];
+  assert.match(emne, /<w:keepNext\/>/);
+  assert.match(emne, /<w:b\/>/);
+  assert.match(emne, /w:color w:val="0E5AA3"/);
+  assert.match(emne, /<w:tab w:val="left" w:pos="(\d+)"\/>/);
+  const tab = emne.match(/w:pos="(\d+)"/)[1];
+  const tekst = stil.match(/<w:style [^>]*w:styleId="Bilagtekst".*?<\/w:style>/)[0];
+  assert.match(tekst, new RegExp(`<w:ind w:left="${tab}"/>`));
+  const tid = stil.match(/<w:style [^>]*w:styleId="Tid".*?<\/w:style>/)[0];
+  assert.match(tid, /w:type="character"/);
+  assert.match(tid, /w:color w:val="5B6470"/);
+  assert.match(tid, /<w:b w:val="0"\/>/);
+  const tidsafsnit = stil.match(/<w:style [^>]*w:styleId="Tidsafsnit".*?<\/w:style>/)[0];
+  assert.match(tidsafsnit, new RegExp(`<w:ind w:left="${tab}" w:hanging="${tab}"/>`));
+});

@@ -76,13 +76,14 @@ function startLokal({ port = 4280 } = {}) {
       if (fejl === 'tjeneste' || fejl === 'format') throw new GeminiFejl(fejl, 'testfejl');
       if (fejl === 'tom') return { tekst: '' };
       if (fejl === 'langsom') await new Promise((ok) => setTimeout(ok, 5000));
-      return { tekst: `Testtekst fra lokal server. Modtog ${bytes} bytes.` };
+      // Som Flash: hvert afsnit starter med tidspunktet. Serveren fjerner dem fra teksten og bruger dem kun i bilaget.
+      return { tekst: `[00:00] Testtekst fra lokal server.\n[00:07] Modtog ${bytes} bytes.` };
     },
   };
 
   // Falsk referat. PDF'en er den rigtige.
   const referat = {
-    async lav({ tekst, titel, type, varighedSek }) {
+    async lav({ tekst, titel, type, varighedSek, afsnit }) {
       tilstand.referatKald++;
       tilstand.sidsteReferat = { titel, type, varighedSek };
       // referat fejler én gang, referatTo de næste to gange (fx både på /transskriber og /referat).
@@ -96,6 +97,8 @@ function startLokal({ port = 4280 } = {}) {
         opsummering: `Testreferat af: ${tekst}`, hovedpunkter: ['Første punkt', 'Andet punkt med æøå'], beslutninger: [],
         opgaver: [], fejlOgMangler: [], maalOgMaengder: [], huskeliste: type === 'paamindelse' ? ['Huskepunkt'] : [],
         aabneSpoergsmaal: [], renTekst: '',
+        // Ét emne, når teksten har tidspunkter. Bilaget i PDF'en får så tid og undertitel.
+        ...(afsnit?.some((a) => a.sek !== null) ? { emner: [{ fra: 0, undertitel: 'Testemne' }] } : {}),
       };
     },
   };

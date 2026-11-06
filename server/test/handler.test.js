@@ -619,3 +619,68 @@ test('x-referat-mangler er tilladt i CORS', async () => {
   const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
   assert.match(svar.headers.get('access-control-allow-headers') || '', /x-referat-mangler/);
 });
+
+// Tidspunkter fra Flash: kun til at dele bilaget op
+
+const MED_TIDER = '[00:00] Taget er utæt.\n[04:26] Facaden mangler fuger.';
+const medTiderGemini = (tekst = MED_TIDER) => falskGemini(async () => ({ tekst }));
+
+test('svarets tekst og referatets kilde er uden tidsmarkører', async () => {
+  const s = await start({ gemini: medTiderGemini() });
+  const j = await (await post(s.adresse, { headers: { 'x-varighed': '300' } })).json();
+  assert.equal(j.tekst, 'Taget er utæt.\nFacaden mangler fuger.');
+  assert.equal(s.referat.valg.tekst, 'Taget er utæt.\nFacaden mangler fuger.');
+  assert.equal(s.pdf.valg.tekst, 'Taget er utæt.\nFacaden mangler fuger.');
+});
+
+test('x-kun-tekst giver teksten uden tidsmarkører', async () => {
+  const s = await start({ gemini: medTiderGemini() });
+  const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-varighed': '300' } })).json();
+  assert.deepEqual(j, { tekst: 'Taget er utæt.\nFacaden mangler fuger.' });
+});
+
+test('referatet får afsnittene med tider rettet efter varigheden', async () => {
+  const s = await start({ gemini: medTiderGemini('[00:00] a b c d\n[04:00] e f g h') });
+  await post(s.adresse, { headers: { 'x-varighed': '600' } });
+  // Flashs slut anslås til 2 × 240 = 480 s. Optagelsen er 600 s, så 04:00 bliver 05:00.
+  assert.deepEqual(s.referat.valg.afsnit, [{ sek: 0, tekst: 'a b c d' }, { sek: 300, tekst: 'e f g h' }]);
+});
+
+test('en uploadet fil over en time rettes også efter sin varighed', async () => {
+  const s = await start({ gemini: medTiderGemini('[00:00] a b c d\n[30:00] e f g h') });
+  await post(s.adresse, { headers: { 'x-varighed': '4000' } });
+  assert.equal(s.referat.valg.afsnit[1].sek, 2000);
+});
+
+test('PDF og Word får bilaget med emnerne, og appen får referatet uden emner', async () => {
+  const referat = falskReferat(async () => ({ ...REFERAT, emner: [{ fra: 0, undertitel: 'Tag' }, { fra: 1, undertitel: 'Facade' }] }));
+  const s = await start({ gemini: medTiderGemini(), referat });
+  // Uden varighed bruges Flashs tider uændret.
+  const j = await (await post(s.adresse)).json();
+  const bilag = [{ sek: 0, undertitel: 'Tag', afsnit: ['Taget er utæt.'] }, { sek: 266, undertitel: 'Facade', afsnit: ['Facaden mangler fuger.'] }];
+  assert.deepEqual(s.pdf.valg.bilag, bilag);
+  assert.deepEqual(s.docx.valg.bilag, bilag);
+  assert.ok(!('emner' in s.pdf.valg.referat));
+  assert.ok(!('emner' in j.referat));
+});
+
+test('kort optagelse uden emner: hvert afsnit med sin tid', async () => {
+  const s = await start({ gemini: medTiderGemini() });
+  await post(s.adresse);
+  assert.deepEqual(s.pdf.valg.bilag, [{ sek: 0, afsnit: ['Taget er utæt.'] }, { sek: 266, afsnit: ['Facaden mangler fuger.'] }]);
+});
+
+test('uden tidspunkter (Transcribe) er der intet opdelt bilag', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-varighed': '300' } });
+  assert.equal(s.pdf.valg.bilag, null);
+  assert.equal(s.pdf.valg.tekst, 'Hej');
+});
+
+test('flere dele via /referat har intet opdelt bilag', async () => {
+  const s = await start();
+  const svar = await postReferat(s.adresse, { tekster: ['Del et.', 'Del to.'] });
+  assert.equal(svar.status, 200);
+  assert.equal(s.pdf.valg.bilag, null);
+  assert.equal(s.referat.valg.afsnit, undefined);
+});

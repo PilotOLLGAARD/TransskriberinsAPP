@@ -136,3 +136,128 @@ test('PDF med type og huskeliste laves uden fejl', async () => {
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
   assert.equal(sider(pdf), 2);
 });
+
+// Bilaget delt i emner med tidspunkter
+
+const PDFDocument = require('pdfkit');
+const { laesAfsnit, samletTekst, knytEmner, lavBilag, formaterTid } = require('../src/afsnit.js');
+
+const GRAA = '#5b6470';
+const BLAA_DYB = '#0e5aa3';
+const BLAEK = '#282828';
+
+/** Laver PDF'en og noterer hvert stykke tekst: indhold, placering, side, skrift og farve. */
+async function tegnet(valg) {
+  const { text, addPage } = PDFDocument.prototype;
+  const ud = [];
+  PDFDocument.prototype.addPage = function (...a) {
+    this.sideNr = (this.sideNr ?? -1) + 1;
+    return addPage.apply(this, a);
+  };
+  PDFDocument.prototype.text = function (s, x, y, ...rest) {
+    const post = {
+      s: String(s), x: typeof x === 'number' ? x : this.x, y: typeof y === 'number' ? y : this.y, side: this.sideNr,
+      font: this._font.name, farve: this._fillColor?.[0], str: this._fontSize, bund: this.page.maxY(),
+    };
+    const r = text.call(this, s, x, y, ...rest);
+    post.slut = this.y;
+    post.slutSide = this.sideNr;
+    ud.push(post);
+    return r;
+  };
+  try {
+    await lavPdf({ titel: 'Møde', tidspunkt: TIDSPUNKT, varighedSek: 4000, referat: REFERAT, tekst: 'x', ...valg });
+  } finally {
+    Object.assign(PDFDocument.prototype, { text, addPage });
+  }
+  return ud.slice(ud.findIndex((p) => p.s === 'Bilag: Fuld transskription') + 2);
+}
+
+const ordAf = (t) => t.split(/\s+/).filter(Boolean);
+const saetning = (i, n) => Array.from({ length: n }, (_, k) => `ord${i}x${k}`).join(' ');
+
+function langOptagelse(antalEmner = 3, ordPrAfsnit = 30) {
+  const linjer = Array.from({ length: antalEmner * 4 }, (_, i) => `[${formaterTid(995 + i * 75)}] ${saetning(i, ordPrAfsnit)}.`);
+  const afsnit = laesAfsnit(linjer.join('\n'));
+  const emner = knytEmner(afsnit, Array.from({ length: antalEmner }, (_, e) => ({ tid: formaterTid(afsnit[e * 4].sek), undertitel: `Emne ${e}` })));
+  return { afsnit, tekst: samletTekst(afsnit), bilag: lavBilag(afsnit, emner) };
+}
+
+test('bilag med emner: grå tid til venstre, fed knapblå undertitel ved siden af, teksten under i samme kolonne', async () => {
+  const { tekst, bilag } = langOptagelse();
+  const p = await tegnet({ tekst, bilag });
+  const tid = p.find((x) => x.s === '16:35');
+  const undertitel = p.find((x) => x.s === 'Emne 0');
+  const forste = p.find((x) => x.s.startsWith('ord0x0'));
+  assert.ok(tid && undertitel && forste);
+  assert.equal(tid.x, 56);
+  assert.equal(tid.farve, GRAA);
+  assert.equal(tid.font, 'Lato-Regular');
+  assert.equal(undertitel.font, 'Lato-Bold');
+  assert.equal(undertitel.farve, BLAA_DYB);
+  assert.ok(undertitel.x >= tid.x + 40, 'undertitlen står til højre for tiden');
+  assert.ok(Math.abs(undertitel.y - tid.y) < 3, 'tid og undertitel på samme linje');
+  assert.equal(forste.x, undertitel.x);
+  assert.equal(forste.farve, BLAEK);
+  assert.ok(forste.y > undertitel.y);
+});
+
+test('tider over en time vises som t:mm:ss', async () => {
+  const p = await tegnet({ tekst: 'a\nb', bilag: [{ sek: 600, undertitel: 'Start', afsnit: ['a.'] }, { sek: 3852, undertitel: 'Senere', afsnit: ['b.'] }] });
+  assert.ok(p.some((x) => x.s === '1:04:12'));
+  assert.ok(p.some((x) => x.s === '10:00'));
+});
+
+test('mere luft mellem emner end mellem afsnit i samme emne', async () => {
+  const { tekst, bilag } = langOptagelse(2, 8);
+  const p = await tegnet({ tekst, bilag });
+  const tekster = p.filter((x) => x.farve === BLAEK);
+  const iEmne = tekster[1].y - tekster[0].slut;
+  const nyTid = p.find((x) => x.s === 'Emne 1');
+  const mellemEmner = nyTid.y - tekster[3].slut;
+  assert.ok(iEmne > 0 && iEmne < mellemEmner, `${iEmne} < ${mellemEmner}`);
+  assert.ok(mellemEmner >= 14, `${mellemEmner}`);
+});
+
+test('tid og undertitel står aldrig alene nederst på en side', async () => {
+  for (const ordPrAfsnit of [11, 23, 37, 52]) {
+    const { tekst, bilag } = langOptagelse(25, ordPrAfsnit);
+    const p = await tegnet({ tekst, bilag });
+    p.forEach((x, i) => {
+      if (x.farve !== BLAA_DYB) return;
+      const naeste = p[i + 1];
+      assert.equal(naeste.side, x.side, `${x.s} er alene nederst på side ${x.side}`);
+      assert.ok(naeste.y + 2 * 14 <= x.bund, `${x.s}: mindre end to linjer tekst under`);
+    });
+  }
+});
+
+test('hele teksten er med i bilaget ord for ord', async () => {
+  const { tekst, bilag } = langOptagelse(6, 40);
+  const p = await tegnet({ tekst, bilag });
+  assert.deepEqual(ordAf(p.filter((x) => x.farve === BLAEK).map((x) => x.s).join(' ')), ordAf(tekst));
+});
+
+test('kort optagelse: kun tid til venstre og teksten, ingen undertitler', async () => {
+  const afsnit = laesAfsnit('[00:00] Taget er utæt.\n[00:42] Facaden mangler fuger.');
+  const p = await tegnet({ tekst: samletTekst(afsnit), bilag: lavBilag(afsnit, []) });
+  assert.ok(!p.some((x) => x.farve === BLAA_DYB));
+  const tid = p.find((x) => x.s === '00:42');
+  const linje = p.find((x) => x.s === 'Facaden mangler fuger.');
+  assert.equal(tid.x, 56);
+  assert.ok(linje.x > tid.x + 40);
+  assert.ok(Math.abs(linje.y - tid.y) < 3);
+});
+
+test('tekst uden tidspunkter vises som før: hele teksten i ét stykke ved margenen', async () => {
+  const p = await tegnet({ tekst: 'Ingen tider her.\nAnden linje.', bilag: null });
+  const tekster = p.filter((x) => x.farve === BLAEK);
+  assert.deepEqual(tekster.map((x) => [x.s, x.x]), [['Ingen tider her.\nAnden linje.', 56]]);
+});
+
+test('lang optagelse med emner giver en gyldig PDF over flere sider', async () => {
+  const { tekst, bilag } = langOptagelse(20, 60);
+  const pdf = await lavPdf({ titel: 'Lang', tidspunkt: TIDSPUNKT, varighedSek: 3000, referat: REFERAT, tekst, bilag });
+  assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+  assert.ok(sider(pdf) >= 4, `kun ${sider(pdf)} sider`);
+});

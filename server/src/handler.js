@@ -5,6 +5,7 @@ const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
 const wordDel = require('./docx.js');
+const { laesAfsnit, skalerTider, samletTekst, lavBilag } = require('./afsnit.js');
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -105,12 +106,19 @@ function lavHandler({
   }
 
   /** Referat, PDF og mail af en tekst. Fælles for én optagelse og flere dele. */
-  async function lavResultat({ tekst, titel, type, varighedSek, tidspunkt, signal }, spor) {
+  async function lavResultat({
+    tekst, afsnit, titel, type, varighedSek, tidspunkt, signal,
+  }, spor) {
     log({ haendelse: 'referat-kald' });
     spor.trin = 'referat';
-    const r = await referat.lav({ tekst, titel, type, varighedSek, signal });
+    // Emnerne bruges kun til bilaget i PDF og Word. Appen får dem ikke.
+    const { emner = [], ...r } = await referat.lav({
+      tekst, titel, type, varighedSek, signal, ...(afsnit ? { afsnit } : {}),
+    });
     spor.trin = 'pdf';
-    const indhold = { titel: r.titel, tidspunkt, varighedSek, referat: r, tekst };
+    const indhold = {
+      titel: r.titel, tidspunkt, varighedSek, referat: r, tekst, bilag: lavBilag(afsnit || [], emner),
+    };
     const fil = await pdf.lavPdf(indhold);
     const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
     return {
@@ -266,9 +274,12 @@ function lavHandler({
     // gemini-kald logges af Gemini-delen, som kender modellen.
     const spor = { trin: 'transskription' };
     try {
-      const { tekst } = await gemini.transskriber(vagt, {
-        bytes, mime, signal: afbryd.signal, varighedSek: laesVarighedTilModel(req.headers['x-varighed']),
+      const { tekst: raa } = await gemini.transskriber(vagt, {
+        bytes, mime, signal: afbryd.signal, varighedSek: varighed,
       });
+      // Flashs tidspunkter deler kun bilaget op. Alt andet bruger teksten uden dem.
+      const afsnit = skalerTider(laesAfsnit(raa), varighed);
+      const tekst = samletTekst(afsnit);
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
       if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
 
@@ -276,6 +287,7 @@ function lavHandler({
       try {
         resultat = await lavResultat({
           tekst,
+          afsnit,
           titel: laesTitel(req.headers['x-titel']),
           type: laesType(req.headers['x-type']),
           varighedSek: laesVarighed(req.headers['x-varighed']),

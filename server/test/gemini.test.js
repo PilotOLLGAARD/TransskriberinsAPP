@@ -822,6 +822,18 @@ test('Flash-prompten er fast, dansk og har ordlisten med', async () => {
   assert.ok(!interaktionsKrop(b.kald).input[1].text.includes('Fagord'));
 });
 
+test('Flash-prompten beder om afsnit med tidspunktet som [mm:ss] og forbyder ikke tidskoder', async () => {
+  const a = falskHent();
+  await lav(a.hent).transskriber(lyd(), langLyd());
+  const tekst = interaktionsKrop(a.kald).input[1].text;
+  assert.match(tekst, /\[mm:ss\]/);
+  assert.match(tekst, /\[t:mm:ss\]/);
+  assert.match(tekst, /ny linje/);
+  assert.match(tekst, /pauser eller nyt emne/);
+  assert.ok(!tekst.includes('tidskoder'), 'tidskoder er ikke længere forbudt');
+  assert.match(tekst, /talernavne/);
+});
+
 test('gemini-kald logges med kort modelnavn', async () => {
   const { hent } = falskHent();
   const logs = [];
@@ -969,8 +981,23 @@ test('Flash overbelastet efter genforsøg: Transcribe tager over, når optagelse
   assert.equal(modelIKald(kald).at(-1), 'gemini-3.5-transcribe');
 });
 
-test('lang optagelse: Transcribe er ikke reserve, fordi den er over grænsen pr. minut', async () => {
+// Googles indholdsfilter blokerer af og til almindelige optagelser, og det kan ikke slås fra (målt 6. nov. 2026:
+// en 60-minutters fil blev blokeret, Transcribe klarede den på 36 s). Derfor er Transcribe reserve uanset længde.
+test('lang optagelse, som Flash blokerer: Transcribe tager over med samme fil', async () => {
   const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
-  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), langLyd()), (e) => e.status === 400 && e.googleKode === 'content_blocked');
-  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), langLyd());
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
+  assert.equal(antal(kald, '/upload/v1beta/files'), 1);
+});
+
+test('lang optagelse, hvor Flash er overbelastet: Transcribe er ikke reserve (over dens grænse pr. minut)', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: raekke(503) }) });
+  await assert.rejects(lav(hent, { foerst: 'flash', timeoutMs: 840000 }).transskriber(lyd(), langLyd()), (e) => e.status === 503);
+  assert.ok(!modelIKald(kald).includes('gemini-3.5-transcribe'));
+});
+
+test('fejler Transcribe efter en blokering hos Flash, gives Flashs fejl videre (ikke en midlertidig fejl)', async () => {
+  const { hent } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe: raekke(429) }) });
+  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), langLyd()), (e) => e.status === 400 && e.googleKode === 'content_blocked' && e.kode === 'format');
 });

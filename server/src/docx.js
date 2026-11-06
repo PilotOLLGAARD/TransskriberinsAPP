@@ -8,6 +8,7 @@
 
 const zlib = require('node:zlib');
 const { lavAfsnit, lavMeta, formaterTidspunkt } = require('./pdf.js');
+const { formaterTid } = require('./afsnit.js');
 
 const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -37,7 +38,24 @@ const punkt = (tekst) => `<w:p><w:pPr><w:pStyle w:val="Punkt"/></w:pPr><w:r><w:t
 /** Hver linje bliver sit eget afsnit. Tomme linjer udelades, da afsnittene har luft imellem sig. */
 const linjer = (tekst) => String(tekst ?? '').split(/\r?\n/).filter((l) => l.trim());
 
-function lavDokument({ titel, tidspunkt, varighedSek, referat, tekst }) {
+/** Tiden i grå, en tabulator og resten. Det hængende indryk holder ombrudte linjer i kolonnen efter tiden. */
+const medTid = (sek, tekst, stil) => `<w:p><w:pPr><w:pStyle w:val="${stil}"/></w:pPr>`
+  + `<w:r><w:rPr><w:rStyle w:val="Tid"/></w:rPr><w:t xml:space="preserve">${formaterTid(sek)}</w:t></w:r>`
+  + `<w:r><w:tab/><w:t xml:space="preserve">${escape(tekst)}</w:t></w:r></w:p>`;
+
+/**
+ * Bilaget som i PDF'en: et emne er tid + tabulator + undertitel med teksten indrykket under.
+ * Uden undertitel (korte optagelser) står tiden foran hvert afsnit.
+ */
+function bilagAfsnit(bilag) {
+  return bilag.flatMap((emne) => (emne.undertitel
+    ? [medTid(emne.sek, emne.undertitel, 'Emne'), ...emne.afsnit.map((a) => afsnit(a, 'Bilagtekst'))]
+    : emne.afsnit.map((a, i) => (i ? afsnit(a, 'Bilagtekst') : medTid(emne.sek, a, 'Tidsafsnit')))));
+}
+
+function lavDokument({
+  titel, tidspunkt, varighedSek, referat, tekst, bilag,
+}) {
   const p = [
     afsnit(titel, 'Title'),
     afsnit(lavMeta({ type: referat.type, tidspunkt, varighedSek }), 'Meta'),
@@ -54,8 +72,11 @@ function lavDokument({ titel, tidspunkt, varighedSek, referat, tekst }) {
   // Den fulde transskription følger altid med, fordi et referat kan udelade noget, der senere viser sig vigtigt.
   p.push(afsnit('Bilag: Fuld transskription', 'Heading1', '<w:pageBreakBefore/>'));
   p.push(afsnit(`${titel}  ·  ${formaterTidspunkt(tidspunkt)}`, 'Meta'));
-  const bilag = linjer(tekst);
-  p.push(...(bilag.length ? bilag : ['(ingen tekst)']).map((l) => afsnit(l)));
+  if (bilag?.length) p.push(...bilagAfsnit(bilag));
+  else {
+    const alle = linjer(tekst);
+    p.push(...(alle.length ? alle : ['(ingen tekst)']).map((l) => afsnit(l)));
+  }
 
   // A4 med 2 cm margen.
   const sektion = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
@@ -80,6 +101,17 @@ const TYPOGRAFIER = `${XML}<w:styles xmlns:w="${W}">`
   + '<w:rPr><w:b/><w:bCs/><w:color w:val="0E5AA3"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>'
   + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Punkt"><w:name w:val="Punkt"/><w:basedOn w:val="Normal"/>'
   + '<w:pPr><w:tabs><w:tab w:val="left" w:pos="360"/></w:tabs><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="360"/></w:pPr></w:style>'
+  // Bilaget: tiden i en kolonne på 960 twips (48 pt som i PDF'en), undertitel og tekst ved siden af.
+  // Emnet holdes sammen med teksten, og tekstens afsnit deles aldrig med én linje alene.
+  + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Emne"><w:name w:val="Emne"/><w:basedOn w:val="Normal"/><w:next w:val="Bilagtekst"/>'
+  + '<w:pPr><w:keepNext/><w:tabs><w:tab w:val="left" w:pos="960"/></w:tabs><w:spacing w:before="320" w:after="60"/><w:ind w:left="960" w:hanging="960"/></w:pPr>'
+  + '<w:rPr><w:b/><w:bCs/><w:color w:val="0E5AA3"/><w:sz w:val="23"/><w:szCs w:val="23"/></w:rPr></w:style>'
+  + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Bilagtekst"><w:name w:val="Bilagtekst"/><w:basedOn w:val="Normal"/>'
+  + '<w:pPr><w:widowControl/><w:spacing w:after="100"/><w:ind w:left="960"/></w:pPr></w:style>'
+  + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Tidsafsnit"><w:name w:val="Tidsafsnit"/><w:basedOn w:val="Normal"/>'
+  + '<w:pPr><w:widowControl/><w:tabs><w:tab w:val="left" w:pos="960"/></w:tabs><w:spacing w:after="160"/><w:ind w:left="960" w:hanging="960"/></w:pPr></w:style>'
+  + '<w:style w:type="character" w:customStyle="1" w:styleId="Tid"><w:name w:val="Tid"/>'
+  + '<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/><w:color w:val="5B6470"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>'
   + '</w:styles>';
 
 const INDHOLDSTYPER = `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
@@ -162,11 +194,15 @@ function lavZip(filer) {
   return Buffer.concat([...lokale, katalogBuf, slut]);
 }
 
-function lavDocx({ titel, tidspunkt, varighedSek, referat, tekst }) {
+function lavDocx({
+  titel, tidspunkt, varighedSek, referat, tekst, bilag,
+}) {
   return lavZip([
     ['[Content_Types].xml', INDHOLDSTYPER],
     ['_rels/.rels', RELATIONER],
-    ['word/document.xml', lavDokument({ titel, tidspunkt, varighedSek, referat, tekst })],
+    ['word/document.xml', lavDokument({
+      titel, tidspunkt, varighedSek, referat, tekst, bilag,
+    })],
     ['word/_rels/document.xml.rels', DOKUMENT_RELATIONER],
     ['word/styles.xml', TYPOGRAFIER],
     ['docProps/core.xml', lavEgenskaber({ titel, tidspunkt })],

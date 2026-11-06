@@ -412,3 +412,89 @@ test('prompten forbyder steder, lande, personer og firmaer, der ikke blev sagt',
   const p = lavPrompt({ tekst: 'x', titel: '', kort: false });
   assert.ok(p.includes('Nævn ikke steder, lande, personer, firmaer eller årstal, der ikke står i transskriptionen, heller ikke når de virker indlysende.'));
 });
+
+// Emner og undertitler til bilaget
+
+const AFSNIT = [
+  { sek: 0, tekst: 'Velkommen til mødet om taget.' },
+  { sek: 266, tekst: 'Taget er utæt ved kippen.' },
+  { sek: 400, tekst: 'Facaden mangler fuger mod nord.' },
+  { sek: 590, tekst: 'Vi ses fredag.' },
+];
+const LANG = { tekst: AFSNIT.map((a) => a.tekst).join('\n'), afsnit: AFSNIT, titel: '', varighedSek: 600 };
+const EMNER = [{ tid: '00:00', undertitel: 'Tag og kip' }, { tid: '06:40', undertitel: 'Facade mod nord' }];
+
+test('lang optagelse med tidspunkter: skemaet har emner, og prompten har [mm:ss] foran hvert afsnit', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ ...FULDT, emner: EMNER }));
+  await lav(hent).lav({ ...LANG, signal: signal() });
+  const skema = kald[0].krop.response_format.schema;
+  assert.deepEqual(skema.properties.emner.items.properties, { tid: { type: 'string' }, undertitel: { type: 'string' } });
+  assert.ok(skema.required.includes('emner'));
+  const prompt = kald[0].krop.input[0].text;
+  assert.ok(prompt.includes('[00:00] Velkommen til mødet om taget.\n[04:26] Taget er utæt ved kippen.\n[06:40] Facaden'));
+});
+
+test('prompten om emner: 2-20 emner, tid som i transskriptionen, undertitel kun om det sagte', () => {
+  const p = lavPrompt({ tekst: '[00:00] Hej', titel: '', kort: false, emner: true });
+  for (const del of ['emner', 'mindst 2', 'højst 20', '3-5 minutter', 'præcis som det står', '2-6 ord', 'faktisk bliver sagt', 'ingen vurdering']) {
+    assert.ok(p.includes(del), del);
+  }
+  assert.ok(p.includes('Skriv ikke tidspunkterne i referatet'));
+  assert.ok(!lavPrompt({ tekst: 'Hej', titel: '', kort: false }).includes('undertitel'));
+});
+
+test('emner knyttes til afsnittene og kommer med i referatet', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, emner: [...EMNER, { tid: '06:40', undertitel: 'Dublet' }] }));
+  const r = await lav(hent).lav({ ...LANG, signal: signal() });
+  assert.deepEqual(r.emner, [{ fra: 0, undertitel: 'Tag og kip' }, { fra: 2, undertitel: 'Facade mod nord' }]);
+});
+
+test('undertitler går gennem kontrollen af tal', async () => {
+  const { hent } = falskHent(() => modelSvar({ ...FULDT, emner: [{ tid: '00:00', undertitel: 'Tag med 12 huller' }] }));
+  const r = await lav(hent).lav({ ...LANG, signal: signal() });
+  assert.deepEqual(r.emner, [{ fra: 0, undertitel: 'Tag med [uklart] huller' }]);
+});
+
+test('tidspunkterne tæller aldrig som sagte tal', async () => {
+  const { hent } = falskHent(() => modelSvar({
+    ...FULDT, opsummering: 'Ved 04:26 blev taget nævnt.', hovedpunkter: ['Punkt 26 om taget', 'Det skete 40 sekunder inde'], emner: [{ tid: '04:26', undertitel: 'Taget efter 266 sekunder' }],
+  }));
+  const r = await lav(hent).lav({ ...LANG, signal: signal() });
+  assert.equal(r.opsummering, 'Ved [uklart] blev taget nævnt.');
+  assert.deepEqual(r.hovedpunkter, ['Punkt [uklart] om taget', 'Det skete [uklart] sekunder inde']);
+  assert.deepEqual(r.emner, [{ fra: 0, undertitel: 'Taget efter [uklart] sekunder' }]);
+});
+
+test('kort optagelse under 120 s: ingen emner i skemaet og ingen tidspunkter i prompten', async () => {
+  const { hent, kald } = falskHent();
+  const r = await lav(hent).lav({ ...LANG, varighedSek: 110, signal: signal() });
+  assert.ok(!kald[0].krop.response_format.schema.properties.emner);
+  assert.ok(!kald[0].krop.input[0].text.includes('[04:26]'));
+  assert.equal(r.emner, undefined);
+});
+
+test('ukendt varighed: emner kun ved mindst ca. 300 ord', async () => {
+  const kort = falskHent();
+  await lav(kort.hent).lav({ ...LANG, varighedSek: null, signal: signal() });
+  assert.ok(!kort.kald[0].krop.response_format.schema.properties.emner);
+  const mange = AFSNIT.map((a) => ({ ...a, tekst: `${a.tekst} ${'ord '.repeat(80)}`.trim() }));
+  const lang = falskHent(() => modelSvar({ ...FULDT, emner: EMNER }));
+  await lav(lang.hent).lav({ tekst: mange.map((a) => a.tekst).join('\n'), afsnit: mange, titel: '', varighedSek: null, signal: signal() });
+  assert.ok(lang.kald[0].krop.response_format.schema.properties.emner);
+});
+
+test('uden tidspunkter (Transcribe eller flere dele): ingen emner', async () => {
+  const { hent, kald } = falskHent();
+  const r = await lav(hent).lav({ ...INPUT, varighedSek: 900, afsnit: [{ sek: null, tekst: INPUT.tekst }], signal: signal() });
+  assert.ok(!kald[0].krop.response_format.schema.properties.emner);
+  assert.equal(r.emner, undefined);
+  const uden = falskHent();
+  await lav(uden.hent).lav({ ...INPUT, varighedSek: 900, signal: signal() });
+  assert.ok(!uden.kald[0].krop.response_format.schema.properties.emner);
+});
+
+test('modellen svarer uden emner: tom liste', async () => {
+  const { hent } = falskHent();
+  const r = await lav(hent).lav({ ...LANG, signal: signal() });
+  assert.deepEqual(r.emner, []);
+});

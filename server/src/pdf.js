@@ -9,6 +9,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const PDFDocument = require('pdfkit');
 const { AFSNIT, ETIKET, FELTER } = require('./typer.js');
+const { formaterTid } = require('./afsnit.js');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 const LATO = fs.readFileSync(path.join(ASSETS, 'Lato-Regular.ttf'));
@@ -96,7 +97,54 @@ function broedtekst(doc, tekst) {
   doc.font('normal').fontSize(11).fillColor(BLAEK).text(tekst, { lineGap: 3 });
 }
 
-function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst }) {
+// Bilaget: tiden i en smal kolonne til venstre, undertitel og tekst i kolonnen ved siden af.
+const TID_KOLONNE = 48;
+const TEKST_X = MARGEN + TID_KOLONNE;
+const TID_STR = 10;
+const UNDERTITEL_STR = 11.5;
+const TEKST_STR = 11;
+const LINJEAFSTAND = 3;
+const LUFT_EMNER = 16;
+const LUFT_TIDER = 8;
+const LUFT_AFSNIT = 5;
+const LUFT_UNDER_UNDERTITEL = 3;
+
+/**
+ * Den fulde transskription delt i emner (med undertitel) eller afsnit (kun tid). Tid og undertitel holdes
+ * sammen med mindst to linjer tekst, så de aldrig står alene nederst på en side. Et emne må gerne deles.
+ */
+function tegnBilag(doc, bilag) {
+  const bredde = doc.page.width - MARGEN - TEKST_X;
+  const tekstValg = { width: bredde, lineGap: LINJEAFSTAND };
+  const toLinjer = 2 * (doc.font('normal').fontSize(TEKST_STR).currentLineHeight(true) + LINJEAFSTAND);
+  // Afstanden fra linjens top til grundlinjen, så tid og undertitel står på samme grundlinje.
+  const top = (str) => (doc.font('normal')._font.ascender / 1000) * str;
+
+  bilag.forEach((emne, i) => {
+    const luft = i === 0 ? 0 : emne.undertitel ? LUFT_EMNER : LUFT_TIDER;
+    const titelHoejde = emne.undertitel
+      ? doc.font('fed').fontSize(UNDERTITEL_STR).heightOfString(emne.undertitel, { width: bredde }) + LUFT_UNDER_UNDERTITEL
+      : 0;
+    let y = doc.y + luft;
+    if (y + titelHoejde + toLinjer > doc.page.maxY()) {
+      doc.addPage();
+      ({ y } = doc);
+    }
+    const linjeStr = emne.undertitel ? UNDERTITEL_STR : TEKST_STR;
+    doc.font('normal').fontSize(TID_STR).fillColor(GRAA).text(formaterTid(emne.sek), MARGEN, y + top(linjeStr) - top(TID_STR), {
+      width: TID_KOLONNE - 8, lineBreak: false, features: ['tnum'],
+    });
+    if (emne.undertitel) {
+      doc.font('fed').fontSize(UNDERTITEL_STR).fillColor(BLAA_DYB).text(emne.undertitel, TEKST_X, y, { width: bredde });
+      y = doc.y + LUFT_UNDER_UNDERTITEL;
+    }
+    emne.afsnit.forEach((tekst, j) => {
+      doc.font('normal').fontSize(TEKST_STR).fillColor(BLAEK).text(tekst, TEKST_X, j ? doc.y + LUFT_AFSNIT : y, tekstValg);
+    });
+  });
+}
+
+function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst, bilag }) {
   return new Promise((ok, fejl) => {
     const doc = new PDFDocument({
       size: 'A4',
@@ -138,7 +186,9 @@ function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst }) {
       doc.font('fed').fontSize(15).fillColor(BLAEK).text('Bilag: Fuld transskription');
       doc.moveDown(0.2).font('normal').fontSize(10.5).fillColor(GRAA).text(`${titel}  ·  ${formaterTidspunkt(tidspunkt)}`);
       doc.moveDown(0.8);
-      broedtekst(doc, tekst || '(ingen tekst)');
+      // Med tidspunkter fra Flash deles teksten i emner eller afsnit. Ellers vises den samlet som før.
+      if (bilag?.length) tegnBilag(doc, bilag);
+      else broedtekst(doc, tekst || '(ingen tekst)');
       doc.end();
     } catch (e) {
       fejl(e);
