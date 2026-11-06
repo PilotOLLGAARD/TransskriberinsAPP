@@ -7,18 +7,44 @@
 
 const http = require('node:http');
 const https = require('node:https');
+const { medGenforsoeg, laesGoogleFejl } = require('./genforsoeg.js');
 
 const BASE = 'https://generativelanguage.googleapis.com';
 const SLET_TIMEOUT_MS = 5000;
 
-const MIME_NAVNE = { 'audio/mp4': 'audio/m4a', 'audio/x-m4a': 'audio/m4a' };
+// Typer, som telefonen eller filen kan have, oversat til dem, Google kender. Lyden sendes uændret.
+const MIME_NAVNE = {
+  'audio/mp4': 'audio/m4a', 'audio/x-m4a': 'audio/m4a', 'audio/m4a': 'audio/m4a',
+  'audio/mpeg': 'audio/mp3', 'audio/mp3': 'audio/mp3',
+  'audio/wav': 'audio/wav', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav',
+  'audio/ogg': 'audio/ogg', 'audio/aac': 'audio/aac',
+  'audio/flac': 'audio/flac', 'audio/x-flac': 'audio/flac',
+};
+// Kort modelnavn i loggen, uanset hvilken version der er sat op.
+const TRANSCRIBE = 'transcribe';
+const FLASH = 'flash';
+// Flash tager kun over efter 5xx fra Transcribe, hvis der er mindst så meget tid tilbage.
+const FLASH_MIN_MS = 60 * 1000;
+const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter, '
+  + 'talernavne eller tidskoder. Skriv tal, som de bliver sagt. Skriv "[uklart]", hvor noget ikke kan høres. Opfind aldrig noget.';
+// Det trin, en fejl skete i, som det står i loggen.
+const TRIN = { 'upload-start': 'upload', upload: 'upload', interactions: 'transskription', referat: 'referat' };
 
 class GeminiFejl extends Error {
-  /** @param {'tjeneste'|'noegle'|'format'} kode */
-  constructor(kode, besked) {
+  /**
+   * @param {'tjeneste'|'noegle'|'format'} kode
+   * @param {{status?: number, hvor?: string, trin?: string, googleKode?: string, fejltype?: string}} [detaljer]
+   *   Kun tal og faste navne, så de kan logges. Aldrig Googles besked eller indhold fra kaldet.
+   */
+  constructor(kode, besked, { status, hvor, trin, googleKode, fejltype } = {}) {
     super(besked);
     this.name = 'GeminiFejl';
     this.kode = kode;
+    if (status !== undefined) this.status = status;
+    if (hvor !== undefined) this.hvor = hvor;
+    if (trin || TRIN[hvor]) this.trin = trin || TRIN[hvor];
+    if (googleKode) this.googleKode = googleKode;
+    if (fejltype) this.fejltype = fejltype;
   }
 }
 
@@ -28,9 +54,25 @@ function geminiMime(mime) {
 }
 
 function httpFejl(status, hvor) {
-  if (status === 400) return new GeminiFejl('format', `${hvor}: ugyldig forespørgsel`);
-  if (status === 401 || status === 403) return new GeminiFejl('noegle', `${hvor}: nøgle afvist`);
-  return new GeminiFejl('tjeneste', `${hvor}: status ${status}`);
+  if (status === 400) return new GeminiFejl('format', `${hvor}: ugyldig forespørgsel`, { status, hvor });
+  if (status === 401 || status === 403) return new GeminiFejl('noegle', `${hvor}: nøgle afvist`, { status, hvor });
+  return new GeminiFejl('tjeneste', `${hvor}: status ${status}`, { status, hvor });
+}
+
+/** Som httpFejl, men med Googles faste fejlkode (fx RESOURCE_EXHAUSTED) fra svarets krop. */
+async function svarFejl(svar, hvor) {
+  const e = httpFejl(svar.status, hvor);
+  const { googleKode, dagsgraense } = await laesGoogleFejl(svar);
+  if (googleKode) e.googleKode = googleKode;
+  // Googles grænse for i dag er nået. Brugeren skal vide, at det først virker igen i morgen.
+  if (svar.status === 429 && dagsgraense) e.kode = 'kvote';
+  return e;
+}
+
+/** Fejlens navn (fx TypeError, TimeoutError), kun hvis det er et rent navn. */
+function fejltype(e) {
+  const navn = e && e.name;
+  return typeof navn === 'string' && /^\w{1,40}$/.test(navn) ? navn : undefined;
 }
 
 function udtraekTekst(svar) {
@@ -64,6 +106,7 @@ function hentUdenGraense(url, { method, headers, body, signal }) {
         ok({
           ok: svar.statusCode >= 200 && svar.statusCode < 300,
           status: svar.statusCode,
+          headers: { get: (navn) => svar.headers[String(navn).toLowerCase()] ?? null },
           json: async () => JSON.parse(tekst),
         });
       });
@@ -82,7 +125,11 @@ function nytFilnavn() {
  * oprydning: { hvertMs, aeldreEndMs } sletter filer, som en afbrudt eller lukket server efterlod.
  * Uden den er oprydning slået fra.
  */
-function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, oprydning, nu = Date.now }) {
+function lavGemini({
+  noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, log = () => {}, oprydning,
+  flashModel = 'gemini-3.8-flash', transcribeMaksSek = 400, foerst = 'transcribe', nu = Date.now, vent, tilfaeldig,
+}) {
+  const flashPrompt = ordliste.length ? `${FLASH_PROMPT}\n\nFagord, der kan forekomme: ${ordliste.join(', ')}.` : FLASH_PROMPT;
   const hentKald = hent || ((...a) => fetch(...a));
   const hentTransskription = hentLangsom || hent || hentUdenGraense;
   // Filer, der er startet hos Google og ikke slettet endnu. Prøves igen ved nedlukning og oprydning.
@@ -91,8 +138,16 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
   const iBrug = new Set();
   let sidsteOprydning = -Infinity;
 
-  async function upload(strom, bytes, mime, signal, navn, vedStart) {
-    const start = await hentKald(`${BASE}/upload/v1beta/files`, {
+  /** Genforsøg inden for kaldets samlede frist. Kun sikre kald: kroppen er en færdig tekst. */
+  function genforsoeg(hvor, kald, signal, frist, ekstra = {}) {
+    return medGenforsoeg(kald, {
+      signal, frist, nu, vent, tilfaeldig, ...ekstra,
+      vedGenforsoeg: (t) => log({ haendelse: 'gemini-genforsoeg', hvor, ...t }),
+    });
+  }
+
+  async function upload(strom, bytes, mime, signal, frist, navn, vedStart) {
+    const start = await genforsoeg('upload-start', () => hentKald(`${BASE}/upload/v1beta/files`, {
       method: 'POST',
       signal,
       headers: {
@@ -104,13 +159,16 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ file: { name: navn, display_name: 'optagelse' } }),
-    });
-    if (!start.ok) throw httpFejl(start.status, 'upload-start');
+      // Telefonens upload står stille, mens der ventes. Appen giver op efter 90 s stilstand.
+    }), signal, frist, { maksVentMs: 45000 });
+    if (!start.ok) throw await svarFejl(start, 'upload-start');
     // Fra nu af kan filen findes hos Google, også hvis resten af upload går galt.
     vedStart();
     const adresse = start.headers.get('x-goog-upload-url');
-    if (!adresse) throw new GeminiFejl('tjeneste', 'upload-start: mangler adresse');
+    if (!adresse) throw new GeminiFejl('tjeneste', 'upload-start: mangler adresse', { trin: 'upload' });
 
+    // Lyden sendes kun én gang. Strømmen kommer direkte fra telefonen og kan ikke spoles tilbage,
+    // og den gemmes ikke i hukommelsen. Fejler den, beholder telefonen lyden, og brugeren prøver igen.
     const svar = await hentKald(adresse, {
       method: 'POST',
       signal,
@@ -122,36 +180,64 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
       },
       body: strom,
     });
-    if (!svar.ok) throw httpFejl(svar.status, 'upload');
+    if (!svar.ok) throw await svarFejl(svar, 'upload');
     const { file } = await svar.json();
-    if (!file || !file.uri || !file.name) throw new GeminiFejl('tjeneste', 'upload: uventet svar');
+    if (!file || !file.uri || !file.name) throw new GeminiFejl('tjeneste', 'upload: uventet svar', { trin: 'upload' });
     return file;
   }
 
-  async function transskriberFil(fil, mime, signal) {
+  /** Kroppen til Transcribe eller Flash. Begge bruger den samme uploadede fil. */
+  function interaktion(hvilken, fil, mime) {
+    const lyd = { type: 'audio', uri: fil.uri, mime_type: mime };
+    // Interactions gemmes ellers i 55 dage hos Google, også efter filen er slettet.
+    if (hvilken === FLASH) {
+      return {
+        model: flashModel,
+        input: [lyd, { type: 'text', text: flashPrompt }],
+        // 'minimal' afvises af Flash. 'low' er nok til en ordret transskription.
+        generation_config: { thinking_level: 'low' },
+        store: false,
+      };
+    }
     const transcription_config = {
       language_codes: [sprog],
       mode: tilstand === 'verbatim' ? { type: 'verbatim' } : 'smart',
     };
     if (ordliste.length) transcription_config.custom_vocabulary = ordliste;
+    return { model, input: [lyd], generation_config: { transcription_config }, store: false };
+  }
 
-    const svar = await hentTransskription(`${BASE}/v1beta/interactions`, {
+  async function transskriberFil(hvilken, fil, mime, signal, frist) {
+    const anmodning = JSON.stringify(interaktion(hvilken, fil, mime));
+    // Filen ligger allerede hos Google, så transskriptionen kan sikkert bestilles igen.
+    // Transcribe genforsøges ikke ved 429: så tager Flash straks over med samme fil.
+    const svar = await genforsoeg('interactions', () => hentTransskription(`${BASE}/v1beta/interactions`, {
       method: 'POST',
       signal,
       headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        input: [{ type: 'audio', uri: fil.uri, mime_type: mime }],
-        generation_config: { transcription_config },
-        // Interactions gemmes ellers i 55 dage hos Google, også efter filen er slettet.
-        store: false,
-      }),
-    });
-    if (!svar.ok) throw httpFejl(svar.status, 'interactions');
+      body: anmodning,
+    }), signal, frist, { stopVed429: hvilken === TRANSCRIBE });
+    if (!svar.ok) throw await svarFejl(svar, 'interactions');
     const krop = await svar.json();
     // Alt andet end completed er fejl, så en halv tekst aldrig tages for en hel.
-    if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `interactions: status ${krop.status}`);
+    if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `interactions: status ${krop.status}`, { trin: 'transskription' });
     return udtraekTekst(krop);
+  }
+
+  /**
+   * Hvorfor Flash skal tage over efter en fejl fra Transcribe, eller null.
+   * 429 (minut- eller dagsgrænse): altid, med det samme. 5xx efter genforsøg: kun hvis der er
+   * mindst ét minut tilbage og mindst lige så lang tid, som Transcribe brugte, så Flash kan nå
+   * at blive færdig. Andre fejl (format, nøgle, netværk, ufuldstændigt svar) giver intet skift.
+   */
+  function skiftGrund(e, startet, frist, signal) {
+    if (!(e instanceof GeminiFejl) || signal.aborted) return null;
+    if (e.status === 429) return '429';
+    if (e.status >= 500 && e.status < 600) {
+      const tilbage = frist - nu();
+      return tilbage >= Math.max(FLASH_MIN_MS, nu() - startet) ? '5xx' : null;
+    }
+    return null;
   }
 
   async function sletFil(navn) {
@@ -196,23 +282,61 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
     rydGamle.igang = rydGamle().catch((e) => advar(`oprydning ${e && e.name}`));
   }
 
+  /** Hvorfor Transcribe skal tage over efter en fejl fra Flash, eller null. Som skiftGrund, plus blokeret indhold. */
+  function flashSkiftGrund(e, startet, frist, signal) {
+    if (e instanceof GeminiFejl && !signal.aborted && e.status === 400 && e.googleKode === 'content_blocked') return 'blokeret';
+    return skiftGrund(e, startet, frist, signal);
+  }
+
   return {
-    async transskriber(strom, { bytes, mime, signal }) {
+    /**
+     * varighedSek fra telefonen (kan mangle). Lyd over transcribeMaksSek går direkte til Flash,
+     * da Transcribe på Tier 1 kun tager 10.000 tokens i minuttet (ca. 6 min. 40 s lyd).
+     */
+    async transskriber(strom, { bytes, mime, signal, varighedSek }) {
       planlaegOprydning();
+      const lang = Number.isFinite(varighedSek) && varighedSek > transcribeMaksSek;
+      const flashFoerst = foerst === 'flash' || lang;
+      log({ haendelse: 'gemini-kald', model: flashFoerst ? FLASH : TRANSCRIBE });
+      if (lang && foerst !== 'flash') log({ haendelse: 'model-skift', grund: 'laengde', fra: TRANSCRIBE, til: FLASH });
       const type = geminiMime(mime);
       const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+      // Genforsøg skal kunne nå at vente færdig inden for samme grænse, så Cloud Runs 900 s aldrig nås.
+      const frist = nu() + timeoutMs;
       const navn = nytFilnavn();
       const navne = new Set();
+      let trin = 'upload';
       try {
         const husk = (n) => { navne.add(n); aktive.add(n); iBrug.add(n); };
-        const fil = await upload(strom, bytes, type, samlet, navn, () => husk(navn));
+        const fil = await upload(strom, bytes, type, samlet, frist, navn, () => husk(navn));
         // Google bør bruge vores navn. Gør den ikke, slettes begge.
         if (fil.name !== navn) husk(fil.name);
-        return { tekst: await transskriberFil(fil, type, samlet) };
+        trin = 'transskription';
+        if (flashFoerst) {
+          const startetFlash = nu();
+          try {
+            return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+          } catch (e) {
+            // Transcribe er kun reserve for korte optagelser: længere er over dens grænse pr. minut.
+            const grund = lang ? null : flashSkiftGrund(e, startetFlash, frist, samlet);
+            if (!grund) throw e;
+            log({ haendelse: 'model-skift', grund, fra: FLASH, til: TRANSCRIBE });
+            return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+          }
+        }
+        const startet = nu();
+        try {
+          return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+        } catch (e) {
+          const grund = skiftGrund(e, startet, frist, samlet);
+          if (!grund) throw e;
+          log({ haendelse: 'model-skift', grund, fra: TRANSCRIBE, til: FLASH });
+          return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+        }
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.
-        throw new GeminiFejl('tjeneste', `netværk ${e && e.name}`);
+        throw new GeminiFejl('tjeneste', `netværk ${fejltype(e)}`, { trin, fejltype: fejltype(e) });
       } finally {
         for (const n of navne) {
           await sletFil(n);
@@ -230,4 +354,4 @@ function lavGemini({ noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, 
   };
 }
 
-module.exports = { lavGemini, GeminiFejl, geminiMime, hentUdenGraense, httpFejl, udtraekTekst, BASE };
+module.exports = { lavGemini, GeminiFejl, geminiMime, hentUdenGraense, httpFejl, svarFejl, fejltype, udtraekTekst, BASE };

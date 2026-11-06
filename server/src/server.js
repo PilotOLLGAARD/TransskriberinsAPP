@@ -29,21 +29,27 @@ async function vedNedlukning({ gemini, afslut = (kode) => process.exit(kode), ve
   afslut(0);
 }
 
+function log(o) {
+  console.log(JSON.stringify(o));
+}
+
 function start() {
   const konfig = hentKonfig(process.env);
   const gemini = konfig ? lavGemini({
     ...konfig,
     ordliste,
     oprydning: OPRYDNING,
-    advar: (besked) => console.log(JSON.stringify({ haendelse: 'advarsel', besked })),
+    advar: (besked) => log({ haendelse: 'advarsel', besked }),
+    log,
   }) : null;
   const handler = lavHandler({
     konfig,
     tjekAdgang: konfig ? lavAdgangsTjek(konfig) : null,
     gemini,
     // Transskription (højst 840 s) og referat skal tilsammen nå under Cloud Runs grænse på 900 s.
-    referat: konfig ? lavReferat({ noegle: konfig.noegle, model: konfig.referatModel, timeoutMs: REFERAT_TIMEOUT_MS }) : null,
+    referat: konfig ? lavReferat({ noegle: konfig.noegle, model: konfig.referatModel, timeoutMs: REFERAT_TIMEOUT_MS, log }) : null,
     pdf,
+    log,
   });
   if (!konfig) console.error(JSON.stringify({ haendelse: 'konfiguration-mangler' }));
   lavServer(handler).listen(Number(process.env.PORT) || 8080);

@@ -201,3 +201,9 @@ test('klokkeslæt efter middag og halve timer', () => {
   // "halv tre" er 2.30, ikke 2.50.
   assert.equal(tjek('vi mødes halv tre', 'Møde kl. 2.50.'), `Møde kl. ${U}.`);
 });
+
+test('telefonnumre med og uden mellemrum er det samme tal', () => {
+  assert.equal(tjek('Ring på 12 34 56 78.', 'Tlf. 12345678.'), 'Tlf. 12345678.');
+  assert.equal(tjek('Ring på 12345678.', 'Tlf. 12 34 56 78.'), 'Tlf. 12 34 56 78.');
+  assert.equal(tjek('Ring på 12 34 56 78.', 'Tlf. 12345679.'), `Tlf. ${U}.`);
+});

@@ -31,7 +31,7 @@ test('git-fejl tælles ikke som ingen fund', () => {
 });
 
 test('interne dokumenter og hemmelige filer må ikke ligge i git', () => {
-  for (const navn of ['.env', '.env.local', 'server/.env', 'local.settings.json', 'docs/plan.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md', 'docs/plan-referat.md', 'docs/plan-fase3.md', 'docs/overdragelse.md']) {
+  for (const navn of ['.env', '.env.local', 'server/.env', 'local.settings.json', 'docs/plan.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md', 'docs/plan-referat.md', 'docs/plan-fase3.md', 'docs/overdragelse.md', 'docs/udrulning.md']) {
     assert.equal(erForbudtFil(navn), true, navn);
   }
   for (const navn of ['.env.example', 'docs/vejledning.md', 'docs/vejledning-medarbejdere.md', 'README.md', 'web/js/konfig.js']) {
@@ -81,7 +81,7 @@ test('et internt dokument, der kun findes i historikken (fx et tag), findes', ()
 
 test('.gitignore holder alle interne dokumenter ude, også nye planer', () => {
   const rod = path.resolve(__dirname, '../..');
-  for (const navn of ['docs/plan.md', 'docs/plan-del4.md', 'docs/overdragelse.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md']) {
+  for (const navn of ['docs/plan.md', 'docs/plan-del4.md', 'docs/overdragelse.md', 'docs/it-opsaetning.md', 'docs/test-resultater.md', 'docs/udrulning.md']) {
     assert.equal(koerI(rod, 'check-ignore', '-q', '--no-index', navn).status, 0, `${navn} er ikke ignoreret`);
   }
 });

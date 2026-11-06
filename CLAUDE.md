@@ -23,7 +23,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 ## Arkitektur
 
-iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → Gemini 3.5 Transcribe → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`). Telefonen sender mailen med PDF via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
+iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`). Telefonen sender mailen med PDF via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
 
 | Fil | Ansvar |
 |---|---|
@@ -31,6 +31,7 @@ iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF. Headere `x-titel`, `x-type`, `x-varighed`, `x-optaget`, `x-kun-tekst` (kun teksten). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
 | `server/src/gemini.js` | Upload, transskription og sletning hos Google |
 | `web/js/optager.js` | Optagelse, afbrydelser, varighed |
+| `web/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
 | `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
 | `web/js/app.js` | Kun brugerflade |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |

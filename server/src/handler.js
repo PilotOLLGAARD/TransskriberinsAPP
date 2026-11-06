@@ -1,11 +1,15 @@
 'use strict';
 
 const { Transform, pipeline } = require('node:stream');
-const { GeminiFejl } = require('./gemini.js');
+const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
 
-const FORMATER = new Set(['audio/mp4', 'audio/webm']);
+// Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
+const FORMATER = new Set([
+  'audio/mp4', 'audio/webm', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/ogg',
+  'audio/aac', 'audio/flac', 'audio/x-flac', 'audio/x-m4a', 'audio/m4a',
+]);
 const MAX_TITEL = 120;
 const MAX_VARIGHED_SEK = 3600;
 const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
@@ -33,6 +37,13 @@ function laesVarighed(raa) {
   if (raa === undefined || raa === '') return null;
   const n = Number(raa);
   return Number.isFinite(n) && n >= 0 && n <= MAX_VARIGHED_SEK ? n : null;
+}
+
+/** Varigheden til modelvalget. Uden loft: en uploadet fil over en time er stadig lang og skal til Flash. */
+function laesVarighedTilModel(raa) {
+  if (raa === undefined || raa === '') return null;
+  const n = Number(raa);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function laesTidspunkt(raa) {
@@ -82,10 +93,18 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     res.end(JSON.stringify(krop));
   }
 
+  /** Afviser en anmodning og logger hvorfor, kun med en fast grund og status. */
+  function afvis(res, cors, status, grund, fejl = 'kan-ikke-behandles') {
+    log({ haendelse: 'anmodning-afvist', grund, status });
+    return sendJson(res, cors, status, { fejl });
+  }
+
   /** Referat, PDF og mail af en tekst. Fælles for én optagelse og flere dele. */
-  async function lavResultat({ tekst, titel, type, varighedSek, tidspunkt, signal }) {
+  async function lavResultat({ tekst, titel, type, varighedSek, tidspunkt, signal }, spor) {
     log({ haendelse: 'referat-kald' });
+    spor.trin = 'referat';
     const r = await referat.lav({ tekst, titel, type, varighedSek, signal });
+    spor.trin = 'pdf';
     const fil = await pdf.lavPdf({ titel: r.titel, tidspunkt, varighedSek, referat: r, tekst });
     return {
       tekst,
@@ -99,11 +118,22 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     };
   }
 
-  function sendFejl(res, cors, e) {
-    const kode = e instanceof GeminiFejl ? e.kode : 'tjeneste';
-    log({ haendelse: 'gemini-fejl', kode });
+  /**
+   * Logger kun koder og tal: trin, Googles HTTP-status og faste fejlkode (fx RESOURCE_EXHAUSTED)
+   * og fejlens navn. Aldrig fejlbeskeden, da den kan indeholde detaljer fra kaldet.
+   */
+  function sendFejl(res, cors, e, trin) {
+    const geminiFejl = e instanceof GeminiFejl;
+    const kode = geminiFejl ? e.kode : 'tjeneste';
+    const linje = { haendelse: 'gemini-fejl', kode, trin: (geminiFejl && e.trin) || trin };
+    if (geminiFejl && Number.isInteger(e.status)) linje.googleStatus = e.status;
+    if (geminiFejl && e.googleKode) linje.googleKode = e.googleKode;
+    const type = geminiFejl ? e.fejltype : fejltype(e);
+    if (type) linje.fejltype = type;
+    log(linje);
     if (kode === 'format') return sendJson(res, cors, 422, { fejl: 'kan-ikke-behandles' });
     if (kode === 'noegle') return sendJson(res, cors, 500, { fejl: 'server-ikke-klar' });
+    if (kode === 'kvote') return sendJson(res, cors, 503, { fejl: 'kvote' });
     return sendJson(res, cors, 502, { fejl: 'tjeneste' });
   }
 
@@ -118,29 +148,30 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
 
   async function referatAfDele(req, res, cors) {
     if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json') {
-      return sendJson(res, cors, 415, { fejl: 'kan-ikke-behandles' });
+      return afvis(res, cors, 415, 'forkert-format');
     }
     const bytes = Number(req.headers['content-length']);
-    if (!Number.isSafeInteger(bytes) || bytes <= 0) return sendJson(res, cors, 411, { fejl: 'kan-ikke-behandles' });
-    if (bytes > MAX_REFERAT_BYTES) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) return afvis(res, cors, 411, 'mangler-laengde');
+    if (bytes > MAX_REFERAT_BYTES) return afvis(res, cors, 413, 'for-stor');
 
     const afbryd = lavAfbryder(res);
     const dele = [];
     try {
       for await (const d of req.pipe(lavBytevagt(bytes))) dele.push(d);
     } catch {
-      return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
+      return afvis(res, cors, 413, 'for-mange-bytes');
     }
     let krop;
     try {
       krop = JSON.parse(Buffer.concat(dele).toString('utf8'));
     } catch {
-      return sendJson(res, cors, 400, { fejl: 'kan-ikke-behandles' });
+      return afvis(res, cors, 400, 'ugyldig-json');
     }
     const tekster = laesTekster(krop);
-    if (!tekster) return sendJson(res, cors, 400, { fejl: 'kan-ikke-behandles' });
+    if (!tekster) return afvis(res, cors, 400, 'ugyldige-tekster');
     if (!tekster.length) return sendJson(res, cors, 200, { tekst: '' });
 
+    const spor = { trin: 'referat' };
     try {
       sendJson(res, cors, 200, await lavResultat({
         tekst: tekster.join(MARKOER),
@@ -149,18 +180,22 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
         varighedSek: laesVarighed(krop.varighedSek),
         tidspunkt: laesTidspunkt(krop.optaget),
         signal: afbryd.signal,
-      }));
+      }, spor));
     } catch (e) {
-      sendFejl(res, cors, e);
+      sendFejl(res, cors, e, spor.trin);
     }
   }
 
-  async function behandl(req, res) {
+  function lavCors(req) {
     const cors = {};
     if (konfig && req.headers.origin === konfig.tilladtOprindelse) {
       cors['access-control-allow-origin'] = konfig.tilladtOprindelse;
       cors.vary = 'Origin';
     }
+    return cors;
+  }
+
+  async function behandl(req, res, cors) {
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
@@ -176,34 +211,34 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     const sti = new URL(req.url, 'http://x').pathname;
     if (sti !== '/transskriber' && sti !== '/referat') return sendJson(res, cors, 404, { fejl: 'ikke-fundet' });
     if (req.method !== 'POST') return sendJson(res, cors, 405, { fejl: 'forkert-metode' });
-    if (!konfig) return sendJson(res, cors, 500, { fejl: 'server-ikke-klar' });
+    if (!konfig) return afvis(res, cors, 500, 'konfiguration-mangler', 'server-ikke-klar');
 
     const adgang = await tjekAdgang(req.headers.authorization);
     if (!adgang.ok) {
-      log({ haendelse: 'adgang-afvist', grund: adgang.grund });
+      log({ haendelse: 'adgang-afvist', grund: adgang.grund, status: adgang.status });
       return sendJson(res, cors, adgang.status, { fejl: ADGANG_FEJL[adgang.status] || 'tjeneste' });
     }
 
     if (sti === '/referat') return referatAfDele(req, res, cors);
 
     const mime = String(req.headers['content-type'] || '');
-    if (!FORMATER.has(mime.split(';')[0].trim().toLowerCase())) {
-      return sendJson(res, cors, 415, { fejl: 'kan-ikke-behandles' });
-    }
+    if (!FORMATER.has(mime.split(';')[0].trim().toLowerCase())) return afvis(res, cors, 415, 'forkert-format');
 
     const raaLaengde = req.headers['content-length'];
-    if (raaLaengde === undefined) return sendJson(res, cors, 411, { fejl: 'kan-ikke-behandles' });
     const bytes = Number(raaLaengde);
-    if (!Number.isSafeInteger(bytes) || bytes <= 0) return sendJson(res, cors, 411, { fejl: 'kan-ikke-behandles' });
-    if (bytes > konfig.maxBytes) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
+    if (raaLaengde === undefined || !Number.isSafeInteger(bytes) || bytes <= 0) return afvis(res, cors, 411, 'mangler-laengde');
+    if (bytes > konfig.maxBytes) return afvis(res, cors, 413, 'for-stor');
 
     const afbryd = lavAfbryder(res);
     const vagt = lavBytevagt(bytes);
     pipeline(req, vagt, () => {});
 
-    log({ haendelse: 'gemini-kald' });
+    // gemini-kald logges af Gemini-delen, som kender modellen.
+    const spor = { trin: 'transskription' };
     try {
-      const { tekst } = await gemini.transskriber(vagt, { bytes, mime, signal: afbryd.signal });
+      const { tekst } = await gemini.transskriber(vagt, {
+        bytes, mime, signal: afbryd.signal, varighedSek: laesVarighedTilModel(req.headers['x-varighed']),
+      });
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
       if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
 
@@ -214,20 +249,25 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
         varighedSek: laesVarighed(req.headers['x-varighed']),
         tidspunkt: laesTidspunkt(req.headers['x-optaget']),
         signal: afbryd.signal,
-      }));
+      }, spor));
     } catch (e) {
-      if (vagt.overskredet) return sendJson(res, cors, 413, { fejl: 'kan-ikke-behandles' });
-      sendFejl(res, cors, e);
+      if (vagt.overskredet) return afvis(res, cors, 413, 'for-mange-bytes');
+      sendFejl(res, cors, e, spor.trin);
     }
   }
 
   return async function handler(req, res) {
+    let cors = {};
     try {
-      await behandl(req, res);
-    } catch {
-      log({ haendelse: 'uventet-fejl' });
+      cors = lavCors(req);
+      await behandl(req, res, cors);
+    } catch (e) {
+      const linje = { haendelse: 'uventet-fejl' };
+      if (fejltype(e)) linje.fejltype = fejltype(e);
+      log(linje);
       if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'application/json' });
+        // Med CORS, så appen kan læse svaret og vise en fejl i stedet for "ingen forbindelse".
+        res.writeHead(500, { ...cors, 'content-type': 'application/json' });
         res.end(JSON.stringify({ fejl: 'server-ikke-klar' }));
       }
     }

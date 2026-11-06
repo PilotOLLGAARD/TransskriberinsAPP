@@ -6,7 +6,8 @@
  * Svaret kommer som JSON efter et skema, der følger optagelsens type, så tomme afsnit altid kan udelades.
  */
 
-const { BASE, GeminiFejl, httpFejl, udtraekTekst, hentUdenGraense } = require('./gemini.js');
+const { BASE, GeminiFejl, svarFejl, fejltype, udtraekTekst, hentUdenGraense } = require('./gemini.js');
+const { medGenforsoeg } = require('./genforsoeg.js');
 const { TYPER, ETIKET, BESKRIVELSE, FELTER, AFSNIT, laesType } = require('./typer.js');
 const { kontrollerTal } = require('./tal.js');
 
@@ -49,6 +50,7 @@ function lavSkema({ type, kort }) {
 const REGLER = [
   'Intet må opfindes. Medtag kun det, der faktisk blev sagt i transskriptionen.',
   'Tilføj ikke roller, titler, årsager eller sammenhænge, der ikke blev sagt.',
+  'Nævn ikke steder, lande, personer, firmaer eller årstal, der ikke står i transskriptionen, heller ikke når de virker indlysende.',
   'Er noget uklart eller utydeligt, så skriv "[uklart]" i stedet for at gætte.',
   'Gengiv tal, mål, mængder, datoer, frister, adresser, navne og fagudtryk præcist, som de blev sagt.',
   'Er du i tvivl om et tal, et mål, en dato eller en frist, så skriv "[uklart]" i stedet for tallet. Gæt aldrig, og ret aldrig et tal, der lyder forkert eller ufuldstændigt.',
@@ -160,15 +162,18 @@ function normaliser(raa, { titel, kort, tekst, type }) {
   };
 }
 
-function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense }) {
+function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense, log = () => {}, nu = Date.now, vent, tilfaeldig }) {
   return {
     async lav({ tekst, titel, type, varighedSek, signal }) {
       const renTitel = streng(titel);
       const valgtType = laesType(type);
       const kort = Number.isFinite(varighedSek) && varighedSek < KORT_SEKUNDER;
       const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+      // Genforsøg skal kunne vente færdig inden for referatets egen grænse.
+      const frist = nu() + timeoutMs;
       try {
-        const svar = await hent(`${BASE}/v1beta/interactions`, {
+        // Kroppen er en færdig tekst, så referatet kan sikkert bestilles igen.
+        const svar = await medGenforsoeg(() => hent(`${BASE}/v1beta/interactions`, {
           method: 'POST',
           signal: samlet,
           headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
@@ -180,23 +185,30 @@ function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense }) {
             // Ellers gemmes referatet i 55 dage hos Google.
             store: false,
           }),
+        }), {
+          signal: samlet, frist, nu, vent, tilfaeldig,
+          vedGenforsoeg: (t) => log({ haendelse: 'gemini-genforsoeg', hvor: 'referat', ...t }),
         });
-        // Optagelsen var i orden, når referatet fejler. Derfor aldrig 'format', som ville få brugeren til at slette den.
-        if (!svar.ok) throw new GeminiFejl(httpFejl(svar.status, 'referat').kode === 'noegle' ? 'noegle' : 'tjeneste', `referat: status ${svar.status}`);
+        if (!svar.ok) {
+          const e = await svarFejl(svar, 'referat');
+          // Optagelsen var i orden, når referatet fejler. Derfor aldrig 'format', som ville få brugeren til at slette den.
+          if (e.kode === 'format') e.kode = 'tjeneste';
+          throw e;
+        }
         const krop = await svar.json();
-        if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `referat: status ${krop.status}`);
+        if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `referat: status ${krop.status}`, { trin: 'referat' });
         let raa;
         try {
           raa = JSON.parse(udtraekTekst(krop));
         } catch {
-          throw new GeminiFejl('tjeneste', 'referat: ugyldig JSON');
+          throw new GeminiFejl('tjeneste', 'referat: ugyldig JSON', { trin: 'referat' });
         }
         // Hvert tal i referatet skal kunne findes i transskriptionen. Ellers bliver det [uklart].
         return kontrollerTal(normaliser(raa, { titel: renTitel, kort, tekst, type: valgtType }), tekst, { brugerTitel: renTitel }).referat;
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.
-        throw new GeminiFejl('tjeneste', `referat: netværk ${e && e.name}`);
+        throw new GeminiFejl('tjeneste', `referat: netværk ${fejltype(e)}`, { trin: 'referat', fejltype: fejltype(e) });
       }
     },
   };

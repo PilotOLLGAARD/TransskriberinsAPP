@@ -1,0 +1,136 @@
+'use strict';
+
+/**
+ * Genforsøg ved midlertidige fejl fra Google: 429 (fx Tier 1's udgiftsgrænse pr. 10 minutter),
+ * 500, 502, 503, 504 og netværksfejl. Andre 4xx genforsøges aldrig.
+ *
+ * Bruges kun til kald, der er sikre at sende igen, fordi kroppen er en færdig tekst:
+ * upload-start, transskription af en allerede uploadet fil og referatet.
+ * Selve lyden genforsøges ikke: den strømmes direkte fra telefonen og kan ikke spoles tilbage,
+ * og den må ikke gemmes i hukommelsen (op til 500 MiB). Fejler den, beholder telefonen lyden.
+ */
+
+const { setTimeout: sov } = require('node:timers/promises');
+
+const MIDLERTIDIGE = new Set([429, 500, 502, 503, 504]);
+const GENFORSOEG = 3; // Højst 3 genforsøg, altså 4 kald i alt.
+const GRUND_MS = 2000; // 2, 4 og 8 s, spredt tilfældigt mellem halvdelen og halvanden gang.
+
+/** Retry-After i sekunder eller som dato. null, hvis den mangler eller ikke kan læses. */
+function laesRetryAfter(vaerdi, nuMs) {
+  if (vaerdi === null || vaerdi === undefined) return null;
+  const s = String(vaerdi).trim();
+  if (/^\d+$/.test(s)) return Number(s) * 1000;
+  const tid = Date.parse(s);
+  return Number.isFinite(tid) ? Math.max(0, tid - nuMs) : null;
+}
+
+const fejlKroppe = new WeakMap();
+const GOOGLE_KODE = /^[A-Z][A-Z_]{1,39}$/;
+// Nyere fejlsvar har en kode med små bogstaver, fx too_many_requests.
+const GOOGLE_KODE_SMAA = /^[a-z][a-z_]{1,39}$/;
+
+/** 'Please retry in 18h17m' i Googles besked. Kun tallene læses, aldrig resten af beskeden. */
+function laesBeskedVent(besked) {
+  const m = /retry in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?/i.exec(String(besked || ''));
+  if (!m || !(m[1] || m[2] || m[3])) return null;
+  return Math.round(((Number(m[1] || 0) * 60 + Number(m[2] || 0)) * 60 + Number(m[3] || 0)) * 1000);
+}
+
+/** "37s" eller "1.5s" fra google.rpc.RetryInfo. */
+function laesVarighed(v) {
+  const m = /^(\d+(?:\.\d+)?)s$/.exec(String(v || '').trim());
+  return m ? Math.round(Number(m[1]) * 1000) : null;
+}
+
+/**
+ * Læser Googles fejlsvar én gang: den faste fejlkode (fx RESOURCE_EXHAUSTED) og evt. retryDelay.
+ * Beskeden læses aldrig videre, da den kan indeholde detaljer fra kaldet. Kun en kode i Googles
+ * faste form (store bogstaver og _) godtages, så intet andet kan slippe ud i loggen.
+ */
+function laesGoogleFejl(svar) {
+  if (!svar || typeof svar !== 'object') return Promise.resolve({});
+  if (!fejlKroppe.has(svar)) {
+    fejlKroppe.set(svar, (async () => {
+      try {
+        const fejl = (await svar.json())?.error;
+        if (!fejl || typeof fejl !== 'object') return {};
+        const ud = {};
+        if (typeof fejl.status === 'string' && GOOGLE_KODE.test(fejl.status)) ud.googleKode = fejl.status;
+        else if (typeof fejl.code === 'string' && GOOGLE_KODE_SMAA.test(fejl.code)) ud.googleKode = fejl.code;
+        // Dagsgrænsen (fx 100 kald om dagen på Tier 1) kan ikke ventes ud inden for tidsgrænsen.
+        if (/per day/i.test(String(fejl.message || ''))) ud.dagsgraense = true;
+        const beskedVent = laesBeskedVent(fejl.message);
+        if (beskedVent !== null) ud.retryMs = beskedVent;
+        for (const d of Array.isArray(fejl.details) ? fejl.details : []) {
+          const ms = d && String(d['@type'] || '').endsWith('google.rpc.RetryInfo') ? laesVarighed(d.retryDelay) : null;
+          if (ms !== null) ud.retryMs = ms;
+          // QuotaFailure med en dagskvote, fx GenerateRequestsPerDayPerProjectPerModel.
+          for (const v of Array.isArray(d?.violations) ? d.violations : []) if (/PerDay/i.test(String(v?.quotaId || ''))) ud.dagsgraense = true;
+        }
+        // Beder Google os vente over en time, er det ikke en minutgrænse.
+        if ((ud.retryMs ?? 0) > 60 * 60 * 1000) ud.dagsgraense = true;
+        return ud;
+      } catch {
+        return {};
+      }
+    })());
+  }
+  return fejlKroppe.get(svar);
+}
+
+function standardVent(ms, signal) {
+  return sov(ms, undefined, { signal });
+}
+
+/**
+ * Kalder kald() og genforsøger ved midlertidige fejl, så længe ventetiden slutter før frist (ms).
+ * Giver det sidste svar, også en fejlstatus, så kalderen selv oversætter den. En netværksfejl
+ * kastes videre, når der ikke genforsøges mere. Et afbrudt signal stopper alt med det samme.
+ * vedGenforsoeg får kun tal: forsøgets nummer, status (0 ved netværksfejl) og ventetiden.
+ */
+async function medGenforsoeg(kald, {
+  signal, frist, nu = Date.now, vent = standardVent, tilfaeldig = Math.random, vedGenforsoeg = () => {},
+  // Højst så meget ventetid i alt. Upload-start: telefonens upload står stille imens.
+  maksVentMs = Infinity,
+  // Transcribe: et 429 gives straks videre, så Flash kan tage over uden venten.
+  stopVed429 = false,
+}) {
+  let ventetIalt = 0;
+  for (let forsoeg = 1; ; forsoeg++) {
+    let svar = null;
+    let fejl = null;
+    const startet = nu();
+    try {
+      svar = await kald();
+    } catch (e) {
+      fejl = e;
+    }
+    const varighed = nu() - startet;
+    const opgiv = () => {
+      if (fejl) throw fejl;
+      return svar;
+    };
+    if (svar && !MIDLERTIDIGE.has(svar.status)) return svar;
+    if (svar && svar.status === 429 && stopVed429) return svar;
+    if ((signal && signal.aborted) || forsoeg > GENFORSOEG) return opgiv();
+
+    const stigende = Math.round(GRUND_MS * 2 ** (forsoeg - 1) * (0.5 + tilfaeldig()));
+    const google = svar ? await laesGoogleFejl(svar) : {};
+    const header = svar ? laesRetryAfter(svar.headers?.get?.('retry-after'), nu()) : null;
+    // Aldrig kortere end Google beder om (header eller RetryInfo), og aldrig ud over tidsgrænsen.
+    const ventMs = Math.max(stigende, header ?? 0, google.retryMs ?? 0);
+    if (nu() + ventMs >= frist) return opgiv();
+    if (ventetIalt + ventMs > maksVentMs) return opgiv();
+    // 5xx og netfejl: kun igen, hvis et nyt forsøg kan nå at blive færdigt. Hvert forsøg kan koste og tæller i dagskvoten.
+    if ((!svar || svar.status !== 429) && frist - (nu() + ventMs) < varighed) return opgiv();
+    ventetIalt += ventMs;
+
+    const info = { forsoeg, status: svar ? svar.status : 0, ventMs };
+    if (google.googleKode) info.googleKode = google.googleKode;
+    vedGenforsoeg(info);
+    await vent(ventMs, signal);
+  }
+}
+
+module.exports = { medGenforsoeg, laesRetryAfter, laesGoogleFejl, MIDLERTIDIGE };

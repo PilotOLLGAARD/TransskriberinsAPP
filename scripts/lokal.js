@@ -166,8 +166,19 @@ function startLokal({ port = 4280 } = {}) {
     }
   }
 
+  // Forbindelsen tabes midt i upload: Efter de første 64 KB lukkes forbindelsen uden svar.
+  // Gælder, til en anden fejl sættes, for browseren prøver selv igen på en ny forbindelse.
+  function afbrydUpload(req) {
+    let modtaget = 0;
+    req.on('data', (d) => {
+      modtaget += d.length;
+      if (modtaget >= 64 * 1024) req.socket.destroy();
+    });
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    if (url.pathname === '/transskriber' && req.method === 'POST' && tilstand.naesteFejl === 'afbrydUpload') return afbrydUpload(req);
     if (url.pathname === '/transskriber' || url.pathname === '/referat') return handler(req, res);
     if (url.pathname.startsWith('/test/')) return testRute(url, req, res);
     return statisk(url, res);

@@ -226,7 +226,14 @@ test('log indeholder hverken bevis eller tekst', async () => {
   assert.ok(!alt.includes('HEMMELIGT-REFERAT'));
   assert.ok(!alt.includes('HEMMELIG-TEKST'));
   assert.ok(!alt.includes('HEMMELIGT-BEVIS'));
-  assert.ok(alt.includes('gemini-kald'));
+  assert.ok(alt.includes('referat-kald'));
+});
+
+test('gemini-kald logges af Gemini-delen med model, ikke af handleren', async () => {
+  // Handleren kender ikke modellen. Gemini-delen logger gemini-kald og evt. model-skift.
+  const s = await start();
+  await post(s.adresse);
+  assert.ok(!s.logs.join('\n').includes('gemini-kald'));
 });
 
 test('afvisning logges med grund', async () => {
@@ -255,6 +262,13 @@ test('nøgle-fejl giver 500', async () => {
   const svar = await post(s.adresse);
   assert.equal(svar.status, 500);
   assert.deepEqual(await svar.json(), { fejl: 'server-ikke-klar' });
+});
+
+test('Googles dagsgrænse giver 503 med fejlkoden kvote', async () => {
+  const s = await start({ gemini: falskGemini(async () => { throw new GeminiFejl('kvote', 'x'); }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 503);
+  assert.deepEqual(await svar.json(), { fejl: 'kvote' });
 });
 
 test('medarbejder får tekst, og lyden sendes uændret', async () => {
@@ -324,6 +338,43 @@ test('ugyldig titel og kontroltegn ignoreres', async () => {
   await post(s.adresse, { headers: { 'x-titel': kodet('a\nb\tc') } });
   assert.equal(s.referat.valg.titel, 'abc');
 });
+
+test('varigheden gives til Gemini, så lang lyd kan gå direkte til Flash', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-varighed': '252' } });
+  assert.equal(s.gemini.valg.varighedSek, 252);
+  // En uploadet fil kan være længere end en time. Til modelvalget tæller den stadig som lang.
+  await post(s.adresse, { headers: { 'x-varighed': '5400' } });
+  assert.equal(s.gemini.valg.varighedSek, 5400);
+  assert.equal(s.referat.valg.varighedSek, null);
+  for (const v of [undefined, '', 'abc', '-5']) {
+    await post(s.adresse, { headers: { 'x-varighed': v } });
+    assert.equal(s.gemini.valg.varighedSek, null, String(v));
+  }
+});
+
+const LYDFORMATER = [
+  'audio/mp4', 'audio/webm', 'audio/webm;codecs=opus', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
+  'audio/ogg', 'audio/ogg; codecs=opus', 'audio/aac', 'audio/flac', 'audio/x-flac', 'audio/x-m4a', 'audio/m4a',
+];
+for (const format of LYDFORMATER) {
+  test(`uploadet lyd godtages og sendes uændret: ${format}`, async () => {
+    const s = await start();
+    const krop = Buffer.from([0x49, 0x44, 0x33, 0, 255]);
+    const svar = await post(s.adresse, { krop, headers: { 'content-type': format } });
+    assert.equal(svar.status, 200);
+    assert.deepEqual(s.gemini.modtaget, krop);
+    assert.equal(s.gemini.valg.mime, format);
+  });
+}
+
+for (const format of ['video/mp4', 'audio/x-ms-wma', 'application/octet-stream', 'audio/']) {
+  test(`andet end lyd afvises: ${format}`, async () => {
+    const s = await start();
+    assert.equal((await post(s.adresse, { headers: { 'content-type': format } })).status, 415);
+    assert.equal(s.gemini.kald, 0);
+  });
+}
 
 for (const v of ['abc', '-5', '99999', '']) {
   test(`ugyldig varighed ignoreres: "${v}"`, async () => {
