@@ -937,3 +937,39 @@ test('en mp3 uploades og transskriberes med Googles type', async () => {
   assert.equal(kald[0].headers['X-Goog-Upload-Header-Content-Type'], 'audio/mp3');
   assert.equal(interaktionsKrop(kald).input[0].mime_type, 'audio/mp3');
 });
+
+// Flash som førstevalg (testbænken 6. nov. 2026: Flash 5,6 % mod Transcribe 17,4 % ordfejl;
+// Transcribe tabte sætninger i møder). Transcribe er reserve for korte optagelser.
+
+const BLOKERET = () => json(400, { error: { code: 'content_blocked', message: 'blocked' } });
+
+test('Flash som førstevalg: også korte og ukendte optagelser går til Flash', async () => {
+  for (const varighedSek of [undefined, 60, 400, 3600]) {
+    const { hent, kald } = falskHent();
+    await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek }));
+    assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash'], String(varighedSek));
+  }
+});
+
+test('Flash blokeret (content_blocked): Transcribe tager over med samme fil, når optagelsen er kort', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  const logs = [];
+  const svar = await lav(hent, { foerst: 'flash', log: (o) => logs.push(o) }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 60 }));
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
+  assert.equal(antal(kald, '/upload/v1beta/files'), 1);
+  assert.ok(logs.some((l) => l.haendelse === 'model-skift' && l.grund === 'blokeret' && l.fra === 'flash' && l.til === 'transcribe'));
+});
+
+test('Flash overbelastet efter genforsøg: Transcribe tager over, når optagelsen er kort', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: raekke(503) }) });
+  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 60 }));
+  assert.equal(svar.tekst, 'Hej');
+  assert.equal(modelIKald(kald).at(-1), 'gemini-3.5-transcribe');
+});
+
+test('lang optagelse: Transcribe er ikke reserve, fordi den er over grænsen pr. minut', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), langLyd()), (e) => e.status === 400 && e.googleKode === 'content_blocked');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+});

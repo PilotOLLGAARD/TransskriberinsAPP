@@ -127,7 +127,7 @@ function nytFilnavn() {
  */
 function lavGemini({
   noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, log = () => {}, oprydning,
-  flashModel = 'gemini-3.8-flash', transcribeMaksSek = 400, nu = Date.now, vent, tilfaeldig,
+  flashModel = 'gemini-3.8-flash', transcribeMaksSek = 400, foerst = 'transcribe', nu = Date.now, vent, tilfaeldig,
 }) {
   const flashPrompt = ordliste.length ? `${FLASH_PROMPT}\n\nFagord, der kan forekomme: ${ordliste.join(', ')}.` : FLASH_PROMPT;
   const hentKald = hent || ((...a) => fetch(...a));
@@ -282,6 +282,12 @@ function lavGemini({
     rydGamle.igang = rydGamle().catch((e) => advar(`oprydning ${e && e.name}`));
   }
 
+  /** Hvorfor Transcribe skal tage over efter en fejl fra Flash, eller null. Som skiftGrund, plus blokeret indhold. */
+  function flashSkiftGrund(e, startet, frist, signal) {
+    if (e instanceof GeminiFejl && !signal.aborted && e.status === 400 && e.googleKode === 'content_blocked') return 'blokeret';
+    return skiftGrund(e, startet, frist, signal);
+  }
+
   return {
     /**
      * varighedSek fra telefonen (kan mangle). Lyd over transcribeMaksSek går direkte til Flash,
@@ -290,8 +296,9 @@ function lavGemini({
     async transskriber(strom, { bytes, mime, signal, varighedSek }) {
       planlaegOprydning();
       const lang = Number.isFinite(varighedSek) && varighedSek > transcribeMaksSek;
-      log({ haendelse: 'gemini-kald', model: lang ? FLASH : TRANSCRIBE });
-      if (lang) log({ haendelse: 'model-skift', grund: 'laengde', fra: TRANSCRIBE, til: FLASH });
+      const flashFoerst = foerst === 'flash' || lang;
+      log({ haendelse: 'gemini-kald', model: flashFoerst ? FLASH : TRANSCRIBE });
+      if (lang && foerst !== 'flash') log({ haendelse: 'model-skift', grund: 'laengde', fra: TRANSCRIBE, til: FLASH });
       const type = geminiMime(mime);
       const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
       // Genforsøg skal kunne nå at vente færdig inden for samme grænse, så Cloud Runs 900 s aldrig nås.
@@ -305,7 +312,18 @@ function lavGemini({
         // Google bør bruge vores navn. Gør den ikke, slettes begge.
         if (fil.name !== navn) husk(fil.name);
         trin = 'transskription';
-        if (lang) return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+        if (flashFoerst) {
+          const startetFlash = nu();
+          try {
+            return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+          } catch (e) {
+            // Transcribe er kun reserve for korte optagelser: længere er over dens grænse pr. minut.
+            const grund = lang ? null : flashSkiftGrund(e, startetFlash, frist, samlet);
+            if (!grund) throw e;
+            log({ haendelse: 'model-skift', grund, fra: FLASH, til: TRANSCRIBE });
+            return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+          }
+        }
         const startet = nu();
         try {
           return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };

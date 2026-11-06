@@ -47,3 +47,9 @@ test('Flash-model og grænsen for Transcribe har standard og kan ændres', () =>
   assert.equal(a.transcribeMaksSek, 1200);
   assert.equal(hentKonfig({ ...FULD, TRANSCRIBE_MAKS_SEK: 'x' }).transcribeMaksSek, 400);
 });
+
+test('Flash er førstevalg til transskription, og Transcribe kan vælges', () => {
+  assert.equal(hentKonfig(FULD).foerst, 'flash');
+  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_FOERST: 'transcribe' }).foerst, 'transcribe');
+  assert.equal(hentKonfig({ ...FULD, TRANSSKRIPTION_FOERST: 'x' }).foerst, 'flash');
+});

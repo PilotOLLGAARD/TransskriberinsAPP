@@ -38,6 +38,7 @@ jobs:
             GEMINI_MODEL=gemini-3.5-transcribe
             FLASH_MODEL=gemini-3.8-flash
             TRANSCRIBE_MAKS_SEK=400
+            TRANSSKRIPTION_FOERST=flash
             SPROG=da-DK
             TRANSSKRIPTION_TILSTAND=verbatim
           secrets: |-

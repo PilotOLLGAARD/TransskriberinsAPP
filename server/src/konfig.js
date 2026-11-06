@@ -31,6 +31,8 @@ function hentKonfig(env) {
     // Transskriberer lange optagelser og tager over, når Transcribe svarer 429.
     flashModel: env.FLASH_MODEL || 'gemini-3.8-flash',
     transcribeMaksSek: tal(env.TRANSCRIBE_MAKS_SEK, STANDARD_TRANSCRIBE_MAKS_SEK),
+    // Flash som førstevalg: lavere ordfejl og taber ikke sætninger (testbænken 6. nov. 2026). Transcribe er reserve.
+    foerst: env.TRANSSKRIPTION_FOERST === 'transcribe' ? 'transcribe' : 'flash',
     sprog: env.SPROG || 'da-DK',
     // Verbatim som standard: smart springer replikker over (testbænken, 4. nov. 2026).
     tilstand: env.TRANSSKRIPTION_TILSTAND === 'smart' ? 'smart' : 'verbatim',
