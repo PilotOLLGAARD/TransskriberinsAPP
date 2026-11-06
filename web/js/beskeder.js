@@ -21,6 +21,7 @@ export const BESKEDER = {
   mailFejl: 'Mailen blev ikke sendt. Referatet er gemt. Prøv igen.',
   ikkeLydfil: 'Filen er ikke en lydfil, appen kan bruge. Brug m4a, mp3, wav, ogg eller webm.',
   forStorFil: 'Filen er for stor. Den må højst fylde 500 MB. Gem optagelsen som m4a eller mp3, og prøv igen.',
+  forLang: 'Lydfilen er længere end 2½ time. Del den op i Diktafon eller en anden app, og upload delene hver for sig.',
   filKanIkkeLaeses: 'Filen kunne ikke læses, så intet blev gemt. Prøv igen, eller gem filen i Filer først.',
   maaskeSendt: 'Mailen er måske allerede sendt. Tjek din indbakke, før du sender igen.',
 };

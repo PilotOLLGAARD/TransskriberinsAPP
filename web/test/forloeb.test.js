@@ -915,3 +915,56 @@ test('genstart fjerner en halvt gemt lydfil, men ikke én, der stadig gemmes i e
   assert.deepEqual(await s2.forloeb.genoptag(new Set(['f'])), []);
   assert.equal(s2.lager.kort.has('f'), true);
 });
+
+// Transskriptionen lykkedes, men referatet fejlede på serveren: kun referatet laves igen
+
+const UDEN_REFERAT = async () => ({ tekst: 'Hej fra pladsen', referatMangler: true });
+const LANG_FIL = { ...FIL, varighedMs: 95 * 60 * 1000, oprettet: 1234, type: 'moede' };
+
+test('referatMangler: teksten gemmes som deltekst, og referatet laves via /referat uden ny upload', async () => {
+  const s = opsaet({ noter: [LANG_FIL], sendLyd: UDEN_REFERAT });
+  await s.forloeb.behandlOgSend('f');
+  assert.equal(s.t.lydKald, 1);
+  assert.equal(s.t.referatKald.length, 1);
+  assert.deepEqual(s.t.referatKald[0][0], { tekster: ['Hej fra pladsen'], titel: 'Møde', type: 'moede', varighedMs: 95 * 60 * 1000, oprettet: 1234 });
+  const n = s.lager.kort.get('f');
+  assert.deepEqual(n.deltekster, ['Hej fra pladsen']);
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(s.t.mailKald.length, 1);
+});
+
+test('referatMangler og /referat fejler: Fejlet med teksten gemt, og Prøv igen laver kun referatet', async () => {
+  let referatGang = 0;
+  const s = opsaet({
+    noter: [LANG_FIL],
+    sendLyd: async (lyd, mime, bevis, meta, hent, valg) => { valg.vedSendt(); return UDEN_REFERAT(); },
+    sendReferat: async (krop) => { if (referatGang++ === 0) throw Object.assign(new Error('tjeneste'), { type: 'tjeneste' }); return { ...REFERAT_SVAR, tekst: krop.tekster[0] }; },
+  });
+  await s.forloeb.behandlOgSend('f');
+  let n = s.lager.kort.get('f');
+  assert.equal(n.status, STATUS.FEJL);
+  assert.equal(n.fejlType, 'tjeneste');
+  assert.equal(n.fremdrift, 'laver');
+  assert.deepEqual(n.deltekster, ['Hej fra pladsen']);
+  assert.equal(s.lager.lydSlettet.has('f'), false);
+
+  const set = [];
+  const opdater = s.lager.opdaterNote;
+  s.lager.opdaterNote = async (id, felter) => { if ('fremdrift' in felter) set.push(felter.fremdrift); return opdater(id, felter); };
+  await s.forloeb.behandlOgSend('f');
+  n = s.lager.kort.get('f');
+  assert.equal(s.t.lydKald, 1, 'lyden må ikke sendes igen');
+  assert.equal(s.t.referatKald.length, 2);
+  assert.equal(n.status, STATUS.SENDT);
+  assert.equal(n.tekst, 'Hej fra pladsen');
+  // Skærmen viser, at referatet laves, ikke at lyden sendes.
+  assert.deepEqual(set.slice(0, 2), ['sender', 'laver']);
+});
+
+test('en note med én del og gemt deltekst sender aldrig lyden igen', async () => {
+  const s = opsaet({ noter: [{ ...FIL, status: STATUS.FEJL, fejlType: 'tjeneste', deltekster: ['Gemt tekst'] }] });
+  await s.forloeb.behandl('f');
+  assert.equal(s.t.lydKald, 0);
+  assert.deepEqual(s.t.referatKald[0][0].tekster, ['Gemt tekst']);
+  assert.equal(s.lager.kort.get('f').status, STATUS.TEKST_KLAR);
+});

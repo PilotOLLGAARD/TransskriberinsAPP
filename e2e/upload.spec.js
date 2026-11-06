@@ -147,6 +147,61 @@ test('en m4a gemmes byte for byte før afsendelse, navneskærmen viser filen, og
   await kontekst.close();
 });
 
+test('en fil på 20 MB gemmes som Blob-stykker og når serveren byte for byte i rigtig rækkefølge', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const fil = await upload(side, { name: 'Stor.m4a', buffer: m4a(20 * KB * KB) });
+  const felt = side.getByLabel(FELT);
+  await felt.waitFor({ timeout: 30000 });
+  // Stykkerne er Blob-udsnit, som browseren lægger på disk. Intet er læst ind som rå bytes.
+  const stykker = await side.evaluate(() => new Promise((ok, fejl) => {
+    const r = indexedDB.open('transskribering');
+    r.onerror = () => fejl(r.error);
+    r.onsuccess = () => {
+      const g = r.result.transaction('stykker').objectStore('stykker').getAll();
+      g.onsuccess = () => { ok(g.result.map((s) => ({ nr: s.nr, blob: s.bytes instanceof Blob, bytes: s.bytes.size }))); r.result.close(); };
+      g.onerror = () => fejl(g.error);
+    };
+  }));
+  const MB8 = 8 * KB * KB;
+  assert.deepEqual(stykker, [
+    { nr: 0, blob: true, bytes: MB8 }, { nr: 1, blob: true, bytes: MB8 }, { nr: 2, blob: true, bytes: fil.length - 2 * MB8 },
+  ]);
+  const [n] = await noter(side);
+  assert.deepEqual(await lydSha(side, n.id), { bytes: fil.length, sha: sha(fil) });
+  await knap(side, 'Send').click();
+  await vis(side, SENDT, 60000);
+  const efter = await tal(miljoe);
+  assert.equal(efter.modtaget.bytes, fil.length);
+  assert.equal(efter.modtaget.sha256, sha(fil));
+  await kontekst.close();
+});
+
+test('optagedatoen er filens ændringsdato og sendes som x-optaget', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const tid = Date.now() - 3 * 24 * 60 * 60 * 1000;
+  const bytes = [...m4a(4 * KB)];
+  // Filvælgeren i Chromium kan ikke sætte en dato, så filen lægges i feltet med DataTransfer.
+  await side.evaluate(({ bytes, tid }) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(bytes)], 'Fra i tirsdags.m4a', { type: 'audio/mp4', lastModified: tid }));
+    const felt = document.getElementById('lydfil');
+    felt.files = dt.files;
+    felt.dispatchEvent(new Event('change'));
+  }, { bytes, tid });
+  await side.getByLabel(FELT).waitFor();
+  const [n] = await noter(side);
+  assert.equal(n.oprettet, tid);
+  const [anmodning] = await Promise.all([
+    side.waitForRequest((r) => r.url().endsWith('/transskriber') && r.method() === 'POST'),
+    knap(side, 'Send').click(),
+  ]);
+  assert.equal(anmodning.headers()['x-optaget'], String(tid));
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
 test('feltet bruger navnet fra forsiden, hvis der er skrevet et', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
@@ -192,6 +247,43 @@ test('en fil, der ikke er lyd, afvises med dansk besked, og intet gemmes', async
   // Samme fil kan vælges igen, og knappen virker stadig.
   await upload(side, { name: 'tegning.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7 tegning') });
   await vis(side, 'Filen er ikke en lydfil');
+  await kontekst.close();
+});
+
+const FOR_LANG = 'Lydfilen er længere end 2½ time. Del den op i Diktafon eller en anden app, og upload delene hver for sig.';
+
+test('en fil over 2½ time afvises med dansk besked, og intet gemmes', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  // Telefonen læser varigheden af filen. Her siger den 2 t 31 min.
+  await kontekst.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { get: () => 9060, configurable: true });
+  });
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await upload(side, { name: 'Heldagsmøde.wav', mimeType: 'audio/wav', buffer: wav(1) });
+  await vis(side, FOR_LANG);
+  assert.equal((await noter(side)).length, 0);
+  assert.equal((await tal(miljoe)).geminiKald, foer.geminiKald);
+  await kontekst.close();
+});
+
+test('serveren afviser over 2½ time med for-lang: appen viser samme besked, lyden bevares, og Prøv igen vises ikke', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    await l.opretNote({ id: 'lang', mime: 'audio/mp4', titel: 'Lang fil', kilde: 'fil', filnavn: 'Lang.m4a' });
+    await l.gemStykke('lang', 0, new Blob([new Uint8Array([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 1, 2, 3])]));
+    await l.opdaterNote('lang', { status: 'gemt', bytes: 11, varighedMs: 9500 * 1000 });
+  });
+  await side.reload();
+  await knap(side, 'Navngiv og send').click();
+  await knap(side, 'Send').click();
+  await vis(side, FOR_LANG);
+  assert.equal((await tal(miljoe)).geminiKald, foer.geminiKald);
+  assert.equal(await knap(side, 'Prøv igen').count(), 0);
+  assert.equal((await lydSha(side, 'lang')).bytes, 11);
   await kontekst.close();
 });
 
@@ -381,11 +473,88 @@ async function delGennemServiceWorker(side, { name, mimeType, buffer }) {
   await Promise.all([side.waitForURL(/\?delt=|\/$/), side.evaluate(() => document.forms[0].submit())]);
 }
 
-test('del-menuen: en delt lydfil gemmes, navneskærmen åbnes, og den midlertidige kopi fjernes', async () => {
+const SPOERG = 'Vil du gemme lydfilen?';
+const kopier = (side) => side.evaluate(async () => (await (await caches.open('delt-lydfil')).keys()).length);
+
+test('del-menuen: appen spørger først, og intet gemmes, før brugeren trykker Gem lydfilen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await delGennemServiceWorker(side, { name: 'Delt møde.m4a', mimeType: 'audio/mp4', buffer: m4a(300 * KB) });
+  await side.getByRole('heading', { name: SPOERG }).waitFor({ timeout: 15000 });
+  await vis(side, 'Delt møde.m4a');
+  await vis(side, '0,3 MB');
+  assert.equal(await knap(side, 'Gem lydfilen').count(), 1);
+  assert.equal(await knap(side, 'Annullér').count(), 1);
+  assert.equal((await noter(side)).length, 0);
+  assert.equal(await kopier(side), 1);
+  // En ny start spørger igen. Intet er gemt af sig selv.
+  await side.reload();
+  await side.getByRole('heading', { name: SPOERG }).waitFor({ timeout: 15000 });
+  assert.equal((await noter(side)).length, 0);
+  await kontekst.close();
+});
+
+test('del-menuen: Annullér fjerner den midlertidige kopi og gemmer intet', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await delGennemServiceWorker(side, { name: 'Fremmed.m4a', mimeType: 'audio/mp4', buffer: m4a(64 * KB) });
+  await side.getByRole('heading', { name: SPOERG }).waitFor({ timeout: 15000 });
+  await knap(side, 'Annullér').click();
+  await knap(side, 'Optag').waitFor();
+  assert.equal((await noter(side)).length, 0);
+  assert.equal(await kopier(side), 0);
+  await side.reload();
+  await knap(side, 'Optag').waitFor();
+  await side.waitForTimeout(300);
+  assert.equal(await side.getByRole('heading', { name: SPOERG }).count(), 0);
+  await kontekst.close();
+});
+
+for (const [navn, fejlnavn, besked] of [
+  ['fuldt lager', 'QuotaExceededError', 'Telefonen er løbet tør for plads, så intet blev gemt.'],
+  ['læsefejl', 'NotReadableError', 'Filen kunne ikke læses, så intet blev gemt.'],
+]) {
+  test(`del-menuen: ${navn} bevarer kopien, og Gem lydfilen kan prøves igen`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe);
+    await kontekst.addInitScript((fejlnavn) => {
+      const original = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (vaerdi, ...rest) {
+        const r = original.call(this, vaerdi, ...rest);
+        if (window.__fejl && vaerdi && 'bytes' in vaerdi && 'nr' in vaerdi) {
+          const t = this.transaction;
+          r.addEventListener('success', () => {
+            Object.defineProperty(t, 'error', { value: new DOMException('fejl', fejlnavn), configurable: true });
+            t.abort();
+          });
+        }
+        return r;
+      };
+    }, fejlnavn);
+    await logInd(side);
+    const fil = m4a(100 * KB);
+    await delGennemServiceWorker(side, { name: 'Prøv igen.m4a', mimeType: 'audio/mp4', buffer: fil });
+    await side.getByRole('heading', { name: SPOERG }).waitFor({ timeout: 15000 });
+    await side.evaluate(() => { window.__fejl = true; });
+    await knap(side, 'Gem lydfilen').click();
+    await vis(side, besked);
+    assert.equal((await noter(side)).length, 0);
+    assert.equal(await kopier(side), 1);
+    await side.evaluate(() => { window.__fejl = false; });
+    await knap(side, 'Gem lydfilen').click();
+    await side.getByLabel(FELT).waitFor();
+    const [n] = await noter(side);
+    assert.deepEqual(await lydSha(side, n.id), { bytes: fil.length, sha: sha(fil) });
+    assert.equal(await kopier(side), 0);
+    await kontekst.close();
+  });
+}
+
+test('del-menuen: Gem lydfilen gemmer den delte fil, navneskærmen åbnes, og den midlertidige kopi fjernes', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   const fil = m4a(300 * KB);
   await delGennemServiceWorker(side, { name: 'Delt møde.m4a', mimeType: 'audio/mp4', buffer: fil });
+  await knap(side, 'Gem lydfilen').click({ timeout: 15000 });
   const felt = side.getByLabel(FELT);
   await felt.waitFor({ timeout: 15000 });
   assert.equal(await felt.inputValue(), 'Delt møde');
@@ -409,7 +578,9 @@ test('del-menuen: en fil, der ikke er lyd, afvises med besked, og kopien fjernes
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await delGennemServiceWorker(side, { name: 'billede.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) });
+  await knap(side, 'Gem lydfilen').click({ timeout: 15000 });
   await vis(side, 'Filen er ikke en lydfil, appen kan bruge.');
+  await knap(side, 'Optag').waitFor();
   assert.equal((await noter(side)).length, 0);
   assert.equal(await side.evaluate(async () => (await (await caches.open('delt-lydfil')).keys()).length), 0);
   await kontekst.close();

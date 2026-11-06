@@ -6,6 +6,8 @@ import { STATUS } from './tilstand.js';
 
 /** Største fil, serveren tager imod. */
 export const MAKS_BYTES = 500 * 1024 * 1024;
+/** Længste lydfil: 2½ time. Samme grænse som på serveren (MAX_UPLOAD_SEK i server/src/handler.js). */
+export const MAKS_VARIGHED_MS = 9000 * 1000;
 /** Filen læses og gemmes i stykker af denne størrelse, så hele filen aldrig skal ligge i hukommelsen på én gang. */
 export const STYKKE_BYTES = 8 * 1024 * 1024;
 const VARIGHED_TIDSGRAENSE_MS = 5000;
@@ -93,7 +95,7 @@ async function varighedMedGraense(laesVarighed, fil, ms) {
 }
 
 /**
- * Kontrollerer filen, før den gemmes: lyd i et kendt format og højst MAKS_BYTES.
+ * Kontrollerer filen, før den gemmes: lyd i et kendt format, højst MAKS_BYTES og, når varigheden kendes, højst MAKS_VARIGHED_MS.
  * Giver { ok: true, format, mime, varighedMs, bytes, filnavn } eller { ok: false, fejl }.
  * Ukendt varighed er tilladt (varighedMs er null).
  */
@@ -108,6 +110,7 @@ export async function kontrollerFil(fil, { laesVarighed = laesVarighedIBrowser, 
   const format = genkendFormat(start);
   if (!format) return { ok: false, fejl: 'ikkeLydfil' };
   const varighedMs = await varighedMedGraense(laesVarighed, fil, tidsgraenseMs);
+  if (varighedMs !== null && varighedMs > MAKS_VARIGHED_MS) return { ok: false, fejl: 'forLang' };
   return { ok: true, format, mime: mimeFor(fil, format), varighedMs, bytes: fil.size, filnavn: fil.name || '' };
 }
 
@@ -143,6 +146,7 @@ export async function hentDeltFil({ caches = globalThis.caches, adresse = global
   try {
     navn = decodeURIComponent(svar.headers.get('x-filnavn') || '');
   } catch { /* Et ødelagt navn giver standardnavnet. */ }
+  // Del-menuen sender filen som multipart uden filens egen dato, så en delt fil får nu som optagedato.
   return {
     fil: new File([blob], navn || 'Delt lydfil', { type: blob.type }),
     fjern: () => cache.delete(noegle),
@@ -155,22 +159,20 @@ export async function hentDeltFil({ caches = globalThis.caches, adresse = global
  * Går det galt, slettes det halvt gemte. Filen ligger stadig, hvor brugeren valgte den.
  * Kaster LydfilFejl ('pladsTom' eller 'filKanIkkeLaeses').
  */
-export async function gemFil({ lager, fil, kontrol, titel = '', id = crypto.randomUUID(), laas }) {
+export async function gemFil({ lager, fil, kontrol, titel = '', id = crypto.randomUUID(), laas, nu = Date.now }) {
   const frigiv = (await laas?.(LAAS_PRAEFIKS + id).catch(() => null)) ?? null;
   let oprettet = false;
   try {
-    await lager.opretNote({ id, mime: kontrol.mime, titel, kilde: 'fil', filnavn: kontrol.filnavn });
+    // Datoen i PDF og mail er, hvornår lyden blev optaget, ikke hvornår den blev uploadet.
+    await lager.opretNote({ id, mime: kontrol.mime, titel, kilde: 'fil', filnavn: kontrol.filnavn, oprettet: optagetTid(fil, nu()) });
     oprettet = true;
     let gemt = 0;
     for (let nr = 0, fra = 0; fra < fil.size; nr++, fra += STYKKE_BYTES) {
-      let bytes;
-      try {
-        bytes = await fil.slice(fra, Math.min(fra + STYKKE_BYTES, fil.size)).arrayBuffer();
-      } catch {
-        throw new LydfilFejl('filKanIkkeLaeses');
-      }
-      await lager.gemStykke(id, nr, bytes, 0);
-      gemt += bytes.byteLength;
+      // Et Blob-udsnit, ikke bytes: browseren kopierer det til lageret på disk uden at læse det ind i
+      // hukommelsen. Kan filen ikke læses, fejler skrivningen og giver filKanIkkeLaeses nedenfor.
+      const stykke = fil.slice(fra, Math.min(fra + STYKKE_BYTES, fil.size));
+      await lager.gemStykke(id, nr, stykke, 0);
+      gemt += stykke.size;
     }
     if (gemt !== fil.size || gemt !== kontrol.bytes) throw new LydfilFejl('filKanIkkeLaeses');
     const felter = { status: STATUS.GEMT, bytes: gemt };
@@ -184,4 +186,19 @@ export async function gemFil({ lager, fil, kontrol, titel = '', id = crypto.rand
   } finally {
     frigiv?.();
   }
+}
+
+/** Optagedatoen: filens ændringsdato, når den er gyldig og ikke i fremtiden, ellers nu. */
+function optagetTid(fil, nu) {
+  const t = fil.lastModified;
+  return Number.isSafeInteger(t) && t > 0 && t <= nu ? t : nu;
+}
+
+// Udfald, hvor kopien fra del-menuen ikke skal bruges igen: gemt, Annullér, eller en fejl, der ikke
+// forsvinder ved at prøve igen. Ved fuldt lager og læsefejl bevares den, så brugeren kan prøve igen.
+const FJERN_KOPI_EFTER = new Set(['gemt', 'annulleret', 'ikkeLydfil', 'forStorFil', 'forLang']);
+
+/** Om den midlertidige kopi fra del-menuen skal fjernes efter dette udfald. */
+export function fjernDeltKopi(udfald) {
+  return FJERN_KOPI_EFTER.has(udfald);
 }

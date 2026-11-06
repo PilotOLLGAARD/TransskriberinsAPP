@@ -10,7 +10,7 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { generateKeyPairSync, createSign, randomUUID } = require('node:crypto');
+const { generateKeyPairSync, createSign, createHash, randomUUID } = require('node:crypto');
 const { lavHandler } = require('../server/src/handler.js');
 const { lavAdgangsTjek } = require('../server/src/adgang.js');
 const { GeminiFejl } = require('../server/src/gemini.js');
@@ -68,7 +68,8 @@ function startLokal({ port = 4280 } = {}) {
       tilstand.geminiKald++;
       const dele = [];
       for await (const d of strom) dele.push(d);
-      tilstand.modtaget = { bytes: Buffer.concat(dele).length, mime };
+      const krop = Buffer.concat(dele);
+      tilstand.modtaget = { bytes: krop.length, mime, sha256: createHash('sha256').update(krop).digest('hex') };
       // Kun transskriptionens egne fejl bruges her. Fejl i referat og mail venter på deres tur.
       const fejl = ['tjeneste', 'format', 'tom', 'langsom'].includes(tilstand.naesteFejl) ? tilstand.naesteFejl : null;
       if (fejl) tilstand.naesteFejl = null;
@@ -84,8 +85,9 @@ function startLokal({ port = 4280 } = {}) {
     async lav({ tekst, titel, type, varighedSek }) {
       tilstand.referatKald++;
       tilstand.sidsteReferat = { titel, type, varighedSek };
-      if (tilstand.naesteFejl === 'referat') {
-        tilstand.naesteFejl = null;
+      // referat fejler én gang, referatTo de næste to gange (fx både på /transskriber og /referat).
+      if (tilstand.naesteFejl === 'referat' || tilstand.naesteFejl === 'referatTo') {
+        tilstand.naesteFejl = tilstand.naesteFejl === 'referatTo' ? 'referat' : null;
         throw new GeminiFejl('tjeneste', 'testfejl');
       }
       return {

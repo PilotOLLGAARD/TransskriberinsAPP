@@ -1,6 +1,8 @@
 import { STATUS } from './tilstand.js';
 
-// Lyd gemmes som rå bytes, ikke som Blob: iOS Safari kan miste adgangen til Blobs i IndexedDB.
+// Optagelser fra mikrofonen gemmes som rå bytes (ArrayBuffer). En uploadet lydfil gemmes som Blob-udsnit
+// af filen, så browseren lægger dem på disk, og en fil på flere hundrede MB aldrig skal ligge i hukommelsen.
+// hentLyd og hentDele samler kun referencer til stykkerne. Bytes læses først, når lyden sendes.
 const DB_NAVN = 'transskribering';
 const NOTER = 'noter';
 const STYKKER = 'stykker';
@@ -55,9 +57,10 @@ function alleStykkerInterval(id) {
   return IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]);
 }
 
-export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', kilde, filnavn }) {
+/** oprettet er optagedatoen. En uploadet lydfil giver sin egen. Ellers er det nu. */
+export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', kilde, filnavn, oprettet }) {
   // Ingen type: AI'en vælger den, og svaret gemmer den på noten.
-  const note = { id, mime, titel, status: STATUS.OPTAGER, oprettet: Date.now() };
+  const note = { id, mime, titel, status: STATUS.OPTAGER, oprettet: Number.isSafeInteger(oprettet) ? oprettet : Date.now() };
   // En lydfil, brugeren har valgt, i stedet for en optagelse.
   if (kilde === 'fil') Object.assign(note, { kilde, filnavn: String(filnavn ?? '') });
   await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
@@ -67,6 +70,7 @@ export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', ki
 /**
  * Gemmer et stykke lyd og stempler noten som aktiv, så andre faner kan se, at optagelsen kører.
  * del er nummeret på delen, når en afbrudt optagelse fortsættes. Dele sættes aldrig sammen.
+ * bytes er en ArrayBuffer (mikrofon) eller en Blob (uploadet fil).
  */
 export async function gemStykke(id, nr, bytes, del = 0) {
   await transaktion([NOTER, STYKKER], 'readwrite', (t) => {

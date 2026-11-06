@@ -79,6 +79,19 @@ const gFejl = (kode, detaljer) => new GeminiFejl(kode, 'HEMMELIG besked fra Goog
 const json = (o) => Buffer.from(JSON.stringify(o));
 const referatReq = (krop, headers = {}) => ({ sti: '/referat', krop, headers: { 'content-type': 'application/json', ...headers } });
 
+// Fejl i referat eller PDF. På /referat er de en fejl. På /transskriber får appen teksten med referatMangler.
+// [navn, handler-valg, status på /referat, forventet log (delvis)]
+const REFERAT_FEJL = [
+  ['referat 429', { referat: fejlReferat(gFejl('tjeneste', { status: 429, hvor: 'referat', googleKode: 'RESOURCE_EXHAUSTED' })) }, 502,
+    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'referat', googleStatus: 429, googleKode: 'RESOURCE_EXHAUSTED' }],
+  ['referat nøgle afvist', { referat: fejlReferat(gFejl('noegle', { status: 403, hvor: 'referat' })) }, 500,
+    { haendelse: 'gemini-fejl', kode: 'noegle', trin: 'referat' }],
+  ['referat kaster noget uventet', { referat: fejlReferat(new Error('HEMMELIG')) }, 502,
+    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'referat', fejltype: 'Error' }],
+  ['PDF fejler', { pdf: { async lavPdf() { throw new RangeError('HEMMELIG'); }, filnavn: () => 'x' } }, 502,
+    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'pdf', fejltype: 'RangeError' }],
+];
+
 // [navn, handler-valg, anmodning, status, appens type, forventet log (delvis)]
 const FEJLVEJE = [
   ...[
@@ -110,14 +123,8 @@ const FEJLVEJE = [
     { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'transskription', fejltype: 'TimeoutError' }],
   ['Gemini kaster noget uventet', { gemini: fejlGemini(new TypeError('HEMMELIG Peter Hansen')) }, {}, 502, 'tjeneste',
     { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'transskription', fejltype: 'TypeError' }],
-  ['referat 429', { referat: fejlReferat(gFejl('tjeneste', { status: 429, hvor: 'referat', googleKode: 'RESOURCE_EXHAUSTED' })) }, {}, 502, 'tjeneste',
-    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'referat', googleStatus: 429, googleKode: 'RESOURCE_EXHAUSTED' }],
-  ['referat nøgle afvist', { referat: fejlReferat(gFejl('noegle', { status: 403, hvor: 'referat' })) }, {}, 500, 'tjeneste',
-    { haendelse: 'gemini-fejl', kode: 'noegle', trin: 'referat' }],
-  ['referat kaster noget uventet', { referat: fejlReferat(new Error('HEMMELIG')) }, {}, 502, 'tjeneste',
-    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'referat', fejltype: 'Error' }],
-  ['PDF fejler', { pdf: { async lavPdf() { throw new RangeError('HEMMELIG'); }, filnavn: () => 'x' } }, {}, 502, 'tjeneste',
-    { haendelse: 'gemini-fejl', kode: 'tjeneste', trin: 'pdf', fejltype: 'RangeError' }],
+  ...REFERAT_FEJL.map(([navn, handlerValg, status, forventetLog]) => [`/referat ${navn}`, handlerValg,
+    referatReq(json({ tekster: ['HEMMELIG'], titel: 'HEMMELIG' })), status, 'tjeneste', forventetLog]),
   ['/referat forkert format', {}, referatReq(json({ tekster: ['HEMMELIG'] }), { 'content-type': 'text/plain' }), 415, 'kanIkkeBehandles',
     { haendelse: 'anmodning-afvist', grund: 'forkert-format', status: 415 }],
   ['/referat mangler længde', {}, referatReq(json({ tekster: ['HEMMELIG'] }), { 'content-length': undefined }), 411, 'kanIkkeBehandles',
@@ -163,6 +170,30 @@ for (const [navn, handlerValg, reqValg, status, type, forventetLog] of FEJLVEJE)
     );
   });
 }
+
+for (const [navn, handlerValg, , forventetLog] of REFERAT_FEJL) {
+  test(`/transskriber ${navn}: teksten med referatMangler, og fejlen logges med kode`, async () => {
+    const svar = await koer(handlerValg, {});
+    assert.equal(svar.status, 200);
+    assert.deepEqual(svar.krop, { tekst: 'Hej fra Peter Hansen', referatMangler: true });
+    for (const o of svar.logs) tjekLog(o);
+    assert.ok(
+      svar.logs.some((o) => Object.entries(forventetLog).every(([k, v]) => o[k] === v)),
+      `mangler ${JSON.stringify(forventetLog)} i ${JSON.stringify(svar.logs)}`,
+    );
+  });
+}
+
+test('for lang optagelse: 413 for-lang med log, og appen viser sin egen besked', async () => {
+  const svar = await koer({}, { headers: { 'x-varighed': '9001' } });
+  assert.equal(svar.status, 413);
+  assert.deepEqual(svar.krop, { fejl: 'for-lang' });
+  assert.equal(svar.headers['access-control-allow-origin'], OPRINDELSE);
+  for (const o of svar.logs) tjekLog(o);
+  assert.ok(svar.logs.some((o) => o.haendelse === 'anmodning-afvist' && o.grund === 'for-lang' && o.status === 413), JSON.stringify(svar.logs));
+  const { BESKEDER } = await import('../../web/js/beskeder.js');
+  assert.ok(BESKEDER.forLang);
+});
 
 test('appen har en besked til hver type, serveren kan give', async () => {
   const { BESKEDER } = await import('../../web/js/beskeder.js');

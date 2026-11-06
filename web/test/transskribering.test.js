@@ -275,6 +275,18 @@ test('Googles dagsgrænse (503 med kvote) giver kvote, også for referatet af fl
   await assert.rejects(sendReferat({ tekster: ['A'] }, 'b', kvote), (e) => e.type === 'kvote');
 });
 
+test('for lang optagelse (413 med for-lang) giver forLang, ikke kanIkkeBehandles', async () => {
+  const forLang = async () => new Response(JSON.stringify({ fejl: 'for-lang' }), { status: 413 });
+  await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, forLang), (e) => e.type === 'forLang');
+  const forStor = async () => new Response(JSON.stringify({ fejl: 'kan-ikke-behandles' }), { status: 413 });
+  await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, forStor), (e) => e.type === 'kanIkkeBehandles');
+});
+
+test('teksten uden referat gives videre med referatMangler', async () => {
+  const svar = await sendLyd(LYD, 'audio/mp4', 'b', {}, async () => Response.json({ tekst: 'Hej', referatMangler: true }));
+  assert.deepEqual(svar, { tekst: 'Hej', referatMangler: true });
+});
+
 test('vedFremdrift får sendte og samlede bytes, mens lyden sendes', async () => {
   const meldt = [];
   await hentMedFremdrift('/x', { ...VALG, vedFremdrift: (sendt, ialt) => meldt.push([sendt, ialt]) }, tidsstyretXhr({ fremdrift: [[5, 30], [10, 60], [15, 100]], svarEfter: 40 }));

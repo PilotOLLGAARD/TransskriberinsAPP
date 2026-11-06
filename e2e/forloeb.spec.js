@@ -381,15 +381,35 @@ test('tjeneste-fejl vises, intet tabt, og det kan prøves igen med samme navn', 
   await kontekst.close();
 });
 
-test('referat-fejl vises, intet tabt, og det kan prøves igen', async () => {
+test('referat-fejl efter transskriptionen: referatet laves igen uden at sende lyden igen', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
+  const foer = await tal(miljoe);
   await saetNaesteFejl(miljoe, 'referat');
   await optag(side, { titel: 'Referatfejl' });
+  await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.geminiKald - foer.geminiKald, 1);
+  assert.equal(efter.referatKald - foer.referatKald, 2);
+  assert.equal(efter.sidsteReferat.titel, 'Referatfejl');
+  await kontekst.close();
+});
+
+test('referat-fejl to gange: Fejlet med lyden gemt, og Prøv igen laver kun referatet', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await saetNaesteFejl(miljoe, 'referatTo');
+  await optag(side, { titel: 'Referatfejl to' });
+  await vis(side, 'Referatet kunne ikke laves lige nu');
   await vis(side, 'Transskriptionen mislykkedes. Optagelsen er gemt.');
   assert.ok((await lydBytes(side)) > 0);
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
+  const efter = await tal(miljoe);
+  assert.equal(efter.geminiKald - foer.geminiKald, 1, 'lyden blev transskriberet igen');
+  assert.equal(efter.referatKald - foer.referatKald, 3);
+  assert.equal(efter.mailKald - foer.mailKald, 1);
   await kontekst.close();
 });
 

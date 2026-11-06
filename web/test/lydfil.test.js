@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAKS_BYTES, STYKKE_BYTES, genkendFormat, kontrollerFil, gemFil, navnUdenEndelse, formaterMB, hentDeltFil } from '../js/lydfil.js';
+import { MAKS_BYTES, MAKS_VARIGHED_MS, STYKKE_BYTES, genkendFormat, kontrollerFil, gemFil, navnUdenEndelse, formaterMB, hentDeltFil, fjernDeltKopi } from '../js/lydfil.js';
 import { STATUS } from '../js/tilstand.js';
 
 const tekst = (s) => [...s].map((c) => c.charCodeAt(0));
@@ -73,6 +73,12 @@ test('varigheden får en tidsgrænse og må ikke stoppe kontrollen', async () =>
   assert.equal(k2.varighedMs, null);
 });
 
+test('en fil over 2½ time afvises med forLang, og præcis 2½ time godtages', async () => {
+  assert.equal(MAKS_VARIGHED_MS, 9000 * 1000);
+  assert.deepEqual(await kontrollerFil(fil(M4A), { laesVarighed: altid(MAKS_VARIGHED_MS + 1000) }), { ok: false, fejl: 'forLang' });
+  assert.equal((await kontrollerFil(fil(M4A), { laesVarighed: altid(MAKS_VARIGHED_MS) })).ok, true);
+});
+
 test('andet end lyd afvises, før noget gemmes', async () => {
   let laest = false;
   const k = await kontrollerFil(fil(start(tekst('%PDF-1.7')), 'tegning.pdf', 'application/pdf'), { laesVarighed: async () => { laest = true; return 1; } });
@@ -115,14 +121,15 @@ function falskLager({ fuldVed = null } = {}) {
   return {
     noter,
     stykker,
-    async opretNote({ id = 'n1', mime, titel = '', kilde, filnavn }) {
-      noter.set(id, { id, mime, titel, kilde, filnavn, status: STATUS.OPTAGER, oprettet: 1 });
+    async opretNote({ id = 'n1', mime, titel = '', kilde, filnavn, oprettet = 1 }) {
+      noter.set(id, { id, mime, titel, kilde, filnavn, status: STATUS.OPTAGER, oprettet });
       return id;
     },
     async gemStykke(id, nr, bytes, del = 0) {
       if (fuldVed !== null && nr >= fuldVed) throw new DOMException('fuld', 'QuotaExceededError');
-      assert.ok(bytes instanceof ArrayBuffer, 'lyden gemmes som rå bytes');
-      stykker.push({ id, nr, bytes: new Uint8Array(bytes), del });
+      // Et Blob-udsnit af filen: browseren lægger det på disk, så en stor fil aldrig ligger i hukommelsen.
+      assert.ok(bytes instanceof Blob, 'stykket gemmes som Blob');
+      stykker.push({ id, nr, bytes, del });
     },
     async opdaterNote(id, felter) { Object.assign(noter.get(id), felter); },
     async sletNote(id) { noter.delete(id); for (let i = stykker.length - 1; i >= 0; i--) if (stykker[i].id === id) stykker.splice(i, 1); },
@@ -186,9 +193,29 @@ test('fuldt lager: intet halvt gemt bliver liggende, og fejlen er pladsTom', asy
   assert.equal(frigivet, true);
 });
 
+test('stykkerne læses ikke ind i hukommelsen, når de gemmes', async () => {
+  const f = fil(new Uint8Array(2 * STYKKE_BYTES + 5).fill(9));
+  const laest = [];
+  const vagt = {
+    name: f.name, type: f.type, size: f.size, lastModified: f.lastModified,
+    slice: (...a) => {
+      const b = f.slice(...a);
+      for (const m of ['arrayBuffer', 'text', 'stream', 'bytes']) b[m] = () => { laest.push(m); throw new Error('læst'); };
+      return b;
+    },
+  };
+  const lager = falskLager();
+  await gemFil({ lager, fil: vagt, kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: f.size, filnavn: f.name } });
+  assert.deepEqual(laest, []);
+  assert.deepEqual(lager.stykker.map((s) => s.bytes.size), [STYKKE_BYTES, STYKKE_BYTES, 5]);
+});
+
 test('en fil, der ikke kan læses undervejs, efterlader intet', async () => {
   const lager = falskLager();
-  const daarlig = { name: 'x.m4a', type: 'audio/mp4', size: 2 * STYKKE_BYTES, slice: (a) => ({ arrayBuffer: async () => { if (a > 0) throw new DOMException('nej', 'NotReadableError'); return new ArrayBuffer(STYKKE_BYTES); } }) };
+  // Browseren læser filen, når stykket skrives til lageret. Kan den ikke, fejler skrivningen.
+  const gem = lager.gemStykke.bind(lager);
+  lager.gemStykke = async (id, nr, ...rest) => { if (nr > 0) throw new DOMException('nej', 'NotReadableError'); return gem(id, nr, ...rest); };
+  const daarlig = fil(new Uint8Array(2 * STYKKE_BYTES).fill(3));
   await assert.rejects(
     gemFil({ lager, fil: daarlig, kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: daarlig.size, filnavn: 'x.m4a' } }),
     (e) => e.type === 'filKanIkkeLaeses',
@@ -199,7 +226,7 @@ test('en fil, der ikke kan læses undervejs, efterlader intet', async () => {
 
 test('en fil, der ændrer størrelse under læsningen, gemmes ikke', async () => {
   const lager = falskLager();
-  const kort = { name: 'x.m4a', type: 'audio/mp4', size: 100, slice: () => ({ arrayBuffer: async () => new ArrayBuffer(60) }) };
+  const kort = { name: 'x.m4a', type: 'audio/mp4', size: 100, slice: () => new Blob([new Uint8Array(60)]) };
   await assert.rejects(
     gemFil({ lager, fil: kort, kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: 100, filnavn: 'x.m4a' } }),
     (e) => e.type === 'filKanIkkeLaeses',
@@ -243,4 +270,40 @@ test('den delte fil hentes med navn og type, og kopien fjernes først, når appe
 test('ingen delt fil giver null, også uden Cache Storage', async () => {
   assert.equal(await hentDeltFil({ caches: falskeCaches(), adresse: APP }), null);
   assert.equal(await hentDeltFil({ caches: undefined, adresse: APP }), null);
+});
+
+// Den midlertidige kopi fra del-menuen fjernes kun, når den ikke skal bruges igen
+
+test('kopien fjernes efter gemning, Annullér og fejl, der ikke kan rettes ved at prøve igen', () => {
+  for (const udfald of ['gemt', 'annulleret', 'ikkeLydfil', 'forStorFil', 'forLang']) assert.equal(fjernDeltKopi(udfald), true, udfald);
+});
+
+test('kopien bevares ved fuldt lager og læsefejl, så brugeren kan prøve igen', () => {
+  for (const udfald of ['pladsTom', 'filKanIkkeLaeses', undefined, 'ukendt']) assert.equal(fjernDeltKopi(udfald), false, String(udfald));
+});
+
+// Optagedato
+
+const DAG = 24 * 60 * 60 * 1000;
+const NU_TID = Date.UTC(2026, 10, 6, 12, 0);
+const filFra = (lastModified) => new File([M4A], 'x.m4a', { type: 'audio/mp4', lastModified });
+
+test('en uploadet fil får filens ændringsdato som optagedato', async () => {
+  const lager = falskLager();
+  const f = filFra(NU_TID - 3 * DAG);
+  const id = await gemFil({ lager, fil: f, kontrol: await kontrollerFil(f, { laesVarighed: altid(null) }), nu: () => NU_TID });
+  assert.equal(lager.noter.get(id).oprettet, NU_TID - 3 * DAG);
+});
+
+test('en dato i fremtiden eller uden værdi giver nu som optagedato', async () => {
+  for (const lastModified of [NU_TID + DAG, 0, -5]) {
+    const lager = falskLager();
+    const f = filFra(lastModified);
+    const id = await gemFil({ lager, fil: f, kontrol: await kontrollerFil(f, { laesVarighed: altid(null) }), nu: () => NU_TID });
+    assert.equal(lager.noter.get(id).oprettet, NU_TID, String(lastModified));
+  }
+  const lager = falskLager();
+  const udenDato = { name: 'x.m4a', type: 'audio/mp4', size: M4A.length, lastModified: undefined, slice: (...a) => new Blob([M4A]).slice(...a) };
+  const id = await gemFil({ lager, fil: udenDato, kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: M4A.length, filnavn: 'x.m4a' }, nu: () => NU_TID });
+  assert.equal(lager.noter.get(id).oprettet, NU_TID);
 });

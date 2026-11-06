@@ -79,8 +79,10 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
   async function behandlDele(id, note, bevis, signal) {
     const dele = await lager.hentDele(id);
     const tekster = [...(note.deltekster || [])];
+    let sendtLyd = false;
     for (let i = 0; i < dele.length; i++) {
       if (typeof tekster[i] === 'string') continue;
+      sendtLyd = true;
       const sidste = i === dele.length - 1;
       const svar = await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet }, undefined, {
         vedSendt: sidste ? () => fremdrift(id, 'laver') : undefined,
@@ -89,6 +91,13 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       tekster[i] = svar.tekst || '';
       await lager.opdaterNote(id, { deltekster: [...tekster] });
     }
+    // Al lyd er transskriberet før: kun referatet mangler, og det er det, skærmen skal vise.
+    if (!sendtLyd) await fremdrift(id, 'laver');
+    return lavReferat(note, tekster, bevis, signal);
+  }
+
+  /** Ét referat af teksterne via /referat. Intet lyd sendes. */
+  async function lavReferat(note, tekster, bevis, signal) {
     const medTale = tekster.filter((x) => x.trim());
     if (!medTale.length) return { tekst: '' };
     return sendReferat(
@@ -140,7 +149,10 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const bevis = await login.hentBevis('api');
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
-        const svar = (note.dele ?? 1) > 1
+        // En note med gemte deltekster er (delvis) transskriberet. Den går altid via delene, også med én del,
+        // så lyd, der allerede er betalt for, aldrig sendes igen.
+        const viaDele = (note.dele ?? 1) > 1 || note.deltekster?.length > 0;
+        let svar = viaDele
           ? await behandlDele(id, note, bevis, signal)
           : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
             titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
@@ -150,6 +162,12 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
             vedFremdrift: (sendt, ialt) => vedUpload(id, sendt, ialt),
             signal,
           });
+        if (!viaDele && svar.referatMangler && svar.tekst) {
+          // Transskriptionen lykkedes, men referatet fejlede på serveren. Teksten gemmes, før referatet
+          // prøves igen, så "Prøv igen" kun laver referatet.
+          await lager.opdaterNote(id, { deltekster: [svar.tekst] });
+          svar = await lavReferat(note, [svar.tekst], bevis, signal);
+        }
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;

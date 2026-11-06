@@ -5,7 +5,7 @@ import { ENTRA, LOKAL } from './konfig.js';
 import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
-import { ACCEPT, formaterMB, gemFil, hentDeltFil, kontrollerFil, navnUdenEndelse } from './lydfil.js';
+import { ACCEPT, fjernDeltKopi, formaterMB, gemFil, hentDeltFil, kontrollerFil, navnUdenEndelse } from './lydfil.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
@@ -31,7 +31,8 @@ const app = document.getElementById('app');
 const temaFarve = document.querySelector('meta[name="theme-color"]');
 
 const t = {
-  visning: 'start', // start | optager | navn | tekst
+  visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt
+  delt: null, // { fil, fjern } en lydfil fra del-menuen, der venter på brugerens svar
   noter: [],
   aabenNote: null,
   fraVisning: 'start', // skærmen, Læs vender tilbage til
@@ -242,9 +243,10 @@ function vaelgFil() {
 /**
  * Kontrollerer filen og gemmer den på telefonen, før noget sendes. Derefter navneskærmen.
  * Feltet udfyldes med navnet fra forsiden eller filnavnet uden endelse.
+ * Giver udfaldet: 'gemt' eller fejltypen (fx ikkeLydfil eller pladsTom).
  */
 async function modtagFil(fil) {
-  if (t.gemmerFil) return;
+  if (t.gemmerFil) return undefined;
   t.gemmerFil = true;
   t.besked = null;
   tegn();
@@ -252,7 +254,7 @@ async function modtagFil(fil) {
     const kontrol = await kontrollerFil(fil);
     if (!kontrol.ok) {
       visFejl(kontrol.fejl);
-      return;
+      return kontrol.fejl;
     }
     const titel = [...(t.valgtNavn.trim() || navnUdenEndelse(kontrol.filnavn).trim())].slice(0, 120).join('');
     const id = await gemFil({ lager, fil, kontrol, titel, laas: medier.laas });
@@ -260,15 +262,20 @@ async function modtagFil(fil) {
     t.visning = 'navn';
     t.navnNote = id;
     t.navnUdkast = null;
+    return 'gemt';
   } catch (e) {
     visFejl(e?.type, 'filKanIkkeLaeses');
+    return e?.type || 'filKanIkkeLaeses';
   } finally {
     t.gemmerFil = false;
     await opdater().catch(() => tegn());
   }
 }
 
-/** En lydfil fra del-menuen på Android, lagt af service workeren. Fjernes, når den er gemt eller afvist. */
+/**
+ * En lydfil fra del-menuen på Android, lagt af service workeren. Enhver side kan sende en fil dertil,
+ * så intet gemmes, før brugeren selv har trykket Gem lydfilen.
+ */
 async function modtagDeltFil() {
   const svar = new URLSearchParams(location.search).get('delt');
   if (svar !== null) history.replaceState(null, '', location.pathname);
@@ -284,8 +291,38 @@ async function modtagDeltFil() {
     }
     return;
   }
-  await modtagFil(delt.fil);
-  await delt.fjern().catch(() => {});
+  t.delt = delt;
+  t.besked = null;
+  t.visning = 'delt';
+  tegn();
+}
+
+/** Brugeren har valgt Gem lydfilen: filen kontrolleres og gemmes som en valgt lydfil. */
+async function gemDeltFil() {
+  if (!t.delt || t.gemmerFil) return;
+  await afslutDelt(await modtagFil(t.delt.fil));
+}
+
+function annullerDelt() {
+  if (t.gemmerFil) return;
+  t.besked = null;
+  afslutDelt('annulleret').catch(() => {});
+}
+
+/**
+ * Fjerner den midlertidige kopi, når den ikke skal bruges igen. Ved fuldt lager og læsefejl bliver den,
+ * og skærmen bliver stående, så Gem lydfilen kan prøves igen.
+ */
+async function afslutDelt(udfald) {
+  if (!fjernDeltKopi(udfald)) {
+    tegn();
+    return;
+  }
+  const delt = t.delt;
+  t.delt = null;
+  if (t.visning === 'delt') t.visning = 'start';
+  await delt?.fjern().catch(() => {});
+  tegn();
 }
 
 /**
@@ -898,7 +935,7 @@ function skaermFremdrift() {
   const meta = [type, formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ');
   let nederst;
   if (fejl) {
-    const kanIgen = !['ingenTale', 'kanIkkeBehandles'].includes(note.fejlType) && !note.maaskeSendt;
+    const kanIgen = !['ingenTale', 'kanIkkeBehandles', 'forLang'].includes(note.fejlType) && !note.maaskeSendt;
     const igen = note.fejlType === 'login'
       ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: note.status === STATUS.TEKST_KLAR ? 'send' : 'behandl' }), { ikonNavn: 'person' })
       : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
@@ -1075,6 +1112,33 @@ function filKort(note) {
   );
 }
 
+/** En lydfil fra del-menuen. Den gemmes først, når brugeren selv vælger det. */
+function skaermDelt() {
+  if (!t.delt) {
+    t.visning = 'start';
+    return skaermStart();
+  }
+  const { fil } = t.delt;
+  return [
+    h('header', { klasse: 'top' }, ordmaerke()),
+    h('h1', { klasse: 'titel' }, 'Vil du gemme lydfilen?'),
+    beskedElement(),
+    h(
+      'div',
+      { klasse: 'navn' },
+      filKort({ filnavn: fil.name, bytes: fil.size }),
+      h('p', { klasse: 'hjaelpetekst' }, 'En lydfil er delt med appen. Den gemmes kun på telefonen, hvis du vælger det.'),
+      t.gemmerFil ? venter('Gemmer lydfilen …') : null,
+      h(
+        'div',
+        { klasse: 'knapper' },
+        h('button', { type: 'button', vedTryk: gemDeltFil, disabled: t.gemmerFil }, ikon('tjek'), 'Gem lydfilen'),
+        h('button', { type: 'button', klasse: 'hvid', vedTryk: annullerDelt, disabled: t.gemmerFil }, 'Annullér'),
+      ),
+    ),
+  ];
+}
+
 function skaermTekst() {
   const note = t.noter.find((n) => n.id === t.aabenNote);
   if (!note) {
@@ -1124,6 +1188,7 @@ function tegn() {
   else if (t.visning === 'tidligere') indhold = skaermTidligere();
   else if (t.visning === 'fremdrift') indhold = skaermFremdrift();
   else if (t.visning === 'information') indhold = skaermInformation();
+  else if (t.visning === 'delt') indhold = skaermDelt();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();

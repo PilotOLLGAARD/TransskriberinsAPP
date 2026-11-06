@@ -134,8 +134,9 @@ export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdri
 async function laesSvar(svar) {
   if (!svar.ok) {
     // Googles grænse for i dag er nået (fx 100 kald om dagen). Serveren siger det med fejlkoden kvote.
+    // En lydfil over 2½ time afvises med for-lang.
     const fejl = await svar.json().then((k) => k?.fejl, () => null);
-    throw new SendFejl(fejl === 'kvote' ? 'kvote' : FEJLTYPER[svar.status] || 'tjeneste');
+    throw new SendFejl(fejl === 'kvote' ? 'kvote' : fejl === 'for-lang' ? 'forLang' : FEJLTYPER[svar.status] || 'tjeneste');
   }
   try {
     const krop = await svar.json();

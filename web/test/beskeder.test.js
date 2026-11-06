@@ -75,3 +75,8 @@ test('dagsgrænsen hos Google har en dansk besked, der siger, at optagelsen er g
   assert.match(BESKEDER.kvote, /gemt/);
   assert.match(BESKEDER.kvote, /i morgen/);
 });
+
+test('en lydfil over 2½ time får en dansk besked om at dele den op', () => {
+  assert.equal(BESKEDER.forLang, 'Lydfilen er længere end 2½ time. Del den op i Diktafon eller en anden app, og upload delene hver for sig.');
+  assert.ok(alleFejltyper().has('forLang'));
+});

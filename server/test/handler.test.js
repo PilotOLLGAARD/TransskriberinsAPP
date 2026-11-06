@@ -376,7 +376,7 @@ for (const format of ['video/mp4', 'audio/x-ms-wma', 'application/octet-stream',
   });
 }
 
-for (const v of ['abc', '-5', '99999', '']) {
+for (const v of ['abc', '-5', '5000', '']) {
   test(`ugyldig varighed ignoreres: "${v}"`, async () => {
     const s = await start();
     await post(s.adresse, { headers: { 'x-varighed': v } });
@@ -391,19 +391,48 @@ test('ugyldigt tidspunkt giver nu', async () => {
   assert.ok(s.pdf.valg.tidspunkt >= foer && s.pdf.valg.tidspunkt <= Date.now());
 });
 
-test('referat-fejl giver 502 og ingen PDF', async () => {
-  const s = await start({ referat: falskReferat(async () => { throw new GeminiFejl('tjeneste', 'x'); }) });
-  const svar = await post(s.adresse);
-  assert.equal(svar.status, 502);
-  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
-  assert.equal(s.pdf.kald, 0);
-});
+// Transskriptionen er betalt. Fejler referat eller PDF bagefter, får appen teksten, så kun referatet laves igen.
+for (const [navn, fejl] of [
+  ['tjeneste', new GeminiFejl('tjeneste', 'x')],
+  ['kvote', new GeminiFejl('kvote', 'x')],
+  ['nøgle', new GeminiFejl('noegle', 'x')],
+  ['uventet', new Error('x')],
+]) {
+  test(`referat-fejl (${navn}) efter transskription giver teksten med referatMangler og ingen PDF`, async () => {
+    const s = await start({ referat: falskReferat(async () => { throw fejl; }) });
+    const svar = await post(s.adresse);
+    assert.equal(svar.status, 200);
+    assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
+    assert.equal(s.gemini.kald, 1);
+    assert.equal(s.pdf.kald, 0);
+    assert.ok(s.logs.some((l) => JSON.parse(l).haendelse === 'gemini-fejl' && JSON.parse(l).trin === 'referat'), s.logs.join());
+  });
+}
 
-test('PDF-fejl giver 502', async () => {
+test('PDF-fejl efter transskription giver teksten med referatMangler', async () => {
   const pdf = falskPdf();
   pdf.lavPdf = async () => { throw new Error('pdf'); };
   const s = await start({ pdf });
-  assert.equal((await post(s.adresse)).status, 502);
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 200);
+  assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
+  assert.ok(s.logs.some((l) => JSON.parse(l).trin === 'pdf'), s.logs.join());
+});
+
+// En time og et kvarter ad gangen er grænsen hos Gemini. Over 2½ time afvises filen, før lyden læses.
+test('x-varighed over 9000 s giver 413 for-lang, før lyden læses', async () => {
+  const s = await start();
+  const svar = await post(s.adresse, { headers: { 'x-varighed': '9001' } });
+  assert.equal(svar.status, 413);
+  assert.deepEqual(await svar.json(), { fejl: 'for-lang' });
+  assert.equal(s.gemini.kald, 0);
+  assert.deepEqual(s.laest, [false]);
+  assert.equal((await post(s.adresse, { headers: { 'x-varighed': '9000' } })).status, 200);
+});
+
+test('for lang afvises først efter adgangstjekket', async () => {
+  const s = await start({ tjekAdgang: async () => ({ ok: false, status: 401, grund: 'x' }) });
+  assert.equal((await post(s.adresse, { headers: { 'x-varighed': '20000' } })).status, 401);
 });
 
 test('anden sti giver 404', async () => {
