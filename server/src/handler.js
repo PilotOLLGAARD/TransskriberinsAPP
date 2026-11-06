@@ -227,7 +227,7 @@ function lavHandler({
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler',
         'access-control-max-age': '600',
       });
       res.end();
@@ -283,6 +283,8 @@ function lavHandler({
           signal: afbryd.signal,
         }, spor);
       } catch (e) {
+        // En ældre app (fra før referatMangler) kender ikke svaret og får den gamle fejl.
+        if (req.headers['x-referat-mangler'] !== '1') throw e;
         // Transskriptionen er betalt og lykkedes. Appen får teksten og laver kun referatet igen via /referat.
         logFejl(e, spor.trin);
         return sendJson(res, cors, 200, { tekst, referatMangler: true });

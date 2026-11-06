@@ -308,3 +308,10 @@ test('sendLyd giver vedFremdrift videre', async () => {
   await sendLyd(LYD, 'audio/mpeg', 'b', { varighedMs: 61_000 }, hent, { vedFremdrift });
   assert.equal(givet, vedFremdrift);
 });
+
+test('sendLyd melder, at appen forstår referatMangler', async () => {
+  let headers;
+  const hent = async (url, valg) => { headers = valg.headers; return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
+  await sendLyd(LYD, 'audio/mp4', 'b', {}, hent);
+  assert.equal(headers['x-referat-mangler'], '1');
+});

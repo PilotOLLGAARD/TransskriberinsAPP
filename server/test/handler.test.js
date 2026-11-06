@@ -439,7 +439,7 @@ for (const [navn, fejl] of [
 ]) {
   test(`referat-fejl (${navn}) efter transskription giver teksten med referatMangler og ingen PDF`, async () => {
     const s = await start({ referat: falskReferat(async () => { throw fejl; }) });
-    const svar = await post(s.adresse);
+    const svar = await post(s.adresse, { headers: { 'x-referat-mangler': '1' } });
     assert.equal(svar.status, 200);
     assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
     assert.equal(s.gemini.kald, 1);
@@ -452,7 +452,7 @@ test('PDF-fejl efter transskription giver teksten med referatMangler', async () 
   const pdf = falskPdf();
   pdf.lavPdf = async () => { throw new Error('pdf'); };
   const s = await start({ pdf });
-  const svar = await post(s.adresse);
+  const svar = await post(s.adresse, { headers: { 'x-referat-mangler': '1' } });
   assert.equal(svar.status, 200);
   assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
   assert.ok(s.logs.some((l) => JSON.parse(l).trin === 'pdf'), s.logs.join());
@@ -605,4 +605,17 @@ test('logs indeholder ingen tekst fra /referat', async () => {
   assert.ok(!alt.includes('HEMMELIG-DELTEKST'));
   assert.ok(!alt.includes('HEMMELIG-TITEL'));
   assert.ok(alt.includes('referat-kald'));
+});
+
+test('en ældre app uden x-referat-mangler får den gamle fejl, når referatet fejler', async () => {
+  const s = await start({ referat: falskReferat(async () => { throw new GeminiFejl('tjeneste', 'x'); }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 502);
+  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
+});
+
+test('x-referat-mangler er tilladt i CORS', async () => {
+  const s = await start();
+  const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.match(svar.headers.get('access-control-allow-headers') || '', /x-referat-mangler/);
 });

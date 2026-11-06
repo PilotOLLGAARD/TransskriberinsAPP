@@ -173,7 +173,7 @@ for (const [navn, handlerValg, reqValg, status, type, forventetLog] of FEJLVEJE)
 
 for (const [navn, handlerValg, , forventetLog] of REFERAT_FEJL) {
   test(`/transskriber ${navn}: teksten med referatMangler, og fejlen logges med kode`, async () => {
-    const svar = await koer(handlerValg, {});
+    const svar = await koer(handlerValg, { headers: { 'x-referat-mangler': '1' } });
     assert.equal(svar.status, 200);
     assert.deepEqual(svar.krop, { tekst: 'Hej fra Peter Hansen', referatMangler: true });
     for (const o of svar.logs) tjekLog(o);

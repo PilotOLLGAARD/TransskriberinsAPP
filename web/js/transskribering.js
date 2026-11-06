@@ -35,7 +35,8 @@ export class SendFejl extends Error {
 }
 
 function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
-  const h = {};
+  // Appen forstår { tekst, referatMangler }: fejler referatet, laves kun det igen. Ældre apps får den gamle fejl.
+  const h = { 'x-referat-mangler': '1' };
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
   if (typeof titel === 'string' && titel.trim()) {
     // Et halvt tegn må aldrig stoppe afsendelsen. Det erstattes, så encodeURIComponent ikke kaster.
