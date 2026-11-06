@@ -35,4 +35,21 @@ async function saetNaesteFejl(miljoe, naeste) {
   await fetch(`${miljoe.adresse}/test/fejl?naeste=${naeste}`);
 }
 
-module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl };
+/**
+ * Luft på forsiden: fri plads i .scene ud over indholdet. Måles med Arial (på Linux Liberation Sans, samme mål),
+ * så Windows, Linux i GitHub og iPhones systemskrift giver nogenlunde samme resultat.
+ */
+async function forsideLuft(side) {
+  await side.evaluate(() => { document.body.style.fontFamily = 'Arial, "Liberation Sans", sans-serif'; });
+  await side.waitForTimeout(100);
+  return side.evaluate(() => {
+    const sc = document.querySelector('.scene');
+    const cs = getComputedStyle(sc);
+    const boern = [...sc.children].reduce((s, b) => s + b.getBoundingClientRect().height, 0);
+    const gap = parseFloat(cs.rowGap || 0) * (sc.children.length - 1);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    return { rul: document.documentElement.scrollHeight - innerHeight, hoejde: innerHeight, luft: Math.round(sc.clientHeight - boern - gap - pad) };
+  });
+}
+
+module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft };

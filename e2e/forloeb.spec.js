@@ -1,7 +1,7 @@
 'use strict';
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
@@ -866,7 +866,13 @@ test('navneskærmen med Fortsæt optagelsen kan betjenes på 360 px', async () =
 test('Tidligere optagelser kan ses øverst uden at rulle', async () => {
   const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
   await logInd(side);
-  const r = await knap(side, TIDLIGERE).boundingBox();
+  // Startskærmen tegnes forfra, når login og noter er hentet. Mål først, når knappen står stille.
+  let r = null;
+  for (let i = 0; i < 40 && !r; i++) {
+    await knap(side, TIDLIGERE).waitFor();
+    r = await knap(side, TIDLIGERE).boundingBox();
+    if (!r) await side.waitForTimeout(50);
+  }
   assert.ok(r.y >= 0 && r.y + r.height <= 120, `knappen ligger ${Math.round(r.y)} px nede`);
   assert.ok(r.height >= 44, `knappen er ${r.height} px høj`);
   assert.ok(r.x + r.width <= 360);
@@ -1365,8 +1371,10 @@ for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['st
     await side.addInitScript(() => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
     await logInd(side);
     await side.waitForTimeout(300);
-    const m = await side.evaluate(() => ({ rul: document.documentElement.scrollHeight - innerHeight, hoejde: innerHeight }));
+    const m = await forsideLuft(side);
     assert.ok(m.rul <= 0, `${navn}: rul ${m.rul} px`);
+    // Ikke på kanten: en lidt bredere skrift eller større tekst må ikke få forsiden til at rulle.
+    assert.ok(m.luft >= 12, `${navn}: kun ${m.luft} px luft`);
     for (const k of [knap(side, 'Optag'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
       const r = await k.boundingBox();
       assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde, `${navn}: knap uden for skærmen`);

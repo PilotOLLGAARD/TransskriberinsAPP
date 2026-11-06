@@ -3,7 +3,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, randomFillSync } = require('node:crypto');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
@@ -100,13 +100,15 @@ for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['st
     await side.addInitScript(() => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
     await logInd(side);
     await side.waitForTimeout(300);
-    const m = await side.evaluate(() => ({ rul: document.documentElement.scrollHeight - innerHeight, hoejde: innerHeight }));
+    const m = await forsideLuft(side);
     assert.ok(m.rul <= 0, `${navn}: rul ${m.rul} px`);
+    // Ikke på kanten: en lidt bredere skrift eller større tekst må ikke få forsiden til at rulle.
+    assert.ok(m.luft >= 12, `${navn}: kun ${m.luft} px luft`);
     for (const k of [knap(side, 'Optag'), knap(side, 'Upload lydfil'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
       const r = await k.boundingBox();
       assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde, `${navn}: knap uden for skærmen`);
     }
-    if (viewport.height < 700) assert.equal(Math.round((await knap(side, 'Optag').boundingBox()).height), 152);
+    if (viewport.height < 700) assert.equal(Math.round((await knap(side, 'Optag').boundingBox()).height), 144);
     await kontekst.close();
   });
 }

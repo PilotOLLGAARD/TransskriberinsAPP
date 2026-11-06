@@ -176,7 +176,7 @@ button svg { width: 26px; height: 26px; }
 input[type="file"] { font: inherit; }
 
 @media (max-height: 700px) {
-  .optag { width: 152px; height: 152px; min-height: 152px; }
+  .optag { width: 144px; height: 144px; min-height: 144px; }
   .titel { margin-top: 12px; }
   .scene { gap: 10px; padding-top: 10px; padding-bottom: 4px; }
   .upload-felt { gap: 2px; }
