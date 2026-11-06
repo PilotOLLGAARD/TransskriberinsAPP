@@ -7,6 +7,7 @@ const { lavGemini } = require('./gemini.js');
 const { lavHandler } = require('./handler.js');
 const { lavReferat } = require('./referat.js');
 const pdf = require('./pdf.js');
+const docx = require('./docx.js');
 const ordliste = require('./ordliste.js');
 
 const REFERAT_TIMEOUT_MS = 50 * 1000;
@@ -49,6 +50,7 @@ function start() {
     // Transskription (højst 840 s) og referat skal tilsammen nå under Cloud Runs grænse på 900 s.
     referat: konfig ? lavReferat({ noegle: konfig.noegle, model: konfig.referatModel, timeoutMs: REFERAT_TIMEOUT_MS, log }) : null,
     pdf,
+    docx,
     log,
   });
   if (!konfig) console.error(JSON.stringify({ haendelse: 'konfiguration-mangler' }));

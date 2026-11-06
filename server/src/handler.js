@@ -4,6 +4,7 @@ const { Transform, pipeline } = require('node:stream');
 const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
+const wordDel = require('./docx.js');
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -12,6 +13,8 @@ const FORMATER = new Set([
 ]);
 const MAX_TITEL = 120;
 const MAX_VARIGHED_SEK = 3600;
+// Længste lydfil, der tages imod: 2½ time. Samme grænse som i appen (web/js/lydfil.js).
+const MAX_UPLOAD_SEK = 9000;
 const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
 const DAG_MS = 24 * 60 * 60 * 1000;
 const MAX_REFERAT_BYTES = 2 * 1024 * 1024;
@@ -87,7 +90,9 @@ function laesTekster(krop) {
  * Adgangstjekket er det første, der sker, før kroppen læses.
  * /transskriber med x-kun-tekst: 1 giver kun teksten. /referat laver ét referat af flere delteksters.
  */
-function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLog }) {
+function lavHandler({
+  konfig, tjekAdgang, gemini, referat, pdf, docx = wordDel, log = standardLog,
+}) {
   function sendJson(res, cors, status, krop) {
     res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(krop));
@@ -105,24 +110,40 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     spor.trin = 'referat';
     const r = await referat.lav({ tekst, titel, type, varighedSek, signal });
     spor.trin = 'pdf';
-    const fil = await pdf.lavPdf({ titel: r.titel, tidspunkt, varighedSek, referat: r, tekst });
+    const indhold = { titel: r.titel, tidspunkt, varighedSek, referat: r, tekst };
+    const fil = await pdf.lavPdf(indhold);
+    const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
     return {
       tekst,
       titel: r.titel,
       type: r.type,
       referat: r,
       pdf: fil.toString('base64'),
-      filnavn: pdf.filnavn({ titel: r.titel, tidspunkt }),
+      filnavn,
+      ...lavWord(indhold, filnavn),
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
       html: lavHtml({ titel: r.titel, referat: r }),
     };
+  }
+
+  /** Word-udgaven med samme navn som PDF'en. Fejler den, sendes referatet med PDF alene. */
+  function lavWord(indhold, filnavn) {
+    try {
+      return {
+        docx: docx.lavDocx(indhold).toString('base64'),
+        docxFilnavn: `${filnavn.replace(/\.pdf$/i, '')}.docx`,
+      };
+    } catch {
+      log({ haendelse: 'docx-fejl' });
+      return {};
+    }
   }
 
   /**
    * Logger kun koder og tal: trin, Googles HTTP-status og faste fejlkode (fx RESOURCE_EXHAUSTED)
    * og fejlens navn. Aldrig fejlbeskeden, da den kan indeholde detaljer fra kaldet.
    */
-  function sendFejl(res, cors, e, trin) {
+  function logFejl(e, trin) {
     const geminiFejl = e instanceof GeminiFejl;
     const kode = geminiFejl ? e.kode : 'tjeneste';
     const linje = { haendelse: 'gemini-fejl', kode, trin: (geminiFejl && e.trin) || trin };
@@ -131,6 +152,11 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     const type = geminiFejl ? e.fejltype : fejltype(e);
     if (type) linje.fejltype = type;
     log(linje);
+    return kode;
+  }
+
+  function sendFejl(res, cors, e, trin) {
+    const kode = logFejl(e, trin);
     if (kode === 'format') return sendJson(res, cors, 422, { fejl: 'kan-ikke-behandles' });
     if (kode === 'noegle') return sendJson(res, cors, 500, { fejl: 'server-ikke-klar' });
     if (kode === 'kvote') return sendJson(res, cors, 503, { fejl: 'kvote' });
@@ -201,7 +227,7 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler',
         'access-control-max-age': '600',
       });
       res.end();
@@ -220,6 +246,10 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     }
 
     if (sti === '/referat') return referatAfDele(req, res, cors);
+
+    // Over 2½ time afvises, før lyden læses. Appen afviser selv, når den kender varigheden.
+    const varighed = laesVarighedTilModel(req.headers['x-varighed']);
+    if (varighed !== null && varighed > MAX_UPLOAD_SEK) return afvis(res, cors, 413, 'for-lang', 'for-lang');
 
     const mime = String(req.headers['content-type'] || '');
     if (!FORMATER.has(mime.split(';')[0].trim().toLowerCase())) return afvis(res, cors, 415, 'forkert-format');
@@ -242,14 +272,24 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
       if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
 
-      sendJson(res, cors, 200, await lavResultat({
-        tekst,
-        titel: laesTitel(req.headers['x-titel']),
-        type: laesType(req.headers['x-type']),
-        varighedSek: laesVarighed(req.headers['x-varighed']),
-        tidspunkt: laesTidspunkt(req.headers['x-optaget']),
-        signal: afbryd.signal,
-      }, spor));
+      let resultat;
+      try {
+        resultat = await lavResultat({
+          tekst,
+          titel: laesTitel(req.headers['x-titel']),
+          type: laesType(req.headers['x-type']),
+          varighedSek: laesVarighed(req.headers['x-varighed']),
+          tidspunkt: laesTidspunkt(req.headers['x-optaget']),
+          signal: afbryd.signal,
+        }, spor);
+      } catch (e) {
+        // En ældre app (fra før referatMangler) kender ikke svaret og får den gamle fejl.
+        if (req.headers['x-referat-mangler'] !== '1') throw e;
+        // Transskriptionen er betalt og lykkedes. Appen får teksten og laver kun referatet igen via /referat.
+        logFejl(e, spor.trin);
+        return sendJson(res, cors, 200, { tekst, referatMangler: true });
+      }
+      sendJson(res, cors, 200, resultat);
     } catch (e) {
       if (vagt.overskredet) return afvis(res, cors, 413, 'for-mange-bytes');
       sendFejl(res, cors, e, spor.trin);

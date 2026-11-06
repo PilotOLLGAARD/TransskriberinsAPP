@@ -56,12 +56,20 @@ function falskPdf() {
   return p;
 }
 
+function falskDocx(svar = () => Buffer.from('PK-falsk')) {
+  const d = { kald: 0, lavDocx(valg) { d.kald++; d.valg = valg; return svar(valg); } };
+  return d;
+}
+
 async function start({
-  konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini(), referat = falskReferat(), pdf = falskPdf(),
+  konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini(), referat = falskReferat(), pdf = falskPdf(), docx = falskDocx(),
 } = {}) {
   const logs = [];
   const laest = [];
-  const handler = lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log: (o) => logs.push(JSON.stringify(o)) });
+  // docx: false bruger handlerens egen, rigtige Word-del.
+  const handler = lavHandler({
+    konfig, tjekAdgang, gemini, referat, pdf, ...(docx ? { docx } : {}), log: (o) => logs.push(JSON.stringify(o)),
+  });
   const server = http.createServer((req, res) => {
     const slut = res.end.bind(res);
     // Node tømmer selv en ulæst krop efter svaret, så det måles, idet svaret sendes.
@@ -71,7 +79,7 @@ async function start({
   servere.push(server);
   await new Promise((ok) => server.listen(0, ok));
   const adresse = `http://localhost:${server.address().port}`;
-  return { adresse, gemini, referat, pdf, logs, laest };
+  return { adresse, gemini, referat, pdf, docx, logs, laest };
 }
 
 function post(adresse, { headers = {}, krop = Buffer.from('lyd'), sti = '/transskriber' } = {}) {
@@ -311,6 +319,37 @@ test('svar indeholder titel, referat, pdf og filnavn', async () => {
   assert.equal(s.pdf.valg.tekst, 'Hej');
 });
 
+test('svar indeholder Word-dokument med samme navn som PDF-filen og samme indhold', async () => {
+  const s = await start();
+  const svar = await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-varighed': '252', 'x-optaget': String(TID) } });
+  const j = await svar.json();
+  assert.equal(Buffer.from(j.docx, 'base64').toString(), 'PK-falsk');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+  assert.equal(s.docx.kald, 1);
+  assert.deepEqual(s.docx.valg, s.pdf.valg);
+});
+
+test('uden en Word-del i opsætningen bruges den rigtige', async () => {
+  const s = await start({ docx: false });
+  const j = await (await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-optaget': String(TID) } })).json();
+  assert.equal(Buffer.from(j.docx, 'base64').subarray(0, 4).toString('latin1'), 'PK\u0003\u0004');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+});
+
+test('fejler Word-dokumentet, sendes referatet uden, og kun koden logges', async () => {
+  const s = await start({ docx: falskDocx(() => { throw new RangeError('HEMMELIG-DOCX'); }) });
+  const svar = await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-optaget': String(TID) } });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
+  assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+  assert.equal(j.docx, undefined);
+  assert.equal(j.docxFilnavn, undefined);
+  assert.equal(j.referatMangler, undefined);
+  assert.ok(s.logs.includes(JSON.stringify({ haendelse: 'docx-fejl' })));
+  assert.ok(!s.logs.join('\n').includes('HEMMELIG-DOCX'));
+});
+
 test('tom titel giver AI-titel', async () => {
   const s = await start();
   const j = await (await post(s.adresse)).json();
@@ -376,7 +415,7 @@ for (const format of ['video/mp4', 'audio/x-ms-wma', 'application/octet-stream',
   });
 }
 
-for (const v of ['abc', '-5', '99999', '']) {
+for (const v of ['abc', '-5', '5000', '']) {
   test(`ugyldig varighed ignoreres: "${v}"`, async () => {
     const s = await start();
     await post(s.adresse, { headers: { 'x-varighed': v } });
@@ -391,19 +430,48 @@ test('ugyldigt tidspunkt giver nu', async () => {
   assert.ok(s.pdf.valg.tidspunkt >= foer && s.pdf.valg.tidspunkt <= Date.now());
 });
 
-test('referat-fejl giver 502 og ingen PDF', async () => {
-  const s = await start({ referat: falskReferat(async () => { throw new GeminiFejl('tjeneste', 'x'); }) });
-  const svar = await post(s.adresse);
-  assert.equal(svar.status, 502);
-  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
-  assert.equal(s.pdf.kald, 0);
-});
+// Transskriptionen er betalt. Fejler referat eller PDF bagefter, får appen teksten, så kun referatet laves igen.
+for (const [navn, fejl] of [
+  ['tjeneste', new GeminiFejl('tjeneste', 'x')],
+  ['kvote', new GeminiFejl('kvote', 'x')],
+  ['nøgle', new GeminiFejl('noegle', 'x')],
+  ['uventet', new Error('x')],
+]) {
+  test(`referat-fejl (${navn}) efter transskription giver teksten med referatMangler og ingen PDF`, async () => {
+    const s = await start({ referat: falskReferat(async () => { throw fejl; }) });
+    const svar = await post(s.adresse, { headers: { 'x-referat-mangler': '1' } });
+    assert.equal(svar.status, 200);
+    assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
+    assert.equal(s.gemini.kald, 1);
+    assert.equal(s.pdf.kald, 0);
+    assert.ok(s.logs.some((l) => JSON.parse(l).haendelse === 'gemini-fejl' && JSON.parse(l).trin === 'referat'), s.logs.join());
+  });
+}
 
-test('PDF-fejl giver 502', async () => {
+test('PDF-fejl efter transskription giver teksten med referatMangler', async () => {
   const pdf = falskPdf();
   pdf.lavPdf = async () => { throw new Error('pdf'); };
   const s = await start({ pdf });
-  assert.equal((await post(s.adresse)).status, 502);
+  const svar = await post(s.adresse, { headers: { 'x-referat-mangler': '1' } });
+  assert.equal(svar.status, 200);
+  assert.deepEqual(await svar.json(), { tekst: 'Hej', referatMangler: true });
+  assert.ok(s.logs.some((l) => JSON.parse(l).trin === 'pdf'), s.logs.join());
+});
+
+// En time og et kvarter ad gangen er grænsen hos Gemini. Over 2½ time afvises filen, før lyden læses.
+test('x-varighed over 9000 s giver 413 for-lang, før lyden læses', async () => {
+  const s = await start();
+  const svar = await post(s.adresse, { headers: { 'x-varighed': '9001' } });
+  assert.equal(svar.status, 413);
+  assert.deepEqual(await svar.json(), { fejl: 'for-lang' });
+  assert.equal(s.gemini.kald, 0);
+  assert.deepEqual(s.laest, [false]);
+  assert.equal((await post(s.adresse, { headers: { 'x-varighed': '9000' } })).status, 200);
+});
+
+test('for lang afvises først efter adgangstjekket', async () => {
+  const s = await start({ tjekAdgang: async () => ({ ok: false, status: 401, grund: 'x' }) });
+  assert.equal((await post(s.adresse, { headers: { 'x-varighed': '20000' } })).status, 401);
 });
 
 test('anden sti giver 404', async () => {
@@ -479,6 +547,19 @@ test('/referat samler teksterne med markøren og laver ét referat', async () =>
   assert.equal(j.emne, 'Møde: Møde om tag – 2. nov. 2026');
   assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
   assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+  assert.equal(Buffer.from(j.docx, 'base64').toString(), 'PK-falsk');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+  assert.equal(s.docx.valg.tekst, j.tekst);
+});
+
+test('/referat sendes uden Word-dokument, hvis det fejler', async () => {
+  const s = await start({ docx: falskDocx(() => { throw new Error('x'); }) });
+  const svar = await postReferat(s.adresse, { tekster: ['a', 'b'], titel: 'Tag', optaget: TID });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.ok(j.pdf);
+  assert.equal(j.docx, undefined);
+  assert.ok(s.logs.includes(JSON.stringify({ haendelse: 'docx-fejl' })));
 });
 
 test('/referat springer tomme tekster over, og kun tomme giver tom tekst', async () => {
@@ -524,4 +605,17 @@ test('logs indeholder ingen tekst fra /referat', async () => {
   assert.ok(!alt.includes('HEMMELIG-DELTEKST'));
   assert.ok(!alt.includes('HEMMELIG-TITEL'));
   assert.ok(alt.includes('referat-kald'));
+});
+
+test('en ældre app uden x-referat-mangler får den gamle fejl, når referatet fejler', async () => {
+  const s = await start({ referat: falskReferat(async () => { throw new GeminiFejl('tjeneste', 'x'); }) });
+  const svar = await post(s.adresse);
+  assert.equal(svar.status, 502);
+  assert.deepEqual(await svar.json(), { fejl: 'tjeneste' });
+});
+
+test('x-referat-mangler er tilladt i CORS', async () => {
+  const s = await start();
+  const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.match(svar.headers.get('access-control-allow-headers') || '', /x-referat-mangler/);
 });
