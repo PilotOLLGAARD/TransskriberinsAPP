@@ -274,3 +274,25 @@ test('Googles dagsgrænse (503 med kvote) giver kvote, også for referatet af fl
   await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, kvote), (e) => e.type === 'kvote');
   await assert.rejects(sendReferat({ tekster: ['A'] }, 'b', kvote), (e) => e.type === 'kvote');
 });
+
+test('vedFremdrift får sendte og samlede bytes, mens lyden sendes', async () => {
+  const meldt = [];
+  await hentMedFremdrift('/x', { ...VALG, vedFremdrift: (sendt, ialt) => meldt.push([sendt, ialt]) }, tidsstyretXhr({ fremdrift: [[5, 30], [10, 60], [15, 100]], svarEfter: 40 }));
+  assert.deepEqual(meldt, [[30, 100], [60, 100], [100, 100]]);
+});
+
+test('vedFremdrift kaldes ikke uden kendt størrelse, og en fejl i den stopper ikke afsendelsen', async () => {
+  const meldt = [];
+  await hentMedFremdrift('/x', { ...VALG, vedFremdrift: (...a) => meldt.push(a) }, falskXhr([{ type: 'progress', lengthComputable: false, loaded: 5, total: 0 }, { type: 'load' }]));
+  assert.deepEqual(meldt, []);
+  const svar = await hentMedFremdrift('/x', { ...VALG, vedFremdrift: () => { throw new Error('ups'); } }, tidsstyretXhr({ fremdrift: [[5, 50]], svarEfter: 30 }));
+  assert.equal(svar.status, 200);
+});
+
+test('sendLyd giver vedFremdrift videre', async () => {
+  let givet;
+  const hent = async (url, valg) => { givet = valg.vedFremdrift; return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
+  const vedFremdrift = () => {};
+  await sendLyd(LYD, 'audio/mpeg', 'b', { varighedMs: 61_000 }, hent, { vedFremdrift });
+  assert.equal(givet, vedFremdrift);
+});

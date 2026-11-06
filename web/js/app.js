@@ -5,6 +5,7 @@ import { ENTRA, LOKAL } from './konfig.js';
 import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
+import { ACCEPT, formaterMB, gemFil, hentDeltFil, kontrollerFil, navnUdenEndelse } from './lydfil.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
@@ -21,8 +22,10 @@ const forloeb = lavForloeb({
   aktivAndetSted: async (id) => (await optagelserAndetSted())?.has(id) ?? null,
   // Fremdriften vises på skærmen efter Send.
   vedAendring: () => { opdater().catch(() => {}); },
+  vedUpload: (id, sendt, ialt) => visUpload(id, sendt, ialt),
 });
-const optager = lavOptager({ lager, medier: browserMedier() });
+const medier = browserMedier();
+const optager = lavOptager({ lager, medier });
 
 const app = document.getElementById('app');
 const temaFarve = document.querySelector('meta[name="theme-color"]');
@@ -44,6 +47,8 @@ const t = {
   starter: false,
   loginStatus: null, // 'ja' | 'nej' | null (ukendt). Login-boksen vises kun ved 'nej'.
   fornyer: false, // under et stille skift til Microsoft kan Optag ikke trykkes
+  gemmerFil: false, // en valgt lydfil kontrolleres og gemmes på telefonen
+  upload: new Map(), // id → { sendt, ialt } i bytes, mens lyden sendes. Kun i hukommelsen.
 };
 
 let urTimer = null;
@@ -63,6 +68,8 @@ const IKONER = {
   tilbage: '<path d="M15 5l-7 7 7 7"/>',
   liste: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/>',
+  upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M5 15v4.5h14V15"/>',
+  fil: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 17.5v-4l5-1v4"/><circle cx="9" cy="17.5" r="1.3"/><circle cx="14" cy="16.5" r="1.3"/>',
 };
 
 function ikon(navn) {
@@ -111,7 +118,8 @@ function maerkbar() {
 async function opdater() {
   // Noter, der er ved at blive slettet, vises ikke. De kan stadig fortrydes.
   // Ændringer, der ikke kunne gemmes (fx fuldt lager), vises alligevel, så intet hænger i "sender".
-  t.noter = (await lager.alleNoter()).map(forloeb.medUgemt).filter((n) => !n.slettet);
+  // En lydfil, der stadig gemmes, vises heller ikke. Den er ikke hel endnu.
+  t.noter = (await lager.alleNoter()).map(forloeb.medUgemt).filter((n) => !n.slettet && !(n.kilde === 'fil' && n.status === STATUS.OPTAGER));
   // En afsendelse, der fejlede på login, betyder, at man ikke er logget ind. En mulig dobbelt mail tæller ikke:
   // den venter på brugerens eget valg.
   if (t.noter.some((n) => n.fejlType === 'login' && !n.maaskeSendt)) t.loginStatus = 'nej';
@@ -213,7 +221,112 @@ async function stop() {
   await optager.stop();
 }
 
+// Lydfil, brugeren allerede har. Ligger uden for #app, så den overlever, at skærmen tegnes,
+// mens telefonens filvælger er åben.
+const filVaelger = h('input', { type: 'file', id: 'lydfil', accept: ACCEPT, hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+filVaelger.addEventListener('change', () => {
+  const [fil] = filVaelger.files;
+  // Så samme fil kan vælges igen.
+  filVaelger.value = '';
+  if (fil) modtagFil(fil);
+});
+document.body.append(filVaelger);
+
+function vaelgFil() {
+  if (t.gemmerFil || t.starter || t.fornyer || optager.erAktiv()) return;
+  t.besked = null;
+  tegn();
+  filVaelger.click();
+}
+
+/**
+ * Kontrollerer filen og gemmer den på telefonen, før noget sendes. Derefter navneskærmen.
+ * Feltet udfyldes med navnet fra forsiden eller filnavnet uden endelse.
+ */
+async function modtagFil(fil) {
+  if (t.gemmerFil) return;
+  t.gemmerFil = true;
+  t.besked = null;
+  tegn();
+  try {
+    const kontrol = await kontrollerFil(fil);
+    if (!kontrol.ok) {
+      visFejl(kontrol.fejl);
+      return;
+    }
+    const titel = [...(t.valgtNavn.trim() || navnUdenEndelse(kontrol.filnavn).trim())].slice(0, 120).join('');
+    const id = await gemFil({ lager, fil, kontrol, titel, laas: medier.laas });
+    t.valgtNavn = '';
+    t.visning = 'navn';
+    t.navnNote = id;
+    t.navnUdkast = null;
+  } catch (e) {
+    visFejl(e?.type, 'filKanIkkeLaeses');
+  } finally {
+    t.gemmerFil = false;
+    await opdater().catch(() => tegn());
+  }
+}
+
+/** En lydfil fra del-menuen på Android, lagt af service workeren. Fjernes, når den er gemt eller afvist. */
+async function modtagDeltFil() {
+  const svar = new URLSearchParams(location.search).get('delt');
+  if (svar !== null) history.replaceState(null, '', location.pathname);
+  const fejl = { 0: 'ikkeLydfil', plads: 'pladsTom', fejl: 'filKanIkkeLaeses' }[svar];
+  let delt = null;
+  try {
+    delt = await hentDeltFil();
+  } catch { /* Uden Cache Storage er der intet delt. */ }
+  if (!delt) {
+    if (fejl) {
+      visFejl(fejl);
+      tegn();
+    }
+    return;
+  }
+  await modtagFil(delt.fil);
+  await delt.fjern().catch(() => {});
+}
+
+/**
+ * Hvor meget af lyden der er sendt. Første melding tegner skærmen. Derefter rettes kun tekst og linje,
+ * så spinneren ikke starter forfra ved hver melding.
+ */
+function visUpload(id, sendt, ialt) {
+  t.upload.set(id, { sendt, ialt });
+  if (t.visning !== 'fremdrift' || t.fremdriftNote !== id) return;
+  const felt = document.getElementById('upload');
+  const bar = felt?.querySelector('.bar');
+  if (!bar) {
+    tegn();
+    return;
+  }
+  const v = uploadVaerdier(t.upload.get(id));
+  felt.querySelector('.trin-titel').textContent = v.titel;
+  felt.querySelector('.trin-tekst').textContent = v.tekst;
+  bar.setAttribute('aria-valuenow', String(v.pct));
+  bar.firstChild.style.transform = `scaleX(${v.pct / 100})`;
+}
+
+function uploadVaerdier({ sendt, ialt }) {
+  const pct = Math.max(0, Math.min(100, Math.floor((sendt / ialt) * 100)));
+  return { pct, titel: `Sender lyden … ${pct} %`, tekst: `${formaterMB(sendt)} af ${formaterMB(ialt)} MB. Hold appen åben.` };
+}
+
+/** Trinnet "Sender lyden" med procent, MB og linje, når telefonen melder fremdrift. iPhone gør det ikke altid. */
+function uploadTrin(id) {
+  const u = t.upload.get(id);
+  if (!u) return trinPunkt('igang', 'Sender lyden …', null, { id: 'upload' });
+  const v = uploadVaerdier(u);
+  const fyld = h('i');
+  fyld.style.transform = `scaleX(${v.pct / 100})`;
+  const bar = h('div', { klasse: 'bar', role: 'progressbar', 'aria-label': 'Lyd sendt', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(v.pct) }, fyld);
+  // Procenten læses ikke op ved hver melding. Linjen har værdien.
+  return trinPunkt('igang', v.titel, v.tekst, { id: 'upload', 'aria-live': 'off' }, bar);
+}
+
 async function efterAfsendelse(id) {
+  t.upload.delete(id);
   if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   await opdater();
 }
@@ -221,6 +334,7 @@ async function efterAfsendelse(id) {
 /** Laver referatet, hvis det mangler, og mailer det. Bruges af Prøv igen og Send igen. */
 async function behandlOgSend(id) {
   t.igang.add(id);
+  t.upload.delete(id);
   t.besked = null;
   await opdater().catch(() => {});
   try {
@@ -238,6 +352,7 @@ async function navngivOgSend(id, titel) {
   t.navnUdkast = null;
   t.besked = null;
   t.igang.add(id);
+  t.upload.delete(id);
   await opdater().catch(() => {});
   try {
     await forloeb.navngivOgSend(id, titel);
@@ -549,7 +664,7 @@ function kortIndhold(note) {
     const kanFortsaette = note.status === STATUS.GEMT && note.afbrudt;
     return {
       klasse: 'kort', ikonNavn: 'ur', ikonKlasse: 'venter',
-      forklaring: note.afbrudt ? BESKEDER.afbrudt : 'Optagelsen er gemt.',
+      forklaring: note.afbrudt ? BESKEDER.afbrudt : note.kilde === 'fil' ? 'Lydfilen er gemt.' : 'Optagelsen er gemt.',
       handlinger: kanFortsaette ? [fortsaetKnap(note.id), send] : [send],
       laes: false,
     };
@@ -682,6 +797,16 @@ function loginBoks() {
   );
 }
 
+/** Under Optag: en lille vej til en lydfil, brugeren allerede har. Optag er stadig det vigtigste. */
+function uploadFelt() {
+  return h(
+    'div',
+    { klasse: 'upload-felt' },
+    h('p', { klasse: 'lille-spoerg' }, 'Har du allerede en lydfil?'),
+    h('button', { type: 'button', klasse: 'top-knap upload-knap', vedTryk: vaelgFil, disabled: t.starter || t.fornyer }, ikon('upload'), 'Upload lydfil'),
+  );
+}
+
 function skaermStart() {
   // Sendte noter venter ikke på noget. De ligger under Tidligere optagelser.
   const afventer = t.noter.filter((n) => n.id !== optager.aktivId() && n.status !== STATUS.SENDT);
@@ -702,8 +827,9 @@ function skaermStart() {
     h(
       'div',
       { klasse: 'scene' },
-      h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter || t.fornyer }, ikon('mikrofon'), 'Optag'),
+      h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter || t.fornyer || t.gemmerFil }, ikon('mikrofon'), 'Optag'),
       t.fornyer ? venter('Logger ind …') : null,
+      t.gemmerFil ? venter('Gemmer lydfilen …') : uploadFelt(),
     ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
     afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
@@ -713,15 +839,15 @@ function skaermStart() {
 
 // Skærmen efter Send: fire trin, der krydses af undervejs
 
-function trinPunkt(tilstand, titel, tekst) {
+function trinPunkt(tilstand, titel, tekst, egenskaber = {}, ekstra = null) {
   const tegnet = tilstand === 'faerdig' ? ikon('tjek')
     : tilstand === 'fejl' ? ikon('advarsel')
       : tilstand === 'igang' ? h('span', { klasse: 'spinner' }) : null;
   return h(
     'li',
-    { klasse: `trin-punkt ${tilstand}` },
+    { ...egenskaber, klasse: `trin-punkt ${tilstand}` },
     h('span', { klasse: 'trin-ikon', 'aria-hidden': 'true' }, tegnet),
-    h('div', {}, h('p', { klasse: 'trin-titel' }, titel), tekst ? h('p', { klasse: 'trin-tekst' }, tekst) : null),
+    h('div', {}, h('p', { klasse: 'trin-titel' }, titel), tekst ? h('p', { klasse: 'trin-tekst' }, tekst) : null, ekstra),
   );
 }
 
@@ -757,9 +883,9 @@ function skaermFremdrift() {
   const p = fase(note);
   const fejl = fremdriftFejl(note);
   const trin = [
-    trinPunkt('faerdig', 'Optagelsen er gemt', 'På telefonen'),
+    trinPunkt('faerdig', note.kilde === 'fil' ? 'Lydfilen er gemt' : 'Optagelsen er gemt', 'På telefonen'),
     fejl?.trin === 2 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
-      : trinPunkt(p > 1 ? 'faerdig' : 'igang', p > 1 ? 'Lyden er sendt' : 'Sender lyden …'),
+      : p > 1 ? trinPunkt('faerdig', 'Lyden er sendt') : uploadTrin(note.id),
     fejl?.trin === 3 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
       : p > 2 ? trinPunkt('faerdig', 'Referatet er lavet')
         : p === 2 && !fejl ? trinPunkt('igang', 'Referatet laves …', 'Det kan tage et par minutter.')
@@ -820,6 +946,10 @@ function skaermInformation() {
         h('li', {}, 'Giv optagelsen et navn, og tryk Send.'),
         h('li', {}, 'Du får et referat på mail med PDF. Det kan tage et par minutter.'),
       ),
+    ),
+    afsnit(
+      'Lydfil fra Diktafon',
+      h('p', {}, 'Åbn optagelsen i Diktafon → Del → Gem i Filer. Tryk derefter Upload lydfil i appen, og vælg filen. Du kan også vælge lydfiler fra OneDrive eller en mail, du har gemt i Filer.'),
     ),
     afsnit(
       'Vigtigt at vide',
@@ -912,10 +1042,13 @@ function skaermNavn() {
   });
   felt.value = t.navnUdkast ?? note.titel ?? '';
   felt.addEventListener('input', () => { t.navnUdkast = felt.value; });
+  const erFil = note.kilde === 'fil';
   const form = h(
     'form',
     { klasse: 'navn' },
-    note.status === STATUS.GEMT && note.afbrudt ? fortsaetKnap(note.id) : null,
+    erFil ? filKort(note) : null,
+    // En lydfil kan ikke fortsættes som en optagelse.
+    !erFil && note.status === STATUS.GEMT && note.afbrudt ? fortsaetKnap(note.id) : null,
     h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
     felt,
     h('p', { klasse: 'hjaelpetekst' }, 'Valgfrit. Er feltet tomt, finder appen selv på en titel. Appen finder også selv ud af, om det er et møde, et byggenotat, en påmindelse eller andet.'),
@@ -927,7 +1060,19 @@ function skaermNavn() {
     e.preventDefault();
     navngivOgSend(note.id, felt.value);
   });
-  return [h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
+  // En lydfil er gemt og venter under Afventer, hvis man går tilbage.
+  return [erFil ? topMedTilbage(tilForsiden) : h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
+}
+
+/** Filnavn, varighed og størrelse på den valgte lydfil. */
+function filKort(note) {
+  const meta = [formaterVarighed(note.varighedMs), Number.isFinite(note.bytes) ? `${formaterMB(note.bytes)} MB` : null].filter(Boolean).join(' · ');
+  return h(
+    'div',
+    { klasse: 'fil-kort' },
+    ikon('fil'),
+    h('div', {}, h('p', { klasse: 'fil-navn' }, note.filnavn || 'Lydfil'), meta ? h('p', { klasse: 'fil-meta' }, meta) : null),
+  );
 }
 
 function skaermTekst() {
@@ -1080,7 +1225,7 @@ const NYLIG_AFBRUDT_MS = 30 * 60 * 1000;
 
 /** Er appen i gang med noget, må den ikke skifte til Microsoft. */
 function nogetIGang() {
-  return t.visning !== 'start' || t.starter || optager.erAktiv() || t.igang.size > 0
+  return t.visning !== 'start' || t.starter || t.gemmerFil || optager.erAktiv() || t.igang.size > 0
     || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
 }
 
@@ -1129,6 +1274,7 @@ async function start() {
   // Beder telefonen om ikke at slette optagelserne. Afgøres af telefonen.
   navigator.storage?.persist?.().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  await modtagDeltFil().catch(() => {});
   await genoptagEfterLogin();
   await tjekLoginVedStart().catch(() => {});
 }

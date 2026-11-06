@@ -93,6 +93,23 @@ test('opretNote gemmer titel og ingen type – typen vælges af AI', async () =>
   await kontekst.close();
 });
 
+test('opretNote gemmer kilde og filnavn for en lydfil, men intet for en optagelse', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const [fil, optagelse] = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    return [
+      await l.hentNote(await l.opretNote({ mime: 'audio/mpeg', kilde: 'fil', filnavn: 'Møde.mp3' })),
+      await l.hentNote(await l.opretNote({ mime: 'audio/mp4' })),
+    ];
+  });
+  assert.equal(fil.kilde, 'fil');
+  assert.equal(fil.filnavn, 'Møde.mp3');
+  assert.equal('kilde' in optagelse, false);
+  assert.equal('filnavn' in optagelse, false);
+  await kontekst.close();
+});
+
 test('opretNote bruger et givet id, og gemStykke stempler noten som aktiv', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await side.goto(`${miljoe.adresse}/test/tom`);

@@ -19,7 +19,7 @@ function falskLager(noter = []) {
   };
 }
 
-function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat, vedAendring } = {}) {
+function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat, vedAendring, vedUpload } = {}) {
   const lager = falskLager(noter);
   const t = { lydKald: 0, mailKald: [], lydListe: [], referatKald: [] };
   const forloeb = lavForloeb({
@@ -27,6 +27,7 @@ function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', op
     nu,
     aktivAndetSted,
     vedAendring,
+    vedUpload,
     login: {
       hentBevis: hentBevis || (async (o) => `bevis-${o}`),
       brugerMail: () => 'a@ollgaard.dk',
@@ -854,4 +855,63 @@ test('medUgemt ændrer ikke noter uden ugemte ændringer', async () => {
   const n = await s.lager.hentNote('a');
   assert.equal(s.forloeb.medUgemt(n), n);
   assert.equal(s.forloeb.medUgemt(null), null);
+});
+
+// Lydfiler, brugeren har valgt
+
+const FIL = { id: 'f', status: STATUS.GEMT, kilde: 'fil', filnavn: 'Møde.mp3', mime: 'audio/mpeg', bytes: 3, varighedMs: 47 * 60 * 1000, titel: 'Møde', oprettet: 1 };
+
+test('en gemt lydfil sendes som en optagelse, med format og varighed, og lyden slettes først ved 202', async () => {
+  const s = opsaet({ noter: [FIL], sendLyd: async () => REFERAT_SVAR });
+  await s.forloeb.navngivOgSend('f', 'Møde');
+  const [lyd, mime, , meta] = s.t.lydArgs;
+  assert.equal(mime, 'audio/mpeg');
+  assert.equal(meta.varighedMs, 47 * 60 * 1000);
+  assert.ok(lyd);
+  assert.equal(s.lager.kort.get('f').status, STATUS.SENDT);
+  assert.equal(s.lager.lydSlettet.has('f'), true);
+});
+
+test('en lydfil, der fejler på nettet, beholder lyden og kan prøves igen', async () => {
+  let gang = 0;
+  const s = opsaet({ noter: [FIL], sendLyd: async () => { if (gang++ === 0) throw Object.assign(new Error('net'), { type: 'net' }); return REFERAT_SVAR; } });
+  await s.forloeb.navngivOgSend('f', 'Møde');
+  assert.equal(s.lager.kort.get('f').status, STATUS.FEJL);
+  assert.equal(s.lager.kort.get('f').fejlType, 'net');
+  assert.equal(s.lager.lydSlettet.has('f'), false);
+  await s.forloeb.behandlOgSend('f');
+  assert.equal(s.lager.kort.get('f').status, STATUS.SENDT);
+  assert.equal(s.t.lydKald, 2);
+});
+
+test('fremdriften under upload gives til appen med sendte og samlede bytes og gemmes ikke', async () => {
+  const meldt = [];
+  const s = opsaet({
+    noter: [FIL],
+    sendLyd: async (lyd, mime, bevis, meta, hent, valg) => { valg.vedFremdrift(10, 40); valg.vedFremdrift(40, 40); valg.vedSendt(); return REFERAT_SVAR; },
+    vedUpload: (...a) => meldt.push(a),
+  });
+  const opdater = s.lager.opdaterNote;
+  const felter = [];
+  s.lager.opdaterNote = async (id, f) => { felter.push(...Object.keys(f)); return opdater(id, f); };
+  await s.forloeb.behandl('f');
+  assert.deepEqual(meldt, [['f', 10, 40], ['f', 40, 40]]);
+  assert.ok(!felter.some((k) => /upload|sendtBytes/i.test(k)), felter.join());
+});
+
+test('en lydfil, der ikke er færdig med at blive gemt, sendes aldrig', async () => {
+  const s = opsaet({ noter: [{ ...FIL, status: STATUS.OPTAGER, sidstAktiv: NU - 600000 }], nu: () => NU, aktivAndetSted: async () => false });
+  await s.forloeb.behandlOgSend('f');
+  assert.equal(s.t.lydKald, 0);
+  assert.equal(s.lager.kort.get('f').status, STATUS.OPTAGER);
+});
+
+test('genstart fjerner en halvt gemt lydfil, men ikke én, der stadig gemmes i en anden fane', async () => {
+  const halv = { ...FIL, status: STATUS.OPTAGER, sidstAktiv: NU - 600000 };
+  const s = opsaet({ noter: [halv], nu: () => NU });
+  assert.deepEqual(await s.forloeb.genoptag(new Set()), []);
+  assert.equal(s.lager.kort.has('f'), false);
+  const s2 = opsaet({ noter: [halv], nu: () => NU });
+  assert.deepEqual(await s2.forloeb.genoptag(new Set(['f'])), []);
+  assert.equal(s2.lager.kort.has('f'), true);
 });

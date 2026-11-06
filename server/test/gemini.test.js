@@ -963,7 +963,8 @@ test('Flash blokeret (content_blocked): Transcribe tager over med samme fil, nå
 
 test('Flash overbelastet efter genforsøg: Transcribe tager over, når optagelsen er kort', async () => {
   const { hent, kald } = falskHent({ interaktion: perModel({ flash: raekke(503) }) });
-  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 60 }));
+  // Fuld tidsgrænse som på Cloud Run: skiftet kræver mindst 60 s tilbage.
+  const svar = await lav(hent, { foerst: 'flash', timeoutMs: 840000 }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 60 }));
   assert.equal(svar.tekst, 'Hej');
   assert.equal(modelIKald(kald).at(-1), 'gemini-3.5-transcribe');
 });

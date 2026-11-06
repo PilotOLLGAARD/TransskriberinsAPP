@@ -20,6 +20,7 @@ const FILER = [
   'js/beskeder.js',
   'js/forloeb.js',
   'js/konfig.js',
+  'js/lydfil.js',
   'js/lager.js',
   'js/login.js',
   'js/mail.js',
@@ -29,6 +30,11 @@ const FILER = [
   'js/typer.js',
   'js/vendor/msal-browser.min.js',
 ];
+
+// En lydfil fra del-menuen på Android ligger her, til appen har gemt den i sit eget lager.
+// Navnene går igen i js/lydfil.js. Cachen ryddes ikke ved en ny udgave.
+const DELT_CACHE = 'delt-lydfil';
+const DELT_NOEGLE = 'delt-fil';
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
@@ -41,7 +47,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     for (const navn of await caches.keys()) {
-      if (navn !== VERSION) await caches.delete(navn);
+      if (navn !== VERSION && navn !== DELT_CACHE) await caches.delete(navn);
     }
     await self.clients.claim();
   })());
@@ -57,11 +63,37 @@ self.addEventListener('notificationclick', (e) => {
   })());
 });
 
+/**
+ * Del-menuen (Web Share Target, kun Android): Filen lægges midlertidigt, og appen åbnes med ?delt=1.
+ * Appen kontrollerer og gemmer den som en valgt lydfil og fjerner derefter den midlertidige kopi.
+ * Går noget galt, åbnes appen alligevel med en besked i stedet for en fejlside.
+ */
+async function modtagDelt(request) {
+  const tilAppen = (svar) => Response.redirect(new URL(`./?delt=${svar}`, self.registration.scope).href, 303);
+  try {
+    const data = await request.formData();
+    const fil = data.getAll('lyd').find((f) => typeof f === 'object' && f !== null && f.size > 0);
+    if (!fil) return tilAppen('0');
+    const cache = await caches.open(DELT_CACHE);
+    await cache.put(new URL(DELT_NOEGLE, self.registration.scope).href, new Response(fil, {
+      headers: { 'content-type': fil.type || 'application/octet-stream', 'x-filnavn': encodeURIComponent(fil.name || '') },
+    }));
+    return tilAppen('1');
+  } catch (e) {
+    return tilAppen(e?.name === 'QuotaExceededError' ? 'plads' : 'fejl');
+  }
+}
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.origin !== location.origin) return;
   const omfang = new URL(self.registration.scope).pathname;
   const sti = url.pathname.slice(omfang.length);
+  if (e.request.method === 'POST' && sti === 'del') {
+    e.respondWith(modtagDelt(e.request));
+    return;
+  }
+  if (e.request.method !== 'GET') return;
   // Kun appens forside gives ved sideskift. Andre sider på samme adresse hentes fra nettet.
   const navigering = e.request.mode === 'navigate';
   if (navigering ? sti !== '' && sti !== 'index.html' : !FILER.includes(sti)) return;

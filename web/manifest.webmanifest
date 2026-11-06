@@ -9,6 +9,19 @@
   "orientation": "portrait",
   "background_color": "#f3f5f8",
   "theme_color": "#f3f5f8",
+  "share_target": {
+    "action": "./del",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "lyd",
+          "accept": ["audio/*", ".m4a", ".mp3", ".wav", ".webm", ".ogg", ".oga", ".aac", ".flac"]
+        }
+      ]
+    }
+  },
   "icons": [
     {
       "src": "icon-192.png",

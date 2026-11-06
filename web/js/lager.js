@@ -55,9 +55,11 @@ function alleStykkerInterval(id) {
   return IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]);
 }
 
-export async function opretNote({ id = crypto.randomUUID(), mime, titel = '' }) {
+export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', kilde, filnavn }) {
   // Ingen type: AI'en vælger den, og svaret gemmer den på noten.
   const note = { id, mime, titel, status: STATUS.OPTAGER, oprettet: Date.now() };
+  // En lydfil, brugeren har valgt, i stedet for en optagelse.
+  if (kilde === 'fil') Object.assign(note, { kilde, filnavn: String(filnavn ?? '') });
   await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
   return id;
 }

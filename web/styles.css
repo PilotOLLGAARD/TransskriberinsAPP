@@ -168,10 +168,19 @@ button svg { width: 26px; height: 26px; }
 .optag:active { transform: scale(0.96); }
 /* Optag midt på den ledige plads. På små skærme (iPhone SE) lidt mindre, så forsiden kan ses uden at rulle. */
 .scene { flex: 1; justify-content: center; }
+/* Under Optag: lille vej til en lydfil, brugeren allerede har. Samme pilleknap som Information. */
+.upload-felt { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 4px; }
+.upload-felt .lille-spoerg { color: var(--graa); font-size: 18px; }
+.upload-knap { padding: 8px 18px 8px 14px; }
+/* Den skjulte filvælger får samme skrift som resten, hvis telefonen viser den. */
+input[type="file"] { font: inherit; }
+
 @media (max-height: 700px) {
-  .optag { width: 168px; height: 168px; min-height: 168px; }
+  .optag { width: 152px; height: 152px; min-height: 152px; }
   .titel { margin-top: 12px; }
-  .scene { padding-top: 16px; }
+  .scene { gap: 10px; padding-top: 10px; padding-bottom: 4px; }
+  .upload-felt { gap: 2px; }
+  .start-navn { margin-top: 12px; }
 }
 
 /* Kort om appen og vej til Information øverst på forsiden. */
@@ -404,7 +413,7 @@ button svg { width: 26px; height: 26px; }
   .prik { animation: none; }
   button { transition: none; }
   button:active { transform: none; }
-  .kort, .besked, .optager { transition: none; }
+  .kort, .besked, .optager, .bar > i { transition: none; }
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -442,6 +451,26 @@ button svg { width: 26px; height: 26px; }
 .navnefelt:focus { outline: 3px solid rgba(45, 137, 229, 0.35); outline-offset: 2px; }
 .navnefelt::placeholder { color: var(--graa); }
 .navn .hjaelpetekst { color: var(--graa); font-size: 18px; }
+
+/* Den valgte lydfil på navneskærmen */
+.fil-kort {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--kort);
+  box-shadow: inset 0 0 0 1.5px var(--linje);
+}
+.fil-kort > div { min-width: 0; }
+.fil-kort svg { width: 30px; height: 30px; color: var(--blaa-dyb); }
+.fil-navn { font-weight: 650; overflow-wrap: anywhere; }
+.fil-meta { color: var(--graa); font-size: 18px; }
+
+/* Fremdrift, mens lyden sendes. Kun transform, så linjen ikke giver ny opsætning af siden. */
+.bar { height: 8px; margin-top: 10px; border-radius: 999px; background: var(--blaa-tone); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--blaa-dyb); border-radius: inherit; transform-origin: left center; transform: scaleX(0); transition: transform 200ms linear; }
 
 .tekst p { margin: 0 0 12px; font-size: 20px; }
 .tekst ul { margin: 0; padding-left: 22px; }

@@ -52,10 +52,11 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
 }
 
 /**
- * Som fetch, men med XMLHttpRequest, som kan melde, når hele lyden er sendt (vedSendt).
+ * Som fetch, men med XMLHttpRequest, som kan melde, når hele lyden er sendt (vedSendt),
+ * og hvor meget der er sendt undervejs (vedFremdrift(sendt, ialt) i bytes).
  * fetch kan ikke vise fremdrift for upload i alle browsere.
  */
-export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt, stilleMs = STILLE_MS }, Xhr = globalThis.XMLHttpRequest) {
+export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt, vedFremdrift, stilleMs = STILLE_MS }, Xhr = globalThis.XMLHttpRequest) {
   if (typeof Xhr !== 'function') return fetch(url, { method, headers, body, signal });
   return new Promise((ok, fejl) => {
     const x = new Xhr();
@@ -79,6 +80,10 @@ export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt,
     for (const [navn, vaerdi] of Object.entries(headers)) x.setRequestHeader(navn, vaerdi);
     x.upload.addEventListener('load', meldSendt);
     x.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        // Kun til visning. En fejl her må aldrig stoppe afsendelsen.
+        try { vedFremdrift?.(e.loaded, e.total); } catch { /* ignoreres */ }
+      }
       if (e.lengthComputable && e.loaded >= e.total) {
         meldSendt();
         return;
@@ -105,10 +110,10 @@ export function hentMedFremdrift(url, { method, headers, body, signal, vedSendt,
 
 /**
  * Sender originallyden. Svaret er { tekst } og, når der var tale, også titel, referat, pdf og filnavn.
- * vedSendt kaldes, når hele lyden er sendt. signal afbryder (fx når brugeren sletter optagelsen).
+ * vedSendt kaldes, når hele lyden er sendt, og vedFremdrift(sendt, ialt) undervejs. signal afbryder (fx når brugeren sletter optagelsen).
  * Kaster SendFejl med typen, appen skal vise.
  */
-export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdrift, { vedSendt, signal } = {}) {
+export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdrift, { vedSendt, vedFremdrift, signal } = {}) {
   const signaler = [AbortSignal.timeout(TIDSGRAENSE_MS), ...(signal ? [signal] : [])];
   let svar;
   try {
@@ -118,6 +123,7 @@ export async function sendLyd(lyd, mime, bevis, meta = {}, hent = hentMedFremdri
       body: lyd,
       signal: kombinerSignaler(signaler),
       vedSendt,
+      vedFremdrift,
     });
   } catch {
     throw new SendFejl('net');

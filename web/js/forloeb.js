@@ -5,6 +5,11 @@ const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.
 // En optagelse, der har gemt lyd for nylig, kan stadig køre i en anden fane.
 const FRISK_MS = 30 * 1000;
 
+/** En valgt lydfil, der stadig gemmes, eller som ikke blev gemt færdig. */
+function erHalvFil(note) {
+  return note.kilde === 'fil' && note.status === STATUS.OPTAGER;
+}
+
 /** Fuldt lager hedder plads, så brugeren får at vide, hvad der skal til. */
 function fejlTypeFor(e, reserve) {
   return e?.name === 'QuotaExceededError' ? 'plads' : (e?.type || reserve);
@@ -14,7 +19,7 @@ function fejlTypeFor(e, reserve) {
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
  */
-export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {} }) {
+export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {}, vedUpload = () => {} }) {
   const igang = new Set();
   // Afsendelser, der kan stoppes, når brugeren sletter noten.
   const afbrydere = new Map();
@@ -123,6 +128,8 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
       try {
       const note = await lager.hentNote(id);
       if (!note || note.slettet || signal.aborted || !KAN_BEHANDLES.has(note.status)) return;
+      // En lydfil, der ikke blev gemt færdig, er ikke hele filen. Den sendes aldrig.
+      if (erHalvFil(note)) return;
       if (note.status === STATUS.OPTAGER) {
         const andetSted = await aktivAndetSted(id).catch(() => null);
         if (andetSted === true || (andetSted !== false && maaskeIGang(note, null))) return;
@@ -137,7 +144,12 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
           ? await behandlDele(id, note, bevis, signal)
           : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
             titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
-          }, undefined, { vedSendt: () => fremdrift(id, 'laver'), signal });
+          }, undefined, {
+            vedSendt: () => fremdrift(id, 'laver'),
+            // Kun til skærmen. Gemmes ikke.
+            vedFremdrift: (sendt, ialt) => vedUpload(id, sendt, ialt),
+            signal,
+          });
         if (!svar.tekst) {
           await lager.opdaterNote(id, { status: STATUS.FEJL, fejlType: 'ingenTale' });
           return;
@@ -265,6 +277,11 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         if (note.slettet) continue;
         // En optagelse, der stadig kører i en anden fane eller i den installerede app, er ikke vores.
         if (maaskeIGang(note, aktive)) continue;
+        // En lydfil, der ikke blev gemt færdig: Filen ligger stadig, hvor brugeren valgte den.
+        if (erHalvFil(note)) {
+          await lager.sletNote(note.id).catch(() => {});
+          continue;
+        }
         try {
           // Lukket før første stykke blev gemt: Der er intet at gemme.
           if (note.status === STATUS.OPTAGER && (await lager.hentLyd(note.id)).size === 0) {
