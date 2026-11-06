@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const { lavGemini, GeminiFejl, hentUdenGraense } = require('../src/gemini.js');
+const { lavGemini, GeminiFejl, hentUdenGraense, geminiMime } = require('../src/gemini.js');
 
 const NOEGLE = 'hemmelig-testnoegle';
 const FIL = { name: 'files/abc', uri: 'https://generativelanguage.googleapis.com/v1beta/files/abc' };
@@ -41,6 +41,8 @@ function lav(hent, ekstra = {}) {
   return lavGemini({
     noegle: NOEGLE,
     model: 'gemini-3.5-transcribe',
+    flashModel: 'gemini-3.8-flash',
+    transcribeMaksSek: 400,
     sprog: 'da-DK',
     tilstand: 'smart',
     ordliste: ['ØLLGAARD', 'lægte'],
@@ -54,7 +56,9 @@ function lav(hent, ekstra = {}) {
 }
 
 const lyd = () => Readable.from([Buffer.from('lyd')]);
-const valg = (mime = 'audio/mp4') => ({ bytes: 3, mime, signal: new AbortController().signal });
+const valg = (mime = 'audio/mp4', ekstra = {}) => ({ bytes: 3, mime, signal: new AbortController().signal, ...ekstra });
+// Over grænsen for Transcribe: går direkte til Flash.
+const langLyd = () => valg('audio/mp4', { varighedSek: 401 });
 
 function interaktionsKrop(kald) {
   return JSON.parse(kald.find((k) => k.url.endsWith('/v1beta/interactions')).krop);
@@ -451,8 +455,8 @@ function maaltVent() {
 
 const antal = (kald, slut) => kald.filter((k) => k.url.endsWith(slut)).length;
 
-test('transskriptionen genforsøges ved 429, 503 og 500 med 2, 4 og 8 s', async () => {
-  const { hent, kald } = falskHent({ interaktion: raekke(429, 503, 500, 200) });
+test('transskriptionen genforsøges ved 503, 500 og 502 med 2, 4 og 8 s', async () => {
+  const { hent, kald } = falskHent({ interaktion: raekke(503, 500, 502, 200) });
   const v = maaltVent();
   const svar = await lav(hent, { vent: v.vent }).transskriber(lyd(), valg());
   assert.equal(svar.tekst, 'Hej');
@@ -477,7 +481,7 @@ test('ventetiden spredes tilfældigt omkring 2, 4 og 8 s', async () => {
 test('opgiver efter 3 genforsøg og giver tjeneste med status og sted', async () => {
   const { hent, kald } = falskHent({ interaktion: raekke(503) });
   const v = maaltVent();
-  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), valg()), (e) => {
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), langLyd()), (e) => {
     assert.equal(e.kode, 'tjeneste');
     assert.equal(e.status, 503);
     assert.equal(e.hvor, 'interactions');
@@ -489,7 +493,7 @@ test('opgiver efter 3 genforsøg og giver tjeneste med status og sted', async ()
 });
 
 test('Retry-After i sekunder respekteres', async () => {
-  const { hent } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '7' }), 200) });
+  const { hent } = falskHent({ interaktion: raekke(() => json(503, {}, { 'retry-after': '7' }), 200) });
   const v = maaltVent();
   await lav(hent, { vent: v.vent, timeoutMs: 60000 }).transskriber(lyd(), valg());
   assert.deepEqual(v.ventet, [7000]);
@@ -505,7 +509,7 @@ test('Retry-After som dato respekteres', async () => {
 });
 
 test('en kortere Retry-After end den stigende ventetid giver den stigende ventetid', async () => {
-  const { hent } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '1' }), 200) });
+  const { hent } = falskHent({ interaktion: raekke(() => json(503, {}, { 'retry-after': '1' }), 200) });
   const v = maaltVent();
   await lav(hent, { vent: v.vent }).transskriber(lyd(), valg());
   assert.deepEqual(v.ventet, [2000]);
@@ -538,7 +542,7 @@ test('genforsøg holder sig inden for den samlede tidsgrænse', async () => {
 test('en Retry-After ud over tidsgrænsen giver straks fejl', async () => {
   const { hent, kald } = falskHent({ interaktion: raekke(() => json(429, {}, { 'retry-after': '900' }), 200) });
   const v = maaltVent();
-  await assert.rejects(lav(hent, { vent: v.vent, timeoutMs: 840000 }).transskriber(lyd(), valg()), (e) => e.status === 429);
+  await assert.rejects(lav(hent, { vent: v.vent, timeoutMs: 840000 }).transskriber(lyd(), langLyd()), (e) => e.status === 429);
   assert.deepEqual(v.ventet, []);
   assert.equal(antal(kald, '/v1beta/interactions'), 1);
 });
@@ -609,10 +613,11 @@ test('venten afbrydes, når klienten går, og hænger aldrig', async () => {
 });
 
 test('genforsøg logges kun med koder og tal', async () => {
-  const { hent } = falskHent({ interaktion: raekke(429, 200) });
+  const { hent } = falskHent({ interaktion: raekke(503, 200) });
   const logs = [];
   await lav(hent, { log: (o) => logs.push(o) }).transskriber(lyd(), valg());
-  assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 429, forsoeg: 1, ventMs: 2000 }]);
+  assert.deepEqual(logs.filter((o) => o.haendelse === 'gemini-genforsoeg'),
+    [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 503, forsoeg: 1, ventMs: 2000 }]);
 });
 
 test('hentUdenGraense giver svarets headere, så Retry-After kan læses', async () => {
@@ -686,19 +691,19 @@ test('retryDelay i Googles fejlsvar respekteres', async () => {
   const { hent } = falskHent({ interaktion: raekke(() => json(429, KVOTE), 200) });
   const v = maaltVent();
   const logs = [];
-  await lav(hent, { vent: v.vent, log: (o) => logs.push(o) }).transskriber(lyd(), valg());
+  await lav(hent, { vent: v.vent, log: (o) => logs.push(o) }).transskriber(lyd(), langLyd());
   assert.deepEqual(v.ventet, [37000]);
-  assert.deepEqual(logs, [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 429, googleKode: 'RESOURCE_EXHAUSTED', forsoeg: 1, ventMs: 37000 }]);
+  assert.deepEqual(logs.filter((o) => o.haendelse === 'gemini-genforsoeg'), [{ haendelse: 'gemini-genforsoeg', hvor: 'interactions', status: 429, googleKode: 'RESOURCE_EXHAUSTED', forsoeg: 1, ventMs: 37000 }]);
 });
 
-test('mange kald, der rammer en minutgrænse, venter grænsen ud i stedet for at fejle', async () => {
+test('mange kald, der rammer Flashs minutgrænse, venter grænsen ud i stedet for at fejle', async () => {
   // Som testbænken: Google svarer 429 i et minut og derefter igen normalt.
   let tid = Date.UTC(2026, 10, 3, 12);
   const aabner = tid + 60000;
   const { hent } = falskHent({ interaktion: () => (tid < aabner ? json(429, KVOTE) : json(200, SVAR_OK)) });
   const vent = async (ms) => { tid += ms; };
   const g = lav(hent, { vent, nu: () => tid, timeoutMs: 840000 });
-  for (let i = 0; i < 5; i++) assert.equal((await g.transskriber(lyd(), valg())).tekst, 'Hej');
+  for (let i = 0; i < 5; i++) assert.equal((await g.transskriber(lyd(), langLyd())).tekst, 'Hej');
 });
 
 // Googles dagsgrænse (Tier 1: 100 transskriptioner om dagen), som testbænken ramte 4. nov. 2026.
@@ -712,7 +717,7 @@ const DAGSGRAENSE = {
 test('dagsgrænsen hos Google genforsøges ikke og giver kvote med Googles kode', async () => {
   const { hent, kald } = falskHent({ interaktion: () => json(429, DAGSGRAENSE) });
   const v = maaltVent();
-  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), valg()), (e) => {
+  await assert.rejects(lav(hent, { vent: v.vent }).transskriber(lyd(), langLyd()), (e) => {
     assert.equal(e.kode, 'kvote');
     assert.equal(e.status, 429);
     assert.equal(e.googleKode, 'too_many_requests');
@@ -746,12 +751,189 @@ test('en lang transskription, der fejler med 503, genforsøges ikke uden tid nok
 test('dagsgrænsen genkendes også uden teksten "per day": lang ventetid eller quotaId PerDay', async () => {
   const lang = { error: { code: 'too_many_requests', message: 'Limit reached. Please retry in 18h17m.' } };
   const a = falskHent({ interaktion: () => json(429, lang) });
-  await assert.rejects(lav(a.hent, { vent: async () => {} }).transskriber(lyd(), valg()), (e) => e.kode === 'kvote');
+  await assert.rejects(lav(a.hent, { vent: async () => {} }).transskriber(lyd(), langLyd()), (e) => e.kode === 'kvote');
   const quota = { error: { status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel' }] }] } };
   const b = falskHent({ interaktion: () => json(429, quota) });
-  await assert.rejects(lav(b.hent, { vent: async () => {} }).transskriber(lyd(), valg()), (e) => e.kode === 'kvote');
+  await assert.rejects(lav(b.hent, { vent: async () => {} }).transskriber(lyd(), langLyd()), (e) => e.kode === 'kvote');
   // En minutgrænse er ikke en dagsgrænse.
   const minut = { error: { status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }] } };
   const c = falskHent({ interaktion: raekke(() => json(429, minut), 200) });
-  assert.equal((await lav(c.hent, { vent: async () => {} }).transskriber(lyd(), valg())).tekst, 'Hej');
+  assert.equal((await lav(c.hent, { vent: async () => {} }).transskriber(lyd(), langLyd())).tekst, 'Hej');
+});
+
+// Modelvalg: Transcribe til korte optagelser, Flash til lange og som reserve (Tier 1-grænserne).
+
+const interaktionsKroppe = (kald) => kald.filter((k) => k.url.endsWith('/v1beta/interactions')).map((k) => JSON.parse(k.krop));
+const modelIKald = (kald) => interaktionsKroppe(kald).map((k) => k.model);
+
+/** Falsk Google, der svarer forskelligt efter model. */
+function perModel({ transcribe = raekke(200), flash = raekke(200) }) {
+  return (v) => (JSON.parse(v.body).model === 'gemini-3.8-flash' ? flash(v) : transcribe(v));
+}
+
+test('kort eller ukendt varighed bruger Transcribe', async () => {
+  for (const varighedSek of [undefined, null, 0, 120, 400]) {
+    const { hent, kald } = falskHent();
+    await lav(hent).transskriber(lyd(), valg('audio/mp4', { varighedSek }));
+    assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe'], String(varighedSek));
+  }
+});
+
+test('lyd over grænsen går direkte til Flash med den uploadede fil', async () => {
+  const { hent, kald } = falskHent();
+  const logs = [];
+  const svar = await lav(hent, { log: (o) => logs.push(o) }).transskriber(lyd(), langLyd());
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+  const krop = interaktionsKrop(kald);
+  assert.deepEqual(krop.input[0], { type: 'audio', uri: `https://generativelanguage.googleapis.com/v1beta/${startNavn(kald)}`, mime_type: 'audio/m4a' });
+  assert.equal(krop.input[1].type, 'text');
+  assert.deepEqual(krop.generation_config, { thinking_level: 'low' });
+  assert.equal(krop.store, false);
+  assert.deepEqual(logs, [
+    { haendelse: 'gemini-kald', model: 'flash' },
+    { haendelse: 'model-skift', grund: 'laengde', fra: 'transcribe', til: 'flash' },
+  ]);
+  assert.equal(kald.filter((k) => k.metode === 'DELETE').length, 1);
+});
+
+test('grænsen for Transcribe kan ændres', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent, { transcribeMaksSek: 1200 }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 900 }));
+  assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe']);
+});
+
+test('Flash-modellen kommer fra indstillingen', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent, { flashModel: 'gemini-x-flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 3000 }));
+  assert.deepEqual(modelIKald(kald), ['gemini-x-flash']);
+});
+
+test('Flash-prompten er fast, dansk og har ordlisten med', async () => {
+  const a = falskHent();
+  await lav(a.hent).transskriber(lyd(), langLyd());
+  const tekst = interaktionsKrop(a.kald).input[1].text;
+  assert.match(tekst, /^Transskriber lyden ordret på dansk\./);
+  assert.match(tekst, /"\[uklart\]"/);
+  assert.match(tekst, /Opfind aldrig noget\./);
+  assert.match(tekst, /Fagord, der kan forekomme: ØLLGAARD, lægte\.$/);
+  const b = falskHent();
+  await lav(b.hent, { ordliste: [] }).transskriber(lyd(), langLyd());
+  assert.ok(!interaktionsKrop(b.kald).input[1].text.includes('Fagord'));
+});
+
+test('gemini-kald logges med kort modelnavn', async () => {
+  const { hent } = falskHent();
+  const logs = [];
+  await lav(hent, { log: (o) => logs.push(o) }).transskriber(lyd(), valg());
+  assert.deepEqual(logs, [{ haendelse: 'gemini-kald', model: 'transcribe' }]);
+});
+
+for (const [navn, krop] of [['minutgrænse', KVOTE], ['dagsgrænse', DAGSGRAENSE]]) {
+  test(`Transcribes ${navn} giver straks Flash med samme fil, uden venten og ny upload`, async () => {
+    const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => json(429, krop) }) });
+    const v = maaltVent();
+    const logs = [];
+    const svar = await lav(hent, { vent: v.vent, log: (o) => logs.push(o) }).transskriber(lyd(), valg());
+    assert.equal(svar.tekst, 'Hej');
+    assert.deepEqual(v.ventet, []);
+    assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe', 'gemini-3.8-flash']);
+    assert.equal(antal(kald, '/upload/v1beta/files'), 1);
+    const [t, f] = interaktionsKroppe(kald);
+    assert.equal(f.input[0].uri, t.input[0].uri);
+    assert.equal(f.input[0].mime_type, t.input[0].mime_type);
+    assert.deepEqual(logs, [
+      { haendelse: 'gemini-kald', model: 'transcribe' },
+      { haendelse: 'model-skift', grund: '429', fra: 'transcribe', til: 'flash' },
+    ]);
+    assert.equal(kald.filter((k) => k.metode === 'DELETE').length, 1);
+  });
+}
+
+test('Flash som reserve har de normale genforsøg', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => json(429, {}), flash: raekke(503, 200) }) });
+  const v = maaltVent();
+  assert.equal((await lav(hent, { vent: v.vent }).transskriber(lyd(), valg())).tekst, 'Hej');
+  assert.deepEqual(v.ventet, [2000]);
+  assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe', 'gemini-3.8-flash', 'gemini-3.8-flash']);
+});
+
+test('Flash med dagsgrænse efter Transcribe 429 giver kvote', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => json(429, KVOTE), flash: () => json(429, DAGSGRAENSE) }) });
+  await assert.rejects(lav(hent).transskriber(lyd(), valg()), (e) => e.kode === 'kvote' && e.status === 429);
+  assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe', 'gemini-3.8-flash']);
+});
+
+test('Transcribe 5xx efter genforsøg: Flash prøves, når der er tid nok', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => json(503, {}) }) });
+  const logs = [];
+  assert.equal((await lav(hent, { log: (o) => logs.push(o), timeoutMs: 840000 }).transskriber(lyd(), valg())).tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), [...Array(4).fill('gemini-3.5-transcribe'), 'gemini-3.8-flash']);
+  assert.ok(logs.some((o) => o.haendelse === 'model-skift' && o.grund === '5xx' && o.fra === 'transcribe' && o.til === 'flash'));
+  assert.equal(antal(kald, '/upload/v1beta/files'), 1);
+});
+
+test('Transcribe 5xx: Flash kun med tid nok tilbage', async () => {
+  // [varighed pr. forsøg, samlet frist, forventede modeller]
+  const tilfaelde = [
+    // 4 forsøg à 25 s + 14 s venten = 114 s brugt, 726 s tilbage: Flash.
+    [25000, 840000, [...Array(4).fill('gemini-3.5-transcribe'), 'gemini-3.8-flash']],
+    // 14 s brugt, men kun 56 s tilbage: under et minut, ingen Flash.
+    [0, 70000, Array(4).fill('gemini-3.5-transcribe')],
+    // Ét forsøg på 500 s, 340 s tilbage: Flash kunne tage lige så lang tid, ingen Flash.
+    [500000, 840000, ['gemini-3.5-transcribe']],
+  ];
+  for (const [forsoegMs, timeoutMs, forventet] of tilfaelde) {
+    let tid = Date.UTC(2026, 10, 3, 12);
+    const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => { tid += forsoegMs; return json(503, {}); } }) });
+    await lav(hent, { vent: async (ms) => { tid += ms; }, nu: () => tid, timeoutMs }).transskriber(lyd(), valg()).catch(() => {});
+    assert.deepEqual(modelIKald(kald), forventet, `${forsoegMs} ${timeoutMs}`);
+  }
+});
+
+for (const [status, kode] of [[400, 'format'], [401, 'noegle'], [403, 'noegle']]) {
+  test(`Transcribe ${status} skifter ikke til Flash`, async () => {
+    const { hent, kald } = falskHent({ interaktion: perModel({ transcribe: () => json(status, {}) }) });
+    await assert.rejects(lav(hent).transskriber(lyd(), valg()), (e) => e.kode === kode);
+    assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe']);
+  });
+}
+
+test('et ufuldstændigt svar eller en netværksfejl fra Transcribe skifter ikke til Flash', async () => {
+  const a = falskHent({ interaktion: perModel({ transcribe: () => json(200, { status: 'incomplete' }) }) });
+  await assert.rejects(lav(a.hent).transskriber(lyd(), valg()), GeminiFejl);
+  assert.deepEqual(modelIKald(a.kald), ['gemini-3.5-transcribe']);
+  const b = falskHent({ interaktion: perModel({ transcribe: () => { throw new TypeError('fetch failed'); } }) });
+  await assert.rejects(lav(b.hent).transskriber(lyd(), valg()), GeminiFejl);
+  assert.ok(!modelIKald(b.kald).includes('gemini-3.8-flash'));
+});
+
+test('Flash bruger også kaldet uden svartidsgrænse', async () => {
+  const { hent, kald } = falskHent();
+  const langsomme = [];
+  const hentLangsom = async (url, v) => { langsomme.push(JSON.parse(v.body).model); return json(200, SVAR_OK); };
+  await lav(hent, { hentLangsom }).transskriber(lyd(), langLyd());
+  assert.deepEqual(langsomme, ['gemini-3.8-flash']);
+  assert.ok(!kald.some((k) => k.url.endsWith('/v1beta/interactions')));
+});
+
+// Uploadede lydfiler: typer, Google kender. Lyden sendes uændret.
+
+test('geminiMime oversætter alle godkendte formater', () => {
+  const forventet = {
+    'audio/mp4': 'audio/m4a', 'audio/x-m4a': 'audio/m4a', 'audio/m4a': 'audio/m4a', 'audio/mp4;codecs=mp4a.40.2': 'audio/m4a',
+    'audio/webm': 'audio/webm', 'audio/webm;codecs=opus': 'audio/webm',
+    'audio/mpeg': 'audio/mp3', 'audio/mp3': 'audio/mp3', 'AUDIO/MPEG': 'audio/mp3',
+    'audio/wav': 'audio/wav', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav',
+    'audio/ogg': 'audio/ogg', 'audio/ogg; codecs=opus': 'audio/ogg',
+    'audio/aac': 'audio/aac', 'audio/flac': 'audio/flac', 'audio/x-flac': 'audio/flac',
+  };
+  for (const [ind, ud] of Object.entries(forventet)) assert.equal(geminiMime(ind), ud, ind);
+});
+
+test('en mp3 uploades og transskriberes med Googles type', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent).transskriber(lyd(), valg('audio/mpeg'));
+  assert.equal(kald[0].headers['X-Goog-Upload-Header-Content-Type'], 'audio/mp3');
+  assert.equal(interaktionsKrop(kald).input[0].mime_type, 'audio/mp3');
 });

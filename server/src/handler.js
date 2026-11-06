@@ -5,7 +5,11 @@ const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
 
-const FORMATER = new Set(['audio/mp4', 'audio/webm']);
+// Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
+const FORMATER = new Set([
+  'audio/mp4', 'audio/webm', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/ogg',
+  'audio/aac', 'audio/flac', 'audio/x-flac', 'audio/x-m4a', 'audio/m4a',
+]);
 const MAX_TITEL = 120;
 const MAX_VARIGHED_SEK = 3600;
 const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
@@ -33,6 +37,13 @@ function laesVarighed(raa) {
   if (raa === undefined || raa === '') return null;
   const n = Number(raa);
   return Number.isFinite(n) && n >= 0 && n <= MAX_VARIGHED_SEK ? n : null;
+}
+
+/** Varigheden til modelvalget. Uden loft: en uploadet fil over en time er stadig lang og skal til Flash. */
+function laesVarighedTilModel(raa) {
+  if (raa === undefined || raa === '') return null;
+  const n = Number(raa);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function laesTidspunkt(raa) {
@@ -222,10 +233,12 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     const vagt = lavBytevagt(bytes);
     pipeline(req, vagt, () => {});
 
-    log({ haendelse: 'gemini-kald' });
+    // gemini-kald logges af Gemini-delen, som kender modellen.
     const spor = { trin: 'transskription' };
     try {
-      const { tekst } = await gemini.transskriber(vagt, { bytes, mime, signal: afbryd.signal });
+      const { tekst } = await gemini.transskriber(vagt, {
+        bytes, mime, signal: afbryd.signal, varighedSek: laesVarighedTilModel(req.headers['x-varighed']),
+      });
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
       if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
 

@@ -7,7 +7,7 @@
  * Bruges kun til kald, der er sikre at sende igen, fordi kroppen er en færdig tekst:
  * upload-start, transskription af en allerede uploadet fil og referatet.
  * Selve lyden genforsøges ikke: den strømmes direkte fra telefonen og kan ikke spoles tilbage,
- * og den må ikke gemmes i hukommelsen (op til 150 MiB). Fejler den, beholder telefonen lyden.
+ * og den må ikke gemmes i hukommelsen (op til 500 MiB). Fejler den, beholder telefonen lyden.
  */
 
 const { setTimeout: sov } = require('node:timers/promises');
@@ -93,6 +93,8 @@ async function medGenforsoeg(kald, {
   signal, frist, nu = Date.now, vent = standardVent, tilfaeldig = Math.random, vedGenforsoeg = () => {},
   // Højst så meget ventetid i alt. Upload-start: telefonens upload står stille imens.
   maksVentMs = Infinity,
+  // Transcribe: et 429 gives straks videre, så Flash kan tage over uden venten.
+  stopVed429 = false,
 }) {
   let ventetIalt = 0;
   for (let forsoeg = 1; ; forsoeg++) {
@@ -110,6 +112,7 @@ async function medGenforsoeg(kald, {
       return svar;
     };
     if (svar && !MIDLERTIDIGE.has(svar.status)) return svar;
+    if (svar && svar.status === 429 && stopVed429) return svar;
     if ((signal && signal.aborted) || forsoeg > GENFORSOEG) return opgiv();
 
     const stigende = Math.round(GRUND_MS * 2 ** (forsoeg - 1) * (0.5 + tilfaeldig()));

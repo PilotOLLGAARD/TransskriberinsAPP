@@ -12,7 +12,21 @@ const { medGenforsoeg, laesGoogleFejl } = require('./genforsoeg.js');
 const BASE = 'https://generativelanguage.googleapis.com';
 const SLET_TIMEOUT_MS = 5000;
 
-const MIME_NAVNE = { 'audio/mp4': 'audio/m4a', 'audio/x-m4a': 'audio/m4a' };
+// Typer, som telefonen eller filen kan have, oversat til dem, Google kender. Lyden sendes uændret.
+const MIME_NAVNE = {
+  'audio/mp4': 'audio/m4a', 'audio/x-m4a': 'audio/m4a', 'audio/m4a': 'audio/m4a',
+  'audio/mpeg': 'audio/mp3', 'audio/mp3': 'audio/mp3',
+  'audio/wav': 'audio/wav', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav',
+  'audio/ogg': 'audio/ogg', 'audio/aac': 'audio/aac',
+  'audio/flac': 'audio/flac', 'audio/x-flac': 'audio/flac',
+};
+// Kort modelnavn i loggen, uanset hvilken version der er sat op.
+const TRANSCRIBE = 'transcribe';
+const FLASH = 'flash';
+// Flash tager kun over efter 5xx fra Transcribe, hvis der er mindst så meget tid tilbage.
+const FLASH_MIN_MS = 60 * 1000;
+const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter, '
+  + 'talernavne eller tidskoder. Skriv tal, som de bliver sagt. Skriv "[uklart]", hvor noget ikke kan høres. Opfind aldrig noget.';
 // Det trin, en fejl skete i, som det står i loggen.
 const TRIN = { 'upload-start': 'upload', upload: 'upload', interactions: 'transskription', referat: 'referat' };
 
@@ -113,8 +127,9 @@ function nytFilnavn() {
  */
 function lavGemini({
   noegle, model, sprog, tilstand, ordliste, timeoutMs, hent, hentLangsom, advar = () => {}, log = () => {}, oprydning,
-  nu = Date.now, vent, tilfaeldig,
+  flashModel = 'gemini-3.8-flash', transcribeMaksSek = 400, nu = Date.now, vent, tilfaeldig,
 }) {
+  const flashPrompt = ordliste.length ? `${FLASH_PROMPT}\n\nFagord, der kan forekomme: ${ordliste.join(', ')}.` : FLASH_PROMPT;
   const hentKald = hent || ((...a) => fetch(...a));
   const hentTransskription = hentLangsom || hent || hentUdenGraense;
   // Filer, der er startet hos Google og ikke slettet endnu. Prøves igen ved nedlukning og oprydning.
@@ -171,31 +186,58 @@ function lavGemini({
     return file;
   }
 
-  async function transskriberFil(fil, mime, signal, frist) {
+  /** Kroppen til Transcribe eller Flash. Begge bruger den samme uploadede fil. */
+  function interaktion(hvilken, fil, mime) {
+    const lyd = { type: 'audio', uri: fil.uri, mime_type: mime };
+    // Interactions gemmes ellers i 55 dage hos Google, også efter filen er slettet.
+    if (hvilken === FLASH) {
+      return {
+        model: flashModel,
+        input: [lyd, { type: 'text', text: flashPrompt }],
+        // 'minimal' afvises af Flash. 'low' er nok til en ordret transskription.
+        generation_config: { thinking_level: 'low' },
+        store: false,
+      };
+    }
     const transcription_config = {
       language_codes: [sprog],
       mode: tilstand === 'verbatim' ? { type: 'verbatim' } : 'smart',
     };
     if (ordliste.length) transcription_config.custom_vocabulary = ordliste;
+    return { model, input: [lyd], generation_config: { transcription_config }, store: false };
+  }
 
+  async function transskriberFil(hvilken, fil, mime, signal, frist) {
+    const anmodning = JSON.stringify(interaktion(hvilken, fil, mime));
     // Filen ligger allerede hos Google, så transskriptionen kan sikkert bestilles igen.
+    // Transcribe genforsøges ikke ved 429: så tager Flash straks over med samme fil.
     const svar = await genforsoeg('interactions', () => hentTransskription(`${BASE}/v1beta/interactions`, {
       method: 'POST',
       signal,
       headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        input: [{ type: 'audio', uri: fil.uri, mime_type: mime }],
-        generation_config: { transcription_config },
-        // Interactions gemmes ellers i 55 dage hos Google, også efter filen er slettet.
-        store: false,
-      }),
-    }), signal, frist);
+      body: anmodning,
+    }), signal, frist, { stopVed429: hvilken === TRANSCRIBE });
     if (!svar.ok) throw await svarFejl(svar, 'interactions');
     const krop = await svar.json();
     // Alt andet end completed er fejl, så en halv tekst aldrig tages for en hel.
     if (krop.status !== 'completed') throw new GeminiFejl('tjeneste', `interactions: status ${krop.status}`, { trin: 'transskription' });
     return udtraekTekst(krop);
+  }
+
+  /**
+   * Hvorfor Flash skal tage over efter en fejl fra Transcribe, eller null.
+   * 429 (minut- eller dagsgrænse): altid, med det samme. 5xx efter genforsøg: kun hvis der er
+   * mindst ét minut tilbage og mindst lige så lang tid, som Transcribe brugte, så Flash kan nå
+   * at blive færdig. Andre fejl (format, nøgle, netværk, ufuldstændigt svar) giver intet skift.
+   */
+  function skiftGrund(e, startet, frist, signal) {
+    if (!(e instanceof GeminiFejl) || signal.aborted) return null;
+    if (e.status === 429) return '429';
+    if (e.status >= 500 && e.status < 600) {
+      const tilbage = frist - nu();
+      return tilbage >= Math.max(FLASH_MIN_MS, nu() - startet) ? '5xx' : null;
+    }
+    return null;
   }
 
   async function sletFil(navn) {
@@ -241,8 +283,15 @@ function lavGemini({
   }
 
   return {
-    async transskriber(strom, { bytes, mime, signal }) {
+    /**
+     * varighedSek fra telefonen (kan mangle). Lyd over transcribeMaksSek går direkte til Flash,
+     * da Transcribe på Tier 1 kun tager 10.000 tokens i minuttet (ca. 6 min. 40 s lyd).
+     */
+    async transskriber(strom, { bytes, mime, signal, varighedSek }) {
       planlaegOprydning();
+      const lang = Number.isFinite(varighedSek) && varighedSek > transcribeMaksSek;
+      log({ haendelse: 'gemini-kald', model: lang ? FLASH : TRANSCRIBE });
+      if (lang) log({ haendelse: 'model-skift', grund: 'laengde', fra: TRANSCRIBE, til: FLASH });
       const type = geminiMime(mime);
       const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
       // Genforsøg skal kunne nå at vente færdig inden for samme grænse, så Cloud Runs 900 s aldrig nås.
@@ -256,7 +305,16 @@ function lavGemini({
         // Google bør bruge vores navn. Gør den ikke, slettes begge.
         if (fil.name !== navn) husk(fil.name);
         trin = 'transskription';
-        return { tekst: await transskriberFil(fil, type, samlet, frist) };
+        if (lang) return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+        const startet = nu();
+        try {
+          return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+        } catch (e) {
+          const grund = skiftGrund(e, startet, frist, samlet);
+          if (!grund) throw e;
+          log({ haendelse: 'model-skift', grund, fra: TRANSCRIBE, til: FLASH });
+          return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
+        }
       } catch (e) {
         if (e instanceof GeminiFejl) throw e;
         // Originalbeskeden kan indeholde detaljer fra kaldet, så den sendes ikke videre.

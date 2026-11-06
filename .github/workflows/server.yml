@@ -36,6 +36,8 @@ jobs:
             ENTRA_CLIENT_ID=792bac2e-d895-4c24-9a58-7466eb8d03a3
             TILLADT_OPRINDELSE=https://pilotollgaard.github.io
             GEMINI_MODEL=gemini-3.5-transcribe
+            FLASH_MODEL=gemini-3.8-flash
+            TRANSCRIBE_MAKS_SEK=400
             SPROG=da-DK
             TRANSSKRIPTION_TILSTAND=verbatim
           secrets: |-

@@ -169,6 +169,44 @@ test('appen har en besked til hver type, serveren kan give', async () => {
   for (const [, , , status, type] of FEJLVEJE) assert.ok(BESKEDER[type], `${status} → ${type}`);
 });
 
+test('gemini-kald og model-skift fra den rigtige Gemini-del logger kun koder', async () => {
+  const { lavGemini } = require('../src/gemini.js');
+  // Falsk Google: Transcribe svarer 429 med en besked, der ikke må i loggen. Flash svarer.
+  const hent = async (url, v = {}) => {
+    const s = String(url);
+    if (s.endsWith('/upload/v1beta/files')) return new Response('{}', { headers: { 'x-goog-upload-url': 'https://upload.example/u' } });
+    if (s === 'https://upload.example/u') {
+      for await (const _ of v.body) { /* læs */ }
+      const navn = 'files/x';
+      return Response.json({ file: { name: navn, uri: `https://g/${navn}` } });
+    }
+    if (s.endsWith('/v1beta/interactions')) {
+      if (JSON.parse(v.body).model === 'gemini-3.5-transcribe') {
+        return Response.json({ error: { status: 'RESOURCE_EXHAUSTED', message: 'HEMMELIG Peter Hansen' } }, { status: 429 });
+      }
+      return Response.json({ status: 'completed', output_text: 'Hej fra Peter Hansen' });
+    }
+    return new Response('{}');
+  };
+  const logs = [];
+  const gemini = lavGemini({
+    noegle: NOEGLE, model: 'gemini-3.5-transcribe', flashModel: 'gemini-3.8-flash', transcribeMaksSek: 400, sprog: 'da-DK',
+    tilstand: 'verbatim', ordliste: ['ØLLGAARD'], timeoutMs: 60000, hent, vent: async () => {}, log: (o) => logs.push(o),
+  });
+  for (const varighed of ['30', '1200']) {
+    const svar = await koer({ gemini, log: (o) => logs.push(o) }, { headers: { 'x-varighed': varighed } });
+    assert.equal(svar.status, 200);
+  }
+  for (const o of logs) tjekLog(o);
+  const linjer = logs.filter((o) => ['gemini-kald', 'model-skift'].includes(o.haendelse));
+  assert.deepEqual(linjer, [
+    { haendelse: 'gemini-kald', model: 'transcribe' },
+    { haendelse: 'model-skift', grund: '429', fra: 'transcribe', til: 'flash' },
+    { haendelse: 'gemini-kald', model: 'flash' },
+    { haendelse: 'model-skift', grund: 'laengde', fra: 'transcribe', til: 'flash' },
+  ]);
+});
+
 test('også et vellykket kald logger kun koder og tal', async () => {
   const svar = await koer({}, {});
   assert.equal(svar.status, 200);
