@@ -1,6 +1,6 @@
 # Sådan bruger du transskriberingsappen
 
-Indtal en note, et møde eller en påmindelse, og få et referat med PDF på din egen mail.
+Indtal en note, et møde eller en påmindelse, og få et referat som PDF og Word-dokument på din egen mail.
 
 ## Læg appen på hjemmeskærmen
 
@@ -19,7 +19,7 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 4. **Lad skærmen være tændt, og læg telefonen med skærmen opad.** Låser du telefonen, skifter app eller får et opkald, stopper optagelsen. Det, du har indtalt, er gemt. Når du åbner appen igen, kan du trykke **Fortsæt optagelsen**. Du får ét referat af det hele. Har du givet appen lov til notifikationer (den spørger første gang, du trykker Optag), får du beskeden "Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager." Når du åbner appen igen, står optagelsen klar med Fortsæt optagelsen og Send.
 5. Tryk på **Stop**.
 6. Ret navnet, hvis du vil, og tryk **Send**. Skærmen viser trin for trin, hvor langt referatet er, og hvilken mailadresse det sendes til. Er navnet tomt, finder appen selv på en titel. **Hold appen åben, til der står "Referatet er sendt".** Lukker du den før, bliver referatet først færdigt, når du åbner appen igen og trykker Prøv igen. Har du givet lov til notifikationer, får du en besked, hvis det sker.
-7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF. Mailen ligger også i din Sendt post.
+7. Efter lidt tid får du en mail med emnet "<Type>: <titel> – <dato>", fx "Møde: Tagrenovering – 2. nov. 2026". Mailen viser en kort opsummering og de vigtigste punkter. Det fulde referat og hele transskriptionen ligger i den vedhæftede PDF og i et Word-dokument med samme indhold. Word-dokumentet kan du rette i, fx før du sender referatet videre. Mailen ligger også i din Sendt post.
 
 Under **Information** øverst på startskærmen står en kort forklaring.
 
@@ -38,7 +38,7 @@ Alle referater begynder med en kort opsummering. Afsnit uden indhold udelades. E
 
 Referatet laves af en AI ud fra det, du sagde. Det skriver "[uklart]", hvor noget ikke var til at forstå. Tjek altid vigtige tal og aftaler mod transskriptionen bagerst i PDF'en.
 
-Når mailen er sendt, slettes lyden fra telefonen. Referatet og PDF'en bliver i 7 dage under **Tidligere optagelser**, så du kan trykke **Send referat igen**. Det sender den samme mail igen og koster ikke et nyt referat. Mailen er din kopi.
+Når mailen er sendt, slettes lyden fra telefonen. Referatet, PDF'en og Word-dokumentet bliver i 7 dage under **Tidligere optagelser**, så du kan trykke **Send referat igen**. Det sender den samme mail igen og koster ikke et nyt referat. Mailen er din kopi.
 
 ## Tidligere optagelser
 

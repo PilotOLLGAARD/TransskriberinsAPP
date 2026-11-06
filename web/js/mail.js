@@ -51,13 +51,31 @@ export function lavBesked(note) {
   return {
     subject: fraServeren ? note.emne : `Referat: ${note.titel || note.referat.titel} – ${langDato(note.oprettet)}`,
     body: { contentType: 'HTML', content: fraServeren ? note.html : html(note) },
-    attachments: [{
-      '@odata.type': '#microsoft.graph.fileAttachment',
-      name: note.filnavn,
-      contentType: 'application/pdf',
-      contentBytes: note.pdf,
-    }],
+    attachments: bilag(note),
   };
+}
+
+const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+// Microsoft Graph tager kun ca. 3 MB bilag i én sendMail. Under det er der lidt luft.
+const MAX_BILAG_BYTES = 2_900_000;
+
+/** Antal bytes i en base64-tekst. */
+function bytesAf(base64) {
+  return Math.floor((base64.length * 3) / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+}
+
+const fil = (name, contentType, contentBytes) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name, contentType, contentBytes });
+
+/**
+ * PDF og, når noten har det, Word-dokumentet, så referatet kan rettes. Noter fra før Word sendes med PDF alene.
+ * Bliver de to tilsammen for store til én mail, sendes kun PDF'en, aldrig en fejl.
+ */
+function bilag(note) {
+  const pdf = fil(note.filnavn, 'application/pdf', note.pdf);
+  if (typeof note.docx !== 'string' || !note.docx) return [pdf];
+  if (bytesAf(note.pdf) + bytesAf(note.docx) > MAX_BILAG_BYTES) return [pdf];
+  const navn = note.docxFilnavn || `${String(note.filnavn || 'Referat').replace(/\.pdf$/i, '')}.docx`;
+  return [pdf, fil(navn, WORD, note.docx)];
 }
 
 /**

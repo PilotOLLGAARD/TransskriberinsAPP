@@ -56,12 +56,20 @@ function falskPdf() {
   return p;
 }
 
+function falskDocx(svar = () => Buffer.from('PK-falsk')) {
+  const d = { kald: 0, lavDocx(valg) { d.kald++; d.valg = valg; return svar(valg); } };
+  return d;
+}
+
 async function start({
-  konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini(), referat = falskReferat(), pdf = falskPdf(),
+  konfig = KONFIG, tjekAdgang = adgangOk, gemini = falskGemini(), referat = falskReferat(), pdf = falskPdf(), docx = falskDocx(),
 } = {}) {
   const logs = [];
   const laest = [];
-  const handler = lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log: (o) => logs.push(JSON.stringify(o)) });
+  // docx: false bruger handlerens egen, rigtige Word-del.
+  const handler = lavHandler({
+    konfig, tjekAdgang, gemini, referat, pdf, ...(docx ? { docx } : {}), log: (o) => logs.push(JSON.stringify(o)),
+  });
   const server = http.createServer((req, res) => {
     const slut = res.end.bind(res);
     // Node tømmer selv en ulæst krop efter svaret, så det måles, idet svaret sendes.
@@ -71,7 +79,7 @@ async function start({
   servere.push(server);
   await new Promise((ok) => server.listen(0, ok));
   const adresse = `http://localhost:${server.address().port}`;
-  return { adresse, gemini, referat, pdf, logs, laest };
+  return { adresse, gemini, referat, pdf, docx, logs, laest };
 }
 
 function post(adresse, { headers = {}, krop = Buffer.from('lyd'), sti = '/transskriber' } = {}) {
@@ -311,6 +319,37 @@ test('svar indeholder titel, referat, pdf og filnavn', async () => {
   assert.equal(s.pdf.valg.tekst, 'Hej');
 });
 
+test('svar indeholder Word-dokument med samme navn som PDF-filen og samme indhold', async () => {
+  const s = await start();
+  const svar = await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-varighed': '252', 'x-optaget': String(TID) } });
+  const j = await svar.json();
+  assert.equal(Buffer.from(j.docx, 'base64').toString(), 'PK-falsk');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+  assert.equal(s.docx.kald, 1);
+  assert.deepEqual(s.docx.valg, s.pdf.valg);
+});
+
+test('uden en Word-del i opsætningen bruges den rigtige', async () => {
+  const s = await start({ docx: false });
+  const j = await (await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-optaget': String(TID) } })).json();
+  assert.equal(Buffer.from(j.docx, 'base64').subarray(0, 4).toString('latin1'), 'PK\u0003\u0004');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+});
+
+test('fejler Word-dokumentet, sendes referatet uden, og kun koden logges', async () => {
+  const s = await start({ docx: falskDocx(() => { throw new RangeError('HEMMELIG-DOCX'); }) });
+  const svar = await post(s.adresse, { headers: { 'x-titel': kodet('Møde om tag'), 'x-optaget': String(TID) } });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
+  assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+  assert.equal(j.docx, undefined);
+  assert.equal(j.docxFilnavn, undefined);
+  assert.equal(j.referatMangler, undefined);
+  assert.ok(s.logs.includes(JSON.stringify({ haendelse: 'docx-fejl' })));
+  assert.ok(!s.logs.join('\n').includes('HEMMELIG-DOCX'));
+});
+
 test('tom titel giver AI-titel', async () => {
   const s = await start();
   const j = await (await post(s.adresse)).json();
@@ -508,6 +547,19 @@ test('/referat samler teksterne med markøren og laver ét referat', async () =>
   assert.equal(j.emne, 'Møde: Møde om tag – 2. nov. 2026');
   assert.equal(Buffer.from(j.pdf, 'base64').toString(), '%PDF-falsk');
   assert.equal(j.filnavn, '2026-11-02 Møde om tag.pdf');
+  assert.equal(Buffer.from(j.docx, 'base64').toString(), 'PK-falsk');
+  assert.equal(j.docxFilnavn, '2026-11-02 Møde om tag.docx');
+  assert.equal(s.docx.valg.tekst, j.tekst);
+});
+
+test('/referat sendes uden Word-dokument, hvis det fejler', async () => {
+  const s = await start({ docx: falskDocx(() => { throw new Error('x'); }) });
+  const svar = await postReferat(s.adresse, { tekster: ['a', 'b'], titel: 'Tag', optaget: TID });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.ok(j.pdf);
+  assert.equal(j.docx, undefined);
+  assert.ok(s.logs.includes(JSON.stringify({ haendelse: 'docx-fejl' })));
 });
 
 test('/referat springer tomme tekster over, og kun tomme giver tom tekst', async () => {

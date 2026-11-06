@@ -858,7 +858,7 @@ function skaermStart() {
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
     // Er man ikke logget ind, står det i stedet for introen.
-    loginBoks() ?? h('p', { klasse: 'intro' }, 'Indtal noter, møder og påmindelser. Du får et referat med PDF på din mail.'),
+    loginBoks() ?? h('p', { klasse: 'intro' }, 'Indtal noter, møder og påmindelser. Du får referatet som PDF og Word på mail.'),
     h('button', { klasse: 'top-knap info-knap', vedTryk: aabnInformation }, ikon('info'), 'Information'),
     startNavn(),
     h(
@@ -981,7 +981,7 @@ function skaermInformation() {
         h('li', {}, 'Skriv evt. et navn.'),
         h('li', {}, 'Tryk Optag, og tryk Stop, når du er færdig.'),
         h('li', {}, 'Giv optagelsen et navn, og tryk Send.'),
-        h('li', {}, 'Du får et referat på mail med PDF. Det kan tage et par minutter.'),
+        h('li', {}, 'Du får et referat på mail med PDF og Word-dokument. Word-dokumentet kan du rette i. Det kan tage et par minutter.'),
       ),
     ),
     afsnit(
@@ -996,7 +996,7 @@ function skaermInformation() {
         h('li', {}, 'Brug appen fra hjemmeskærmen, ikke fra en fane i Safari eller Chrome.'),
         h('li', {}, 'Svar Ja, når Microsoft spørger \'Vil du forblive logget på?\'.'),
         h('li', {}, 'Hold appen åben og skærmen tændt, mens du optager, og indtil referatet er sendt.'),
-        h('li', {}, 'Lyden slettes fra telefonen, når referatet er sendt. Referatet og PDF\'en gemmes på telefonen i 7 dage under Tidligere. Optagelser, der ikke er sendt, gemmes, indtil de er sendt.'),
+        h('li', {}, 'Lyden slettes fra telefonen, når referatet er sendt. Referatet, PDF\'en og Word-dokumentet gemmes på telefonen i 7 dage under Tidligere. Optagelser, der ikke er sendt, gemmes, indtil de er sendt.'),
         h('li', {}, 'Referatet laves af AI. Tjek altid vigtige tal, mål og frister. Hele transskriptionen ligger bagerst i PDF\'en.'),
         h('li', {}, 'Lyd og tekst behandles af Google for at lave transskription og referat. De bruges ikke til at træne AI-modeller. Mailen sendes fra din egen Outlook.'),
       ),

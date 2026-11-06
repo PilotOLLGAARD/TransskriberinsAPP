@@ -395,6 +395,23 @@ test('svarets type, emne og html gemmes', async () => {
   assert.equal(n.html, '<p>x</p>');
 });
 
+test('svarets Word-dokument og filnavn gemmes på noten', async () => {
+  const s = opsaet({ sendLyd: async () => ({ ...REFERAT_SVAR, docx: 'UEsDBA==', docxFilnavn: 'f.docx' }) });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.docx, 'UEsDBA==');
+  assert.equal(n.docxFilnavn, 'f.docx');
+});
+
+test('svar uden Word-dokument gemmes uden docx', async () => {
+  const s = opsaet({ sendLyd: async () => REFERAT_SVAR });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.pdf, 'JVBERg==');
+  assert.equal('docx' in n, false);
+  assert.equal('docxFilnavn' in n, false);
+});
+
 test('navngivOgSend gemmer navnet og sender ingen type for nye noter', async () => {
   const s = opsaet({ sendLyd: fejl('net') });
   await s.forloeb.navngivOgSend('a', 'Tag', 'byggenotat');

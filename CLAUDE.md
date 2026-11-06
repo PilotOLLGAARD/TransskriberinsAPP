@@ -23,7 +23,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 ## Arkitektur
 
-iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`). Telefonen sender mailen med PDF via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
+iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med PDF via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
 
 | Fil | Ansvar |
 |---|---|

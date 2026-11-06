@@ -51,6 +51,51 @@ test('emne og bilag fra referat', () => {
   assert.ok(b.body.content.includes('Spær 45x195'));
 });
 
+const WORD_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+test('note med Word-dokument får både PDF og Word som bilag', () => {
+  const b = lavBesked({ ...NY, docx: 'UEsDBA==', docxFilnavn: '2026-11-02 Møde om tag.docx' });
+  assert.deepEqual(b.attachments, [{
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: '2026-11-02 Møde om tag.pdf',
+    contentType: 'application/pdf',
+    contentBytes: 'JVBERi0xLjM=',
+  }, {
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: '2026-11-02 Møde om tag.docx',
+    contentType: WORD_TYPE,
+    contentBytes: 'UEsDBA==',
+  }]);
+});
+
+test('Word uden filnavn får PDF-navnet med .docx', () => {
+  const b = lavBesked({ ...NY, docx: 'UEsDBA==' });
+  assert.equal(b.attachments[1].name, '2026-11-02 Møde om tag.docx');
+});
+
+/** Base64 med præcis så mange bytes. */
+const base64Af = (bytes) => 'A'.repeat(Math.ceil(bytes / 3) * 4);
+
+test('over 2,9 MB i alt sendes kun PDF-filen, uden fejl', () => {
+  const pdf = base64Af(1_500_000);
+  const b = lavBesked({ ...NY, pdf, docx: base64Af(1_500_000), docxFilnavn: 'x.docx' });
+  assert.equal(b.attachments.length, 1);
+  assert.equal(b.attachments[0].contentType, 'application/pdf');
+  assert.equal(b.attachments[0].contentBytes, pdf);
+});
+
+test('lige under 2,9 MB i alt kommer Word med', () => {
+  const b = lavBesked({ ...NY, pdf: base64Af(1_440_000), docx: base64Af(1_440_000), docxFilnavn: 'x.docx' });
+  assert.equal(b.attachments.length, 2);
+});
+
+test('sendMail sender Word med, så Send referat igen også får Word', async () => {
+  const { kald, hent } = lavHent();
+  await sendMail({ note: { ...NY, docx: 'UEsDBA==', docxFilnavn: 'x.docx' }, til: 'a@ollgaard.dk', bevis: 'b', hent });
+  const krop = JSON.parse(kald[0].v.body);
+  assert.deepEqual(krop.message.attachments.map((a) => a.name), ['2026-11-02 Møde om tag.pdf', 'x.docx']);
+});
+
 test('HTML escapes', () => {
   const html = lavBesked(NY).body.content;
   assert.ok(!html.includes('<b>fed</b>'));

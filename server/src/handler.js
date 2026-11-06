@@ -4,6 +4,7 @@ const { Transform, pipeline } = require('node:stream');
 const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
+const wordDel = require('./docx.js');
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -89,7 +90,9 @@ function laesTekster(krop) {
  * Adgangstjekket er det første, der sker, før kroppen læses.
  * /transskriber med x-kun-tekst: 1 giver kun teksten. /referat laver ét referat af flere delteksters.
  */
-function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLog }) {
+function lavHandler({
+  konfig, tjekAdgang, gemini, referat, pdf, docx = wordDel, log = standardLog,
+}) {
   function sendJson(res, cors, status, krop) {
     res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(krop));
@@ -107,17 +110,33 @@ function lavHandler({ konfig, tjekAdgang, gemini, referat, pdf, log = standardLo
     spor.trin = 'referat';
     const r = await referat.lav({ tekst, titel, type, varighedSek, signal });
     spor.trin = 'pdf';
-    const fil = await pdf.lavPdf({ titel: r.titel, tidspunkt, varighedSek, referat: r, tekst });
+    const indhold = { titel: r.titel, tidspunkt, varighedSek, referat: r, tekst };
+    const fil = await pdf.lavPdf(indhold);
+    const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
     return {
       tekst,
       titel: r.titel,
       type: r.type,
       referat: r,
       pdf: fil.toString('base64'),
-      filnavn: pdf.filnavn({ titel: r.titel, tidspunkt }),
+      filnavn,
+      ...lavWord(indhold, filnavn),
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
       html: lavHtml({ titel: r.titel, referat: r }),
     };
+  }
+
+  /** Word-udgaven med samme navn som PDF'en. Fejler den, sendes referatet med PDF alene. */
+  function lavWord(indhold, filnavn) {
+    try {
+      return {
+        docx: docx.lavDocx(indhold).toString('base64'),
+        docxFilnavn: `${filnavn.replace(/\.pdf$/i, '')}.docx`,
+      };
+    } catch {
+      log({ haendelse: 'docx-fejl' });
+      return {};
+    }
   }
 
   /**
