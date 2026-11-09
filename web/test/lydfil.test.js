@@ -23,6 +23,17 @@ test('genkender lydformater på de første bytes', () => {
   for (const [format, bytes] of tilfaelde) assert.equal(genkendFormat(bytes), format, `${format}: ${[...bytes.slice(0, 6)]}`);
 });
 
+test('m4a fra Samsung Stemmeoptager og Pixel Optager genkendes, uanset hvilket mærke filen har', () => {
+  for (const maerke of ['3gp4', 'isom', 'M4A ', 'mp42', '3gp5']) {
+    assert.equal(genkendFormat(start([0, 0, 0, 0x18], tekst(`ftyp${maerke}`), [0, 0, 0, 0])), 'm4a', maerke);
+  }
+});
+
+test('AMR (ældre Android-optagelser) genkendes ikke, så filen afvises med beskeden om formater', () => {
+  assert.equal(genkendFormat(start(tekst('#!AMR\n'), [0x3c, 0x48])), null);
+  assert.equal(genkendFormat(start(tekst('#!AMR-WB\n'), [0x3c])), null);
+});
+
 test('andet end lyd genkendes ikke', () => {
   for (const bytes of [
     new Uint8Array(0),
@@ -57,6 +68,23 @@ test('MIME udledes af formatet, når filen ikke har en brugbar type', async () =
   // Typen må ikke modsige indholdet.
   assert.equal((await kontrollerFil(fil(M4A, 'x.m4a', 'audio/webm'), { laesVarighed: altid(null) })).mime, 'audio/mp4');
   assert.equal((await kontrollerFil(fil(start(tekst('RIFF'), [0, 0, 0, 0], tekst('WAVE')), 'x.wav', 'audio/x-wav'), { laesVarighed: altid(null) })).mime, 'audio/wav');
+});
+
+test('m4a med de typer, Android-apps deler med, sendes som en type, serveren kender', async () => {
+  const SAMSUNG = start([0, 0, 0, 0x18], tekst('ftyp3gp4'), new Array(40).fill(3));
+  for (const [type, forventet] of [
+    ['audio/mp4', 'audio/mp4'], ['audio/x-m4a', 'audio/x-m4a'], ['audio/m4a', 'audio/mp4'], ['audio/mp4a-latm', 'audio/mp4'],
+    ['audio/3gpp', 'audio/mp4'], ['audio/aac', 'audio/mp4'], ['', 'audio/mp4'], ['application/octet-stream', 'audio/mp4'],
+  ]) {
+    const k = await kontrollerFil(fil(SAMSUNG, 'Stemme 001.m4a', type), { laesVarighed: altid(null) });
+    assert.equal(k.ok, true, type);
+    assert.equal(k.format, 'm4a', type);
+    assert.equal(k.mime, forventet, type);
+  }
+});
+
+test('en tom delt fil afvises som ikke-lyd', async () => {
+  assert.deepEqual(await kontrollerFil(fil(new Uint8Array(0), 'tom.m4a'), { laesVarighed: altid(null) }), { ok: false, fejl: 'ikkeLydfil' });
 });
 
 test('ukendt varighed er tilladt', async () => {
