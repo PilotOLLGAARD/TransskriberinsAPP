@@ -464,6 +464,8 @@ test('Information på iPhone: trin for Memoer med telefonens egne knapnavne, og 
   assert.equal(await trin.count(), 4);
   const tekst = (await trin.allTextContents()).join(' | ');
   for (const ord of ['Memoer', 'Del', 'Gem i Arkiver', 'På min iPhone', 'Upload lydfil']) assert.ok(tekst.includes(ord), `mangler ${ord}: ${tekst}`);
+  // Knappen ⋯ har kun et ikon. Skærmlæsere skal kunne læse den.
+  assert.match(await trin.nth(1).textContent(), /Tryk på\s*Mere\s*og derefter på/);
   await vis(side, 'Vælg ikke "Kan redigeres"');
   assert.equal(await side.getByRole('heading', { name: ANDROID_AFSNIT }).count(), 0);
   assert.equal(await side.getByText(/Diktafon|Gem i Filer/).count(), 0);
@@ -502,12 +504,18 @@ test('Information på en computer viser begge vejledninger', async () => {
   await kontekst.close();
 });
 
-for (const [navn, userAgent] of [['iPhone', IPHONE], ['Android', ANDROID]]) {
-  test(`Information på ${navn} kan læses på 360 px uden at rulle til siden`, async () => {
-    const { kontekst, side } = await nyTelefon(miljoe, { userAgent, viewport: { width: 360, height: 640 } });
+// 260 px svarer til 360 px med forstørret tekst (ca. 140 %) i telefonens indstillinger.
+for (const [navn, userAgent, bredde] of [['iPhone', IPHONE, 360], ['Android', ANDROID, 360], ['iPhone', IPHONE, 260], ['Android', ANDROID, 260]]) {
+  test(`Information på ${navn} kan læses på ${bredde} px uden at rulle til siden`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe, { userAgent, viewport: { width: bredde, height: 640 } });
     await aabnInformation(side);
     await side.locator('ol.guide').first().waitFor();
-    assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    // Vejledningen og telefonens knapnavne må aldrig gå ud over kanten. (Ved 260 px er logoet i toppen bredere end skærmen.)
+    const udenfor = await side.evaluate(() => [...document.querySelectorAll('.info-afsnit *:not(.skjult)')]
+      .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5 || e.scrollWidth > e.clientWidth + 1)
+      .map((e) => e.className || e.tagName));
+    assert.deepEqual(udenfor, []);
+    if (bredde >= 360) assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await kontekst.close();
   });
 }
@@ -568,8 +576,11 @@ test('del-menuen: en ny start henter ikke filen igen', async () => {
   await logInd(side);
   await delGennemServiceWorker(side, { name: 'En gang.m4a', mimeType: 'audio/mp4', buffer: m4a(64 * KB) });
   await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  assert.equal(await kopier(side), 0);
   await side.reload();
+  await vis(side, 'Afventer');
   await side.waitForTimeout(500);
+  assert.equal(await side.getByLabel(FELT).count(), 0);
   assert.equal((await noter(side)).length, 1);
   await kontekst.close();
 });
@@ -634,6 +645,30 @@ for (const [navn, fejlnavn, besked] of [
     await kontekst.close();
   });
 }
+
+test('del-menuen: Til forsiden efter en fejl beholder kopien, så næste start prøver igen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fejlVedGemning(kontekst, 'QuotaExceededError');
+  await logInd(side);
+  await side.evaluate(() => sessionStorage.setItem('fejl', '1'));
+  const fil = m4a(64 * KB);
+  await delGennemServiceWorker(side, { name: 'Senere igen.m4a', mimeType: 'audio/mp4', buffer: fil });
+  await side.getByRole('heading', { name: IKKE_GEMT }).waitFor({ timeout: 15000 });
+  await knap(side, 'Til forsiden').click();
+  await knap(side, 'Optag').waitFor();
+  // Fra forsiden kan man fx slette gamle noter under Tidligere for at få plads.
+  await knap(side, 'Tidligere optagelser').click();
+  await side.getByRole('heading', { name: 'Tidligere optagelser' }).waitFor();
+  assert.equal((await noter(side)).length, 0);
+  assert.equal(await kopier(side), 1);
+  await side.evaluate(() => sessionStorage.removeItem('fejl'));
+  await side.reload();
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  const [n] = await noter(side);
+  assert.deepEqual(await lydSha(side, n.id), { bytes: fil.length, sha: sha(fil) });
+  assert.equal(await kopier(side), 0);
+  await kontekst.close();
+});
 
 test('del-menuen: Annullér efter en fejl fjerner kopien og gemmer intet', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);

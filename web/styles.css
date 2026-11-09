@@ -602,7 +602,10 @@ input[type="file"] { font: inherit; }
 .guide li:last-child { border-bottom: 0; }
 .guide li::before { counter-increment: guide; content: counter(guide); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--blaa-dyb); background: var(--blaa-tone); font-weight: 700; font-size: 18px; }
 .guide li > span { min-width: 0; }
-.tlf { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0; padding: 1px 10px 1px 7px; border-radius: 9px; background: #eceef2; font-weight: 650; white-space: nowrap; vertical-align: 1px; }
+/* Knapnavnet må bryde, når teksten er forstørret i telefonens indstillinger. */
+.tlf { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0; padding: 1px 10px 1px 7px; border-radius: 9px; background: #eceef2; font-weight: 650; overflow-wrap: anywhere; vertical-align: 1px; }
+/* Tekst kun til skærmlæsere. */
+.skjult { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tlf.kun-ikon { padding: 1px 7px; }
 .tlf svg, .tlf img { width: 18px; height: 18px; }
 .guide + button { margin-top: 14px; }

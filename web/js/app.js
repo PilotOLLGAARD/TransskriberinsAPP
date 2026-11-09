@@ -311,6 +311,15 @@ async function gemDeltFil() {
   await afslutDelt(await modtagFil(t.delt.fil));
 }
 
+/** Til forsiden efter en fejl: kopien bliver liggende, så gemningen prøves igen ved næste start. */
+function delTilForsiden() {
+  if (t.gemmerFil) return;
+  t.delt = null;
+  t.besked = null;
+  t.visning = 'start';
+  tegn();
+}
+
 function annullerDelt() {
   if (t.gemmerFil) return;
   t.besked = null;
@@ -983,8 +992,8 @@ function platform() {
 }
 
 /** Et af telefonens egne knapnavne, vist som en lille grå knap, så det er nemt at genkende. */
-function tlfKnap(ikonEl, tekst) {
-  return h('span', { klasse: tekst ? 'tlf' : 'tlf kun-ikon', ...(tekst ? {} : { 'aria-label': 'Mere (⋯)' }) }, ikonEl, tekst || null);
+function tlfKnap(ikonEl, tekst, skjultTekst) {
+  return h('span', { klasse: tekst ? 'tlf' : 'tlf kun-ikon' }, ikonEl, tekst || h('span', { klasse: 'skjult' }, skjultTekst));
 }
 
 /**
@@ -998,7 +1007,7 @@ function lydfilVejledninger(afsnit) {
     'Lydfil fra Memoer',
     trin(
       ['Åbn ', tlfKnap(ikon('boelge'), 'Memoer'), ', og tryk på optagelsen.'],
-      ['Tryk på ', tlfKnap(ikon('mere')), ' og derefter på ', tlfKnap(ikon('del'), 'Del'), '.'],
+      ['Tryk på ', tlfKnap(ikon('mere'), null, 'Mere'), ' og derefter på ', tlfKnap(ikon('del'), 'Del'), '.'],
       ['Rul ned, og tryk på ', tlfKnap(ikon('mappe'), 'Gem i Arkiver'), '. Vælg fx På min iPhone, og tryk Gem.'],
       ['Tryk på Upload lydfil herunder, og vælg optagelsen.'],
     ),
@@ -1186,6 +1195,7 @@ function skaermDelt() {
           'div',
           { klasse: 'knapper' },
           h('button', { type: 'button', vedTryk: gemDeltFil }, ikon('igen'), 'Prøv igen'),
+          h('button', { type: 'button', klasse: 'hvid', vedTryk: delTilForsiden }, ikon('tilbage'), 'Til forsiden'),
           h('button', { type: 'button', klasse: 'hvid', vedTryk: annullerDelt }, 'Annullér'),
         )
         : venter('Gemmer lydfilen på telefonen …'),
