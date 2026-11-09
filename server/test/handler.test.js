@@ -346,6 +346,8 @@ test('fejler Word-dokumentet, sendes referatet uden, og kun koden logges', async
   assert.equal(j.docx, undefined);
   assert.equal(j.docxFilnavn, undefined);
   assert.equal(j.referatMangler, undefined);
+  // Appen sender så PDF'en, og mailen skal sige det.
+  assert.match(j.html, /vedhæftede PDF\./);
   assert.ok(s.logs.includes(JSON.stringify({ haendelse: 'docx-fejl' })));
   assert.ok(!s.logs.join('\n').includes('HEMMELIG-DOCX'));
 });

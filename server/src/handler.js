@@ -123,6 +123,8 @@ function lavHandler({
     };
     const fil = await pdf.lavPdf(indhold);
     const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
+    // Appen sender kun Word-dokumentet. PDF'en er reserve (fejlet Word) og til ældre apps.
+    const word = lavWord(indhold, filnavn);
     return {
       tekst,
       titel: r.titel,
@@ -130,9 +132,9 @@ function lavHandler({
       referat: r,
       pdf: fil.toString('base64'),
       filnavn,
-      ...lavWord(indhold, filnavn),
+      ...word,
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
-      html: lavHtml({ titel: r.titel, referat: r }),
+      html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx) }),
     };
   }
 

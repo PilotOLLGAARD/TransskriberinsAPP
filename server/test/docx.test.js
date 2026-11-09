@@ -43,6 +43,8 @@ function unzip(buf) {
   const katalogStart = buf.readUInt32LE(eocd + 16);
   assert.equal(katalogStart + katalogStr, eocd, 'centralkatalogets størrelse passer ikke');
   const dele = new Map();
+  // Rå bytes, fx til billeder. Map'en selv har teksten.
+  dele.raa = new Map();
   let p = katalogStart;
   for (let i = 0; i < antal; i++) {
     assert.equal(buf.readUInt32LE(p), 0x02014b50, 'forkert signatur i centralkataloget');
@@ -70,6 +72,7 @@ function unzip(buf) {
     assert.equal(indhold.length, udpakket, `størrelse for ${navn}`);
     assert.equal(crc32(indhold), crc, `CRC for ${navn}`);
     dele.set(navn, indhold.toString('utf8'));
+    dele.raa.set(navn, indhold);
     p += 46 + navnLgd + ekstraLgd + kommentarLgd;
   }
   return dele;
@@ -93,8 +96,8 @@ function tjekVelformet(xml, navn) {
 
 const lav = (over = {}) => lavDocx({ titel: REFERAT.titel, tidspunkt: TIDSPUNKT, varighedSek: 252, referat: REFERAT, tekst: TEKST, ...over });
 const dokument = (over) => unzip(lav(over)).get('word/document.xml');
-/** Teksten i document.xml uden tags, med entiteter afkodet. Ét afsnit pr. linje. */
-const afsnitAf = (xml) => [...xml.matchAll(/<w:p[ >].*?<\/w:p>/g)].map(([p]) => p
+/** Teksten i document.xml uden tags, med entiteter afkodet. Ét afsnit pr. linje. Logoets afsnit springes over. */
+const afsnitAf = (xml) => [...xml.matchAll(/<w:p[ >].*?<\/w:p>/g)].filter(([p]) => !p.includes('<w:drawing>')).map(([p]) => p
   .replace(/<w:tab\/>/g, '\t')
   .replace(/<[^>]*>/g, '')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&'));
@@ -124,7 +127,7 @@ test('relationerne peger på dokumentet og typografierne', () => {
 });
 
 test('alle XML-dele er velformede', () => {
-  for (const [navn, xml] of unzip(lav())) tjekVelformet(xml, navn);
+  for (const [navn, xml] of unzip(lav())) if (/\.(xml|rels)$/.test(navn)) tjekVelformet(xml, navn);
 });
 
 test('titel, linjen med type, dato og varighed, og opsummering kommer først', () => {
@@ -289,4 +292,36 @@ test('typografierne til bilaget: emnet holdes med teksten, tiden er grå, undert
   assert.match(tid, /<w:b w:val="0"\/>/);
   const tidsafsnit = stil.match(/<w:style [^>]*w:styleId="Tidsafsnit".*?<\/w:style>/)[0];
   assert.match(tidsafsnit, new RegExp(`<w:ind w:left="${tab}" w:hanging="${tab}"/>`));
+});
+
+// ØLLGAARD-logoet øverst på første side, som i PDF'en.
+
+const LOGO = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'assets', 'ordmaerke.png'));
+
+test('logoet ligger i dokumentet som det samme billede som i PDF\'en', () => {
+  const dele = unzip(lav());
+  assert.ok(dele.raa.has('word/media/ordmaerke.png'), 'mangler billedet');
+  assert.ok(dele.raa.get('word/media/ordmaerke.png').equals(LOGO));
+  assert.ok(dele.get('[Content_Types].xml').includes('<Default Extension="png" ContentType="image/png"/>'));
+});
+
+test('logoet er første afsnit og peger på billedet gennem relationerne', () => {
+  const dele = unzip(lav());
+  const rel = /<Relationship Id="(rId\d+)" Type="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/relationships\/image" Target="media\/ordmaerke.png"\/>/
+    .exec(dele.get('word/_rels/document.xml.rels'));
+  assert.ok(rel, 'mangler relation til billedet');
+  const forste = /<w:p[ >].*?<\/w:p>/.exec(dele.get('word/document.xml').replace(/^.*?<w:body>/, ''))[0];
+  assert.ok(forste.includes('<w:drawing>'), 'logoet er ikke første afsnit');
+  assert.ok(forste.includes(`r:embed="${rel[1]}"`));
+  assert.ok(forste.includes('descr="ØLLGAARD"'), 'mangler alternativ tekst');
+});
+
+test('logoet er 150 pt bredt som i PDF\'en og holder sit forhold', () => {
+  const xml = unzip(lav()).get('word/document.xml');
+  const [, cx, cy] = /<wp:extent cx="(\d+)" cy="(\d+)"\/>/.exec(xml);
+  assert.equal(Number(cx), 150 * 12700);
+  const forhold = LOGO.readUInt32BE(16) / LOGO.readUInt32BE(20);
+  assert.ok(Math.abs(Number(cx) / Number(cy) - forhold) < 0.01);
+  assert.match(xml, /<w:document [^>]*xmlns:r="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/relationships"/);
+  assert.match(xml, /<w:document [^>]*xmlns:wp="http:\/\/schemas.openxmlformats.org\/drawingml\/2006\/wordprocessingDrawing"/);
 });

@@ -6,6 +6,8 @@
  * pakket med Nodes egen zlib, så der ikke kommer nye afhængigheder.
  */
 
+const fs = require('node:fs');
+const path = require('node:path');
 const zlib = require('node:zlib');
 const { lavAfsnit, lavMeta, formaterTidspunkt } = require('./pdf.js');
 const { formaterTid } = require('./afsnit.js');
@@ -13,6 +15,15 @@ const { formaterTid } = require('./afsnit.js');
 const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const PIC = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+
+// Samme ordmærke som i PDF'en, 150 pt bredt. 1 pt = 12.700 EMU. Højden følger billedets forhold.
+const LOGO = fs.readFileSync(path.join(__dirname, '..', 'assets', 'ordmaerke.png'));
+const LOGO_CX = 150 * 12700;
+const LOGO_CY = Math.round((LOGO_CX * LOGO.readUInt32BE(20)) / LOGO.readUInt32BE(16));
+const LOGO_REL = 'rId2';
 
 /** Fjerner tegn, XML ikke tillader (Word nægter at åbne filen), og escaper resten. */
 function escape(tekst) {
@@ -53,10 +64,23 @@ function bilagAfsnit(bilag) {
     : emne.afsnit.map((a, i) => (i ? afsnit(a, 'Bilagtekst') : medTid(emne.sek, a, 'Tidsafsnit')))));
 }
 
+/** ØLLGAARD-logoet som billede i sit eget afsnit, låst til sit forhold. */
+const logo = '<w:p><w:pPr><w:spacing w:after="240"/></w:pPr><w:r><w:drawing>'
+  + `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${LOGO_CX}" cy="${LOGO_CY}"/>`
+  + '<wp:docPr id="1" name="ØLLGAARD" descr="ØLLGAARD"/>'
+  + '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+  + `<a:graphic><a:graphicData uri="${PIC}"><pic:pic>`
+  + '<pic:nvPicPr><pic:cNvPr id="1" name="ordmaerke.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+  + `<pic:blipFill><a:blip r:embed="${LOGO_REL}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
+  + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${LOGO_CX}" cy="${LOGO_CY}"/></a:xfrm>`
+  + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+  + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+
 function lavDokument({
   titel, tidspunkt, varighedSek, referat, tekst, bilag,
 }) {
   const p = [
+    logo,
     afsnit(titel, 'Title'),
     afsnit(lavMeta({ type: referat.type, tidspunkt, varighedSek }), 'Meta'),
   ];
@@ -81,7 +105,7 @@ function lavDokument({
   // A4 med 2 cm margen.
   const sektion = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
     + '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>';
-  return `${XML}<w:document xmlns:w="${W}"><w:body>${p.join('')}${sektion}</w:body></w:document>`;
+  return `${XML}<w:document xmlns:w="${W}" xmlns:r="${REL}" xmlns:wp="${WP}" xmlns:a="${A}" xmlns:pic="${PIC}"><w:body>${p.join('')}${sektion}</w:body></w:document>`;
 }
 
 const TYPOGRAFIER = `${XML}<w:styles xmlns:w="${W}">`
@@ -117,6 +141,7 @@ const TYPOGRAFIER = `${XML}<w:styles xmlns:w="${W}">`
 const INDHOLDSTYPER = `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
   + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
   + '<Default Extension="xml" ContentType="application/xml"/>'
+  + '<Default Extension="png" ContentType="image/png"/>'
   + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
   + '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
   + '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
@@ -129,6 +154,7 @@ const RELATIONER = `${XML}<Relationships xmlns="http://schemas.openxmlformats.or
 
 const DOKUMENT_RELATIONER = `${XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
   + `<Relationship Id="rId1" Type="${REL}/styles" Target="styles.xml"/>`
+  + `<Relationship Id="${LOGO_REL}" Type="${REL}/image" Target="media/ordmaerke.png"/>`
   + '</Relationships>';
 
 function lavEgenskaber({ titel, tidspunkt }) {
@@ -147,7 +173,7 @@ function lavZip(filer) {
   const katalog = [];
   let offset = 0;
   for (const [navn, tekst] of filer) {
-    const data = Buffer.from(tekst, 'utf8');
+    const data = Buffer.isBuffer(tekst) ? tekst : Buffer.from(tekst, 'utf8');
     const pakket = zlib.deflateRawSync(data);
     const crc = zlib.crc32(data);
     const navnBuf = Buffer.from(navn, 'utf8');
@@ -205,6 +231,7 @@ function lavDocx({
     })],
     ['word/_rels/document.xml.rels', DOKUMENT_RELATIONER],
     ['word/styles.xml', TYPOGRAFIER],
+    ['word/media/ordmaerke.png', LOGO],
     ['docProps/core.xml', lavEgenskaber({ titel, tidspunkt })],
   ]);
 }
