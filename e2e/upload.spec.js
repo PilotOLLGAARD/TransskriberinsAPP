@@ -510,6 +510,9 @@ for (const [navn, userAgent, bredde] of [['iPhone', IPHONE, 360], ['Android', AN
     const { kontekst, side } = await nyTelefon(miljoe, { userAgent, viewport: { width: bredde, height: 640 } });
     await aabnInformation(side);
     await side.locator('ol.guide').first().waitFor();
+    // En bred skrift som Linux' DejaVu Sans (Verdana på Windows), så testen giver det samme på GitHub.
+    await side.evaluate(() => { document.body.style.fontFamily = 'Verdana, "DejaVu Sans", sans-serif'; });
+    await side.waitForTimeout(100);
     // Vejledningen og telefonens knapnavne må aldrig gå ud over kanten. (Ved 260 px er logoet i toppen bredere end skærmen.)
     const udenfor = await side.evaluate(() => [...document.querySelectorAll('.info-afsnit *:not(.skjult)')]
       .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5 || e.scrollWidth > e.clientWidth + 1)
