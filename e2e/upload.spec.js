@@ -618,3 +618,102 @@ test('del-menuen: en fil på 48 MB kommer gennem service workeren byte for byte'
   assert.equal(await kopier(side), 0);
   await kontekst.close();
 });
+
+// Formater, som Samsung Stemmeoptager, Pixel Optager og andre apps deler. Formatet afgøres af filens
+// første bytes, så MIME-typen fra appen er ligegyldig. Serveren får en type, den kender.
+
+const hoved = (tekst, laengde = 64 * KB) => {
+  const b = Buffer.alloc(laengde, 7);
+  Buffer.from(tekst, 'latin1').copy(b, 0);
+  return b;
+};
+const SAMSUNG_M4A = () => { const b = m4a(); Buffer.from('ftyp3gp4').copy(b, 4); return b; };
+const PIXEL_M4A = () => { const b = m4a(); Buffer.from('ftypisom').copy(b, 4); return b; };
+
+test('del-menuen: m4a, wav, mp3, ogg, aac og flac med forskellige MIME-typer når serveren med en type, den kender', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  for (const [name, mimeType, buffer, forventet] of [
+    ['Stemme 001.m4a', 'audio/mp4', SAMSUNG_M4A(), 'audio/mp4'],
+    ['Stemme 002.m4a', 'audio/mp4a-latm', SAMSUNG_M4A(), 'audio/mp4'],
+    ['Stemme 003.m4a', 'audio/3gpp', SAMSUNG_M4A(), 'audio/mp4'],
+    ['Optagelse 9. nov.m4a', 'audio/x-m4a', PIXEL_M4A(), 'audio/x-m4a'],
+    ['Optagelse uden type.m4a', '', PIXEL_M4A(), 'audio/mp4'],
+    ['Opkald.wav', 'audio/x-wav', wav(1), 'audio/wav'],
+    ['Lyd.mp3', 'audio/mpeg', mp3(), 'audio/mpeg'],
+    ['Lyd.ogg', 'audio/ogg', hoved('OggS'), 'audio/ogg'],
+    ['Lyd.aac', 'audio/aac', hoved(String.fromCharCode(0xff, 0xf1, 0x50, 0x80)), 'audio/aac'],
+    ['Lyd.flac', 'application/octet-stream', hoved('fLaC'), 'audio/flac'],
+  ]) {
+    await delGennemServiceWorker(side, { name, mimeType, buffer });
+    await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+    await knap(side, 'Send').click();
+    await vis(side, SENDT);
+    const { modtaget } = await tal(miljoe);
+    assert.equal(modtaget.mime, forventet, name);
+    assert.equal(modtaget.bytes, buffer.length, name);
+  }
+  await kontekst.close();
+});
+
+test('del-menuen: AMR og en tom fil afvises med beskeden om formater, og intet gemmes', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  for (const [name, mimeType, buffer] of [['Opkald.amr', 'audio/amr', hoved('#!AMR\n', 4 * KB)], ['Tom.m4a', 'audio/mp4', Buffer.alloc(0)]]) {
+    await delGennemServiceWorker(side, { name, mimeType, buffer });
+    await vis(side, 'Filen er ikke en lydfil, appen kan bruge.');
+    await knap(side, 'Optag').waitFor();
+    assert.equal((await noter(side)).length, 0, name);
+    assert.equal(await kopier(side), 0, name);
+  }
+  await kontekst.close();
+});
+
+// Ikke logget ind: filen gemmes alligevel. Send giver login, og efter login sendes den. Uden bevis kaldes serveren ikke.
+
+for (const [navn, forbered] of [
+  ['aldrig logget ind', async () => {}],
+  ['logget ud', async (side) => {
+    await logInd(side);
+    await knap(side, 'Information').click();
+    await knap(side, 'Log ud').click();
+    await knap(side, 'Log ind').first().waitFor();
+  }],
+]) {
+  test(`del-menuen, ${navn}: filen gemmes, Send beder om login, og efter login sendes den`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe);
+    await side.goto(miljoe.adresse);
+    await forbered(side);
+    const foer = await tal(miljoe);
+    const fil = m4a(200 * KB);
+    await delGennemServiceWorker(side, { name: 'Uden login.m4a', mimeType: 'audio/mp4', buffer: fil });
+    const felt = side.getByLabel(FELT);
+    await felt.waitFor({ timeout: 15000 });
+    assert.equal(await felt.inputValue(), 'Uden login');
+    await knap(side, 'Send').click();
+    await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
+    assert.equal((await tal(miljoe)).geminiKald, foer.geminiKald);
+    const [n] = await noter(side);
+    assert.deepEqual(await lydSha(side, n.id), { bytes: fil.length, sha: sha(fil) });
+    await knap(side, 'Log ind og prøv igen').click();
+    await vis(side, SENDT, 20000);
+    const efter = await tal(miljoe);
+    assert.equal(efter.modtaget.bytes, fil.length);
+    assert.equal(efter.modtaget.sha256, sha(fil));
+    assert.equal(efter.sidsteReferat.titel, 'Uden login');
+    await kontekst.close();
+  });
+}
+
+test('del-menuen, ikke logget ind: Tilbage lader filen vente under Afventer, også når telefonen aldrig har været logget ind', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(miljoe.adresse);
+  await delGennemServiceWorker(side, { name: 'Venter.m4a', mimeType: 'audio/mp4', buffer: m4a(64 * KB) });
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  await knap(side, 'Tilbage').click();
+  await vis(side, 'Afventer');
+  await side.reload();
+  await vis(side, 'Afventer');
+  assert.equal((await noter(side)).length, 1);
+  await kontekst.close();
+});
