@@ -252,7 +252,7 @@ test('en fil, der ikke er lyd, afvises med dansk besked, og intet gemmes', async
   await kontekst.close();
 });
 
-const FOR_LANG = 'Lydfilen er længere end 2½ time. Del den op i Diktafon eller en anden app, og upload delene hver for sig.';
+const FOR_LANG = 'Lydfilen er længere end 2½ time. Del den op i en anden app, og upload delene hver for sig.';
 
 test('en fil over 2½ time afvises med dansk besked, og intet gemmes', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
@@ -444,15 +444,73 @@ test('Tidligere optagelser viser den sendte fil som enhver anden note', async ()
 
 // Information
 
-test('Information forklarer, hvordan en optagelse fra Diktafon uploades', async () => {
-  const { kontekst, side } = await nyTelefon(miljoe);
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
+const MEMOER = 'Lydfil fra Memoer';
+const ANDROID_AFSNIT = 'Lydfil fra telefonens optager';
+
+async function aabnInformation(side) {
   await logInd(side);
   await knap(side, 'Information').click();
-  await side.getByRole('heading', { name: 'Lydfil fra Diktafon' }).waitFor();
-  await vis(side, 'Åbn optagelsen i Diktafon → Del → Gem i Filer. Tryk derefter Upload lydfil i appen, og vælg filen.');
-  await vis(side, 'Du kan også vælge lydfiler fra OneDrive eller en mail, du har gemt i Filer.');
+  await side.getByRole('heading', { name: 'Information' }).waitFor();
+}
+
+test('Information på iPhone: trin for Memoer med telefonens egne knapnavne, og intet om Android eller Diktafon', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await aabnInformation(side);
+  const afsnit = side.locator('section').filter({ has: side.getByRole('heading', { name: MEMOER }) });
+  await afsnit.waitFor();
+  const trin = afsnit.locator('ol > li');
+  assert.equal(await trin.count(), 4);
+  const tekst = (await trin.allTextContents()).join(' | ');
+  for (const ord of ['Memoer', 'Del', 'Gem i Arkiver', 'På min iPhone', 'Upload lydfil']) assert.ok(tekst.includes(ord), `mangler ${ord}: ${tekst}`);
+  await vis(side, 'Vælg ikke "Kan redigeres"');
+  assert.equal(await side.getByRole('heading', { name: ANDROID_AFSNIT }).count(), 0);
+  assert.equal(await side.getByText(/Diktafon|Gem i Filer/).count(), 0);
   await kontekst.close();
 });
+
+test('Information på iPhone: Upload lydfil i vejledningen åbner filvælgeren og går til navneskærmen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await aabnInformation(side);
+  const afsnit = side.locator('section').filter({ has: side.getByRole('heading', { name: MEMOER }) });
+  const [vaelger] = await Promise.all([side.waitForEvent('filechooser'), afsnit.getByRole('button', { name: 'Upload lydfil' }).click()]);
+  await vaelger.setFiles({ name: 'Ny optagelse 3.m4a', mimeType: 'audio/mp4', buffer: m4a() });
+  assert.equal(await side.getByLabel(FELT).inputValue(), 'Ny optagelse 3');
+  await kontekst.close();
+});
+
+test('Information på Android: trin for Del-menuen, og intet om Memoer', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: ANDROID });
+  await aabnInformation(side);
+  const afsnit = side.locator('section').filter({ has: side.getByRole('heading', { name: ANDROID_AFSNIT }) });
+  await afsnit.waitFor();
+  const trin = afsnit.locator('ol > li');
+  assert.equal(await trin.count(), 4);
+  const tekst = (await trin.allTextContents()).join(' | ');
+  for (const ord of ['Stemmeoptager', 'Optager', 'Del', 'Transskribering', 'Send']) assert.ok(tekst.includes(ord), `mangler ${ord}: ${tekst}`);
+  await vis(side, 'Appen står kun i Del-menuen, når den er føjet til startskærmen.');
+  assert.equal(await side.getByRole('heading', { name: MEMOER }).count(), 0);
+  await kontekst.close();
+});
+
+test('Information på en computer viser begge vejledninger', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await aabnInformation(side);
+  await side.getByRole('heading', { name: MEMOER }).waitFor();
+  await side.getByRole('heading', { name: ANDROID_AFSNIT }).waitFor();
+  await kontekst.close();
+});
+
+for (const [navn, userAgent] of [['iPhone', IPHONE], ['Android', ANDROID]]) {
+  test(`Information på ${navn} kan læses på 360 px uden at rulle til siden`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe, { userAgent, viewport: { width: 360, height: 640 } });
+    await aabnInformation(side);
+    await side.locator('ol.guide').first().waitFor();
+    assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await kontekst.close();
+  });
+}
 
 // Del-menuen på Android (Web Share Target). Chromium kan ikke åbne del-menuen, så POST-kaldet,
 // Android laver, efterlignes med en formular, der sendes gennem service workeren.

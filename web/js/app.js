@@ -71,6 +71,11 @@ const IKONER = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/>',
   upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M5 15v4.5h14V15"/>',
   fil: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 17.5v-4l5-1v4"/><circle cx="9" cy="17.5" r="1.3"/><circle cx="14" cy="16.5" r="1.3"/>',
+  // Telefonens egne knapper i vejledningen under Information.
+  boelge: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>',
+  mere: '<circle cx="12" cy="12" r="9"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>',
+  mappe: '<path d="M3 6.5h6l2 2.5h10v10.5H3z"/>',
+  delAndroid: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
 };
 
 function ikon(navn) {
@@ -969,6 +974,52 @@ function skaermFremdrift() {
   ];
 }
 
+/** Telefonens platform ud fra browseren. iPad med skrivebordsadresse regnes som iPhone. */
+function platform() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'andet';
+}
+
+/** Et af telefonens egne knapnavne, vist som en lille grå knap, så det er nemt at genkende. */
+function tlfKnap(ikonEl, tekst) {
+  return h('span', { klasse: tekst ? 'tlf' : 'tlf kun-ikon', ...(tekst ? {} : { 'aria-label': 'Mere (⋯)' }) }, ikonEl, tekst || null);
+}
+
+/**
+ * Sådan kommer en optagelse fra telefonens egen optager ind i appen. Knapnavnene er som på en dansk telefon
+ * (Apples vejledning: Memoer → ⋯ → Del → Gem i Arkiver). Kun afsnittet for ens egen telefon vises.
+ */
+function lydfilVejledninger(afsnit) {
+  const p = platform();
+  const trin = (...punkter) => h('ol', { klasse: 'guide' }, ...punkter.map((indhold) => h('li', {}, h('span', {}, ...indhold))));
+  const iphone = afsnit(
+    'Lydfil fra Memoer',
+    trin(
+      ['Åbn ', tlfKnap(ikon('boelge'), 'Memoer'), ', og tryk på optagelsen.'],
+      ['Tryk på ', tlfKnap(ikon('mere')), ' og derefter på ', tlfKnap(ikon('del'), 'Del'), '.'],
+      ['Rul ned, og tryk på ', tlfKnap(ikon('mappe'), 'Gem i Arkiver'), '. Vælg fx På min iPhone, og tryk Gem.'],
+      ['Tryk på Upload lydfil herunder, og vælg optagelsen.'],
+    ),
+    knap('Upload lydfil', vaelgFil, { klasse: 'hvid', ikonNavn: 'upload' }),
+    h('p', { klasse: 'guide-note' }, 'Optagelsen gemmes som m4a. Vælg ikke "Kan redigeres" under Indstillinger.'),
+  );
+  const android = afsnit(
+    'Lydfil fra telefonens optager',
+    trin(
+      ['Åbn Stemmeoptager (Samsung) eller Optager (Pixel), og hold fingeren på optagelsen.'],
+      ['Tryk på ', tlfKnap(ikon('delAndroid'), 'Del'), '. Spørger telefonen, så vælg lyd, ikke tekst.'],
+      ['Vælg ', tlfKnap(h('img', { src: 'maerke.svg', alt: '' }), 'Transskribering'), '.'],
+      ['Appen åbner med lydfilen klar. Giv den et navn, og tryk Send.'],
+    ),
+    h('p', { klasse: 'guide-note' }, 'Appen står kun i Del-menuen, når den er føjet til startskærmen.'),
+  );
+  if (p === 'ios') return [iphone];
+  if (p === 'android') return [android];
+  return [iphone, android];
+}
+
 function skaermInformation() {
   const afsnit = (titel, ...indhold) => h('section', { klasse: 'info-afsnit' }, h('h2', {}, titel), ...indhold);
   return [
@@ -989,10 +1040,7 @@ function skaermInformation() {
         h('li', {}, 'Du får referatet på mail som Word-dokument, som du kan rette i. Det kan tage et par minutter.'),
       ),
     ),
-    afsnit(
-      'Lydfil fra Diktafon',
-      h('p', {}, 'Åbn optagelsen i Diktafon → Del → Gem i Filer. Tryk derefter Upload lydfil i appen, og vælg filen. Du kan også vælge lydfiler fra OneDrive eller en mail, du har gemt i Filer.'),
-    ),
+    ...lydfilVejledninger(afsnit),
     afsnit(
       'Vigtigt at vide',
       h(

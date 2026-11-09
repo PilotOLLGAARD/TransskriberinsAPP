@@ -1,4 +1,4 @@
-// En lydfil, brugeren allerede har (fx fra Diktafon): kontrol i appen og gemning på telefonen, før noget sendes.
+// En lydfil, brugeren allerede har (fx fra Memoer på iPhone): kontrol i appen og gemning på telefonen, før noget sendes.
 // Filen gemmes byte for byte. Den omkodes, nedsamples og deles aldrig, så lyden er den samme hos Google.
 
 import { LAAS_PRAEFIKS } from './optager.js';

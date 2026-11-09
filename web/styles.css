@@ -596,6 +596,22 @@ input[type="file"] { font: inherit; }
 .info-afsnit a { color: var(--blaa-dyb); font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .info-afsnit:last-child { margin-bottom: 24px; }
 
+/* Vejledning til telefonens optager: nummererede trin på et kort, og telefonens egne knapnavne som små grå knapper. */
+.guide { list-style: none; margin: 10px 0 0; padding: 4px 18px; border-radius: var(--radius-stor); background: var(--kort); box-shadow: var(--skygge); counter-reset: guide; }
+.guide li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; margin: 0; padding: 14px 0; border-bottom: 1px solid var(--linje); }
+.guide li:last-child { border-bottom: 0; }
+.guide li::before { counter-increment: guide; content: counter(guide); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--blaa-dyb); background: var(--blaa-tone); font-weight: 700; font-size: 18px; }
+.guide li > span { min-width: 0; }
+.tlf { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0; padding: 1px 10px 1px 7px; border-radius: 9px; background: #eceef2; font-weight: 650; white-space: nowrap; vertical-align: 1px; }
+.tlf.kun-ikon { padding: 1px 7px; }
+.tlf svg, .tlf img { width: 18px; height: 18px; }
+.guide + button { margin-top: 14px; }
+.info-afsnit .guide-note { margin-top: 10px; color: var(--graa); font-size: 18px; }
+@media (prefers-contrast: more) {
+  .guide { box-shadow: inset 0 0 0 2px var(--blaek); }
+  .tlf { box-shadow: inset 0 0 0 1.5px var(--blaek); }
+}
+
 /* Login-boks på forsiden, kun når man ikke er logget ind. */
 .login-boks {
   display: flex;
