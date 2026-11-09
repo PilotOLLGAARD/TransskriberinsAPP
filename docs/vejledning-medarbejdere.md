@@ -23,6 +23,27 @@ Gør det før første brug. Ellers kan browseren slette optagelser, der ikke er 
 
 Under **Information** øverst på startskærmen står en kort forklaring.
 
+## Har du allerede en lydfil?
+
+Du kan også få referat af en optagelse fra telefonens egen optager. Lydfilen behandles som en optagelse i appen: navn, Send, referat på mail og **Tidligere**.
+
+**iPhone (Memoer):**
+1. Åbn **Memoer**, og tryk på optagelsen.
+2. Tryk på **⋯** og derefter på **Del**.
+3. Rul ned, og tryk på **Gem i Arkiver**. Vælg fx På min iPhone, og tryk **Gem**.
+4. Åbn appen, tryk **Upload lydfil**, og vælg optagelsen.
+
+Tryk ikke på "Kan redigeres" under Indstillinger. Så bliver filen ikke en m4a.
+
+**Android (Stemmeoptager på Samsung, Optager på Pixel):**
+1. Hold fingeren på optagelsen, og tryk **Del**. Spørger telefonen, så vælg lyd, ikke tekst.
+2. Vælg **Transskribering**.
+3. Appen åbner med lydfilen klar. Giv den et navn, og tryk **Send**.
+
+Appen står kun i Del-menuen, når den er lagt på startskærmen. Du kan også bruge **Upload lydfil** på Android.
+
+Lydfilen må højst være 500 MB og 2½ time. Er du ikke logget ind, gemmes filen alligevel, og den sendes, når du har logget ind.
+
 ## Typer
 
 Du vælger ikke typen. Appen finder selv ud af ud fra navnet og indholdet, om optagelsen er et byggenotat, et møde, en påmindelse eller andet, og bygger referatet op efter det. Typen står i mailens emne, i Word-dokumentet og under **Tidligere**.

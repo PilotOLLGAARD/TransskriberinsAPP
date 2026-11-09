@@ -136,6 +136,12 @@ Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, 
 
 Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes aldrig.
 
+**Lydfil fra telefonens optager:**
+- **Android:** Appen står i Del-menuen (`share_target` i `web/manifest.webmanifest`), når den er lagt på startskærmen fra Chrome. Service workeren lægger filen i Cache Storage og åbner appen med `?delt=1`. Appen kontrollerer og gemmer filen straks og åbner navneskærmen. Kopien i Cache Storage slettes først, når filen er gemt i IndexedDB. Ved fuldt lager eller læsefejl bevares den og prøves igen ved næste start.
+- **iPhone:** Webapps kan ikke stå i Del-menuen ([WebKit-fejl 194593](https://bugs.webkit.org/show_bug.cgi?id=194593)). Brugeren gemmer optagelsen med Memoer → ⋯ → Del → Gem i Arkiver og vælger den med Upload lydfil. Vejledningen står under Information.
+
+Formatet afgøres af filens første bytes, ikke af MIME-typen fra den app, der deler.
+
 En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til `POST /transskriber` med `x-kun-tekst: 1` og transskriberes for sig. Derefter laver `POST /referat` ét referat af delteksterne, samlet med "[Optagelsen blev afbrudt her]". Serveren gemmer heller ikke her noget.
 
 ### Sletteregler
