@@ -48,12 +48,19 @@ export function lavBesked(note) {
     return { subject: `Transskription ${kortDato(note.oprettet)}`, body: { contentType: 'Text', content: note.tekst } };
   }
   const fraServeren = typeof note.emne === 'string' && typeof note.html === 'string';
+  const vedhaeftet = bilag(note);
+  let indhold = fraServeren ? note.html : html(note);
+  // Teksten skal passe til bilaget: en note fra før nævner PDF'en, og en for stor Word-fil giver PDF'en som reserve.
+  indhold = vedhaeftet[0].contentType === WORD ? indhold.replace(PDF_TEKST, WORD_TEKST) : indhold.replace(WORD_TEKST, PDF_TEKST);
   return {
     subject: fraServeren ? note.emne : `Referat: ${note.titel || note.referat.titel} – ${langDato(note.oprettet)}`,
-    body: { contentType: 'HTML', content: fraServeren ? note.html : html(note) },
-    attachments: bilag(note),
+    body: { contentType: 'HTML', content: indhold },
+    attachments: vedhaeftet,
   };
 }
+
+const PDF_TEKST = 'ligger i den vedhæftede PDF.';
+const WORD_TEKST = 'ligger i det vedhæftede Word-dokument.';
 
 const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 // Microsoft Graph tager kun ca. 3 MB bilag i én sendMail. Under det er der lidt luft.
@@ -67,15 +74,16 @@ function bytesAf(base64) {
 const fil = (name, contentType, contentBytes) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name, contentType, contentBytes });
 
 /**
- * PDF og, når noten har det, Word-dokumentet, så referatet kan rettes. Noter fra før Word sendes med PDF alene.
- * Bliver de to tilsammen for store til én mail, sendes kun PDF'en, aldrig en fejl.
+ * Kun Word-dokumentet. Det har referatet og hele transskriptionen og kan rettes.
+ * PDF'en sendes kun som reserve: noter fra før Word, når Word fejlede på serveren,
+ * eller hvis Word-filen er for stor til én mail. Så mangler transskriptionen aldrig.
  */
 function bilag(note) {
-  const pdf = fil(note.filnavn, 'application/pdf', note.pdf);
-  if (typeof note.docx !== 'string' || !note.docx) return [pdf];
-  if (bytesAf(note.pdf) + bytesAf(note.docx) > MAX_BILAG_BYTES) return [pdf];
-  const navn = note.docxFilnavn || `${String(note.filnavn || 'Referat').replace(/\.pdf$/i, '')}.docx`;
-  return [pdf, fil(navn, WORD, note.docx)];
+  if (typeof note.docx === 'string' && note.docx && bytesAf(note.docx) <= MAX_BILAG_BYTES) {
+    const navn = note.docxFilnavn || `${String(note.filnavn || 'Referat').replace(/\.pdf$/i, '')}.docx`;
+    return [fil(navn, WORD, note.docx)];
+  }
+  return [fil(note.filnavn, 'application/pdf', note.pdf)];
 }
 
 /**

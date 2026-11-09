@@ -132,7 +132,7 @@ gcloud secrets versions add gemini-api-key --data-file=-
 
 ## Referat og PDF
 
-Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, hvis Flash rammer en grænse (kun op til 400 s lyd) eller Googles indholdsfilter (alle længder). Derefter laver serveren et referat med Gemini 3.8 Flash, en PDF med ØLLGAARD-logo og skriften Lato og et Word-dokument. Hele transskriptionen ligger som bilag i begge, delt i emner med tidspunkt og undertitel. Intet gemmes på serveren eller hos Google (`store: false`). Hele kæden koster ca. 0,01 USD for 5 minutter og 0,11 USD for en time.
+Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, hvis Flash rammer en grænse (kun op til 400 s lyd) eller Googles indholdsfilter (alle længder). Derefter laver serveren et referat med Gemini 3.8 Flash, et Word-dokument med ØLLGAARD-logo og en PDF med logo og skriften Lato. Hele transskriptionen ligger som bilag i begge, delt i emner med tidspunkt og undertitel. Mailen har kun Word-dokumentet. PDF'en sendes kun som reserve, hvis Word-dokumentet mangler, og bruges af ældre app-udgaver. Intet gemmes på serveren eller hos Google (`store: false`). Hele kæden koster ca. 0,01 USD for 5 minutter og 0,11 USD for en time.
 
 Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes aldrig.
 

@@ -65,15 +65,14 @@ const sendteUdenLyd = (side) => side.evaluate(async () => {
 
 const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-/** Mailen har to bilag: PDF'en og Word-dokumentet med samme navn. */
+/** Mailen har ét bilag: Word-dokumentet. PDF'en sendes ikke længere. */
 function tjekWord(besked) {
-  assert.equal(besked.attachments.length, 2);
-  const [pdf, word] = besked.attachments;
-  assert.equal(pdf.contentType, 'application/pdf');
+  assert.equal(besked.attachments.length, 1);
+  const [word] = besked.attachments;
   assert.equal(word.contentType, WORD);
-  assert.match(pdf.name, /\.pdf$/);
-  assert.equal(word.name, pdf.name.replace(/\.pdf$/, '.docx'));
+  assert.match(word.name, /\.docx$/);
   assert.equal(Buffer.from(word.contentBytes, 'base64').readUInt32LE(0), 0x04034b50, 'ZIP-signatur');
+  assert.ok(!/PDF/.test(besked.body.content), 'mailteksten nævner PDF');
 }
 
 async function lydBytes(side) {
@@ -101,8 +100,7 @@ test('hele forløbet med navn', async () => {
   assert.deepEqual(besked.toRecipients, [{ emailAddress: { address: 'test@ollgaard.dk' } }]);
   assert.match(besked.subject, /^Andet: Møde omkring SAS Lounge – \d{1,2}\. \S+ \d{4}$/);
   assert.match(besked.body.content, /Testreferat af/);
-  assert.match(besked.attachments[0].name, /^\d{4}-\d{2}-\d{2} Møde omkring SAS Lounge\.pdf$/);
-  assert.equal(Buffer.from(besked.attachments[0].contentBytes, 'base64').subarray(0, 5).toString(), '%PDF-');
+  assert.match(besked.attachments[0].name, /^\d{4}-\d{2}-\d{2} Møde omkring SAS Lounge\.docx$/);
   tjekWord(besked);
   assert.equal(await sendteUdenLyd(side), 1);
   await kontekst.close();
@@ -525,7 +523,7 @@ const STARTNAVN = 'Navn (valgfrit)';
 test('ingen typevalg nogen steder: forsiden og navneskærmen har kun navnet', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  await vis(side, 'Indtal noter, møder og påmindelser. Du får referatet som PDF og Word på mail.');
+  await vis(side, 'Indtal noter, møder og påmindelser. Du får referatet i Word på mail.');
   assert.equal(await side.getByRole('radio').count(), 0);
   assert.equal(await side.getByText('Type', { exact: true }).count(), 0);
   await stopOptagelse(side);
@@ -673,7 +671,7 @@ test('efter afsendelse ligger referatet under Tidligere optagelser med Sendt og 
   await kontekst.close();
 });
 
-test('Send referat igen sender samme emne, pdf og Word uden nyt Gemini- eller referatkald', async () => {
+test('Send referat igen sender samme emne og Word uden nyt Gemini- eller referatkald', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await optag(side, { titel: 'Igen' });
@@ -690,7 +688,6 @@ test('Send referat igen sender samme emne, pdf og Word uden nyt Gemini- eller re
   assert.equal(efter.sidsteMail.message.subject, foer.sidsteMail.message.subject);
   assert.equal(efter.sidsteMail.message.attachments[0].contentBytes, foer.sidsteMail.message.attachments[0].contentBytes);
   tjekWord(efter.sidsteMail.message);
-  assert.equal(efter.sidsteMail.message.attachments[1].contentBytes, foer.sidsteMail.message.attachments[1].contentBytes);
   await kontekst.close();
 });
 
@@ -801,7 +798,7 @@ test('skjult app under optagelse giver beskeden og Fortsæt optagelsen', async (
   await kontekst.close();
 });
 
-test('fortsat optagelse giver én mail med markøren, én pdf og ét Word-dokument', async () => {
+test('fortsat optagelse giver én mail med markøren og ét Word-dokument', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   const foer = await tal(miljoe);
@@ -1183,7 +1180,7 @@ test('Information viser afsnittene og en klikbar mailadresse, og Tilbage fører 
   }
   await vis(side, 'Brug appen fra hjemmeskærmen');
   await vis(side, 'Tjek altid vigtige tal, mål og frister.');
-  await vis(side, 'Du får et referat på mail med PDF og Word-dokument. Word-dokumentet kan du rette i.');
+  await vis(side, 'Du får referatet på mail som Word-dokument, som du kan rette i.');
   const link = side.getByRole('link', { name: 'rw@ollgaard.dk' });
   assert.equal(await link.getAttribute('href'), 'mailto:rw@ollgaard.dk');
   await knap(side, 'Tilbage').click();

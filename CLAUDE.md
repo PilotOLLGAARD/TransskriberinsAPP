@@ -1,6 +1,6 @@
 # Transskriberingsapp til ØLLGAARD: projektregler
 
-Medarbejderen indtaler en note på telefonen, giver den et navn og får et referat med PDF på mail. Erstatter Notta.ai.
+Medarbejderen indtaler en note på telefonen, giver den et navn og får et referat som Word-dokument på mail. Erstatter Notta.ai.
 
 **Ny session: læs først `docs/overdragelse.md`.** Den beskriver, hvad der er bygget, beslutninger, konti, kendte mangler og næste skridt. Opsætning og udgivelse: `docs/vejledning.md`.
 
@@ -14,7 +14,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
 - Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
-- Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i PDF'en.
+- Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i Word-dokumentet. Mailen har kun Word-dokumentet; PDF'en sendes kun som reserve, hvis Word mangler (fejlet på serveren eller gamle noter). Serveren laver stadig PDF'en til det og til ældre apps.
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
 - Ingen hemmeligheder i git, i `web/` eller i logs. Læs aldrig `.env*`.
 - GitHub-kontoen PilotOLLGAARD må kun have denne ene GitHub Pages-side, og repoet `pilotollgaard.github.io` må aldrig oprettes. Alle Pages-sider på kontoen deler adressen `https://pilotollgaard.github.io`, så en anden side kunne læse login og optagelser. Skal der flere sider til, skal appen først have sit eget domæne.
@@ -23,7 +23,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 ## Arkitektur
 
-iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med PDF via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
+iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument med logo (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med Word-dokumentet via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
 
 | Fil | Ansvar |
 |---|---|

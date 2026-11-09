@@ -53,14 +53,9 @@ test('emne og bilag fra referat', () => {
 
 const WORD_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-test('note med Word-dokument får både PDF og Word som bilag', () => {
+test('note med Word-dokument får kun Word som bilag, ingen PDF', () => {
   const b = lavBesked({ ...NY, docx: 'UEsDBA==', docxFilnavn: '2026-11-02 Møde om tag.docx' });
   assert.deepEqual(b.attachments, [{
-    '@odata.type': '#microsoft.graph.fileAttachment',
-    name: '2026-11-02 Møde om tag.pdf',
-    contentType: 'application/pdf',
-    contentBytes: 'JVBERi0xLjM=',
-  }, {
     '@odata.type': '#microsoft.graph.fileAttachment',
     name: '2026-11-02 Møde om tag.docx',
     contentType: WORD_TYPE,
@@ -70,30 +65,30 @@ test('note med Word-dokument får både PDF og Word som bilag', () => {
 
 test('Word uden filnavn får PDF-navnet med .docx', () => {
   const b = lavBesked({ ...NY, docx: 'UEsDBA==' });
-  assert.equal(b.attachments[1].name, '2026-11-02 Møde om tag.docx');
+  assert.equal(b.attachments[0].name, '2026-11-02 Møde om tag.docx');
 });
 
 /** Base64 med præcis så mange bytes. */
 const base64Af = (bytes) => 'A'.repeat(Math.ceil(bytes / 3) * 4);
 
-test('over 2,9 MB i alt sendes kun PDF-filen, uden fejl', () => {
+test('Word over 2,9 MB: PDF-filen sendes i stedet, uden fejl', () => {
   const pdf = base64Af(1_500_000);
-  const b = lavBesked({ ...NY, pdf, docx: base64Af(1_500_000), docxFilnavn: 'x.docx' });
+  const b = lavBesked({ ...NY, pdf, docx: base64Af(3_000_000), docxFilnavn: 'x.docx' });
   assert.equal(b.attachments.length, 1);
   assert.equal(b.attachments[0].contentType, 'application/pdf');
   assert.equal(b.attachments[0].contentBytes, pdf);
 });
 
-test('lige under 2,9 MB i alt kommer Word med', () => {
-  const b = lavBesked({ ...NY, pdf: base64Af(1_440_000), docx: base64Af(1_440_000), docxFilnavn: 'x.docx' });
-  assert.equal(b.attachments.length, 2);
+test('Word lige under 2,9 MB sendes, uanset PDF\'ens størrelse', () => {
+  const b = lavBesked({ ...NY, pdf: base64Af(2_000_000), docx: base64Af(2_880_000), docxFilnavn: 'x.docx' });
+  assert.deepEqual(b.attachments.map((a) => a.name), ['x.docx']);
 });
 
 test('sendMail sender Word med, så Send referat igen også får Word', async () => {
   const { kald, hent } = lavHent();
   await sendMail({ note: { ...NY, docx: 'UEsDBA==', docxFilnavn: 'x.docx' }, til: 'a@ollgaard.dk', bevis: 'b', hent });
   const krop = JSON.parse(kald[0].v.body);
-  assert.deepEqual(krop.message.attachments.map((a) => a.name), ['2026-11-02 Møde om tag.pdf', 'x.docx']);
+  assert.deepEqual(krop.message.attachments.map((a) => a.name), ['x.docx']);
 });
 
 test('HTML escapes', () => {
@@ -168,4 +163,24 @@ test('online som standard: telefonens egen melding om net bruges', async () => {
     if (foer) Object.defineProperty(globalThis, 'navigator', foer);
     else delete globalThis.navigator;
   }
+});
+
+test('en note fra før, hvor serverens tekst nævner PDF\'en, får teksten rettet, når kun Word sendes', () => {
+  const html = '<p>Kort.</p>\n<p style="color:#5b6470;font-size:14px">Hele referatet og den fulde transskription ligger i den vedhæftede PDF.</p>';
+  const b = lavBesked({ ...NY, emne: 'Møde: Tag', html, docx: 'UEsDBA==', docxFilnavn: 'x.docx' });
+  assert.ok(b.body.content.includes('ligger i det vedhæftede Word-dokument.'));
+  assert.ok(!b.body.content.includes('PDF'));
+});
+
+test('sendes PDF\'en som reserve, står der PDF i mailen', () => {
+  const b = lavBesked(NY);
+  assert.ok(b.body.content.includes('vedhæftede PDF'));
+});
+
+test('nævner serverens tekst Word, men PDF\'en sendes som reserve (for stort Word), rettes teksten til PDF', () => {
+  const html = '<p>Hele referatet og den fulde transskription ligger i det vedhæftede Word-dokument.</p>';
+  const b = lavBesked({ ...NY, emne: 'Møde: Tag', html, docx: base64Af(3_000_000), docxFilnavn: 'x.docx' });
+  assert.equal(b.attachments[0].contentType, 'application/pdf');
+  assert.ok(b.body.content.includes('ligger i den vedhæftede PDF.'));
+  assert.ok(!b.body.content.includes('Word'));
 });
