@@ -68,6 +68,66 @@ function skalerTider(afsnit, varighedSek) {
   });
 }
 
+// Et afsnit længere end dette deles. Målet er et stykke for hver ca. 45 s eller 150 ord.
+const MAKS_AFSNIT_SEK = 90;
+const MAKS_AFSNIT_ORD = 200;
+const MAAL_SEK = 45;
+const MAAL_ORD = 150;
+// Sætningsskel: efter . ! ? … (evt. med anførselstegn eller parentes) og før et stort bogstav eller [uklart].
+// Så deles der ikke efter "ca. 20" eller "kl. 14".
+const SAETNINGSSKEL = /(?<=[.!?…]["'”»)\]]*)\s+(?=[\p{Lu}[«"])/u;
+
+/** Afsnittets sætninger og linjer: [{ skel, tekst }], hvor skel er det, der stod foran ("\n" eller " "). */
+function enheder(tekst) {
+  return tekst.split('\n').flatMap((linje, i) => linje.split(SAETNINGSSKEL)
+    .map((s, j) => ({ skel: j ? ' ' : i ? '\n' : '', tekst: s.trim() }))
+    .filter((e) => e.tekst));
+}
+
+/**
+ * I en samtale uden lange pauser kan Flash skrive minutter af tale som ét afsnit (set: hele optagelsen
+ * under [00:00]). Så kan emnerne ikke knyttes til tiden. Et afsnit over 90 s eller 200 ord deles derfor ved
+ * sætninger og linjeskift i stykker på ca. 45 s, og hvert stykkes tid anslås ud fra antal ord mellem
+ * afsnittets tid og det næstes (sidste afsnit: optagelsens længde). Ordene ændres aldrig.
+ * Uden tider, uden kendt slutning eller uden sætningsskel røres afsnittet ikke.
+ */
+function delLangeAfsnit(afsnit, varighedSek) {
+  if (!harTider(afsnit)) return afsnit;
+  const kendtSlut = Number.isFinite(varighedSek) && varighedSek > 0 ? Math.floor(varighedSek) : null;
+  return afsnit.flatMap((a, i) => {
+    const slut = i + 1 < afsnit.length ? afsnit[i + 1].sek : kendtSlut;
+    const ordIalt = antalOrd(a.tekst);
+    if (slut === null || a.sek === null || slut <= a.sek) return [a];
+    const spaend = slut - a.sek;
+    if (spaend <= MAKS_AFSNIT_SEK && ordIalt <= MAKS_AFSNIT_ORD) return [a];
+    const dele = enheder(a.tekst);
+    if (dele.length < 2) return [a];
+
+    const antal = Math.max(Math.ceil(spaend / MAAL_SEK), Math.ceil(ordIalt / MAAL_ORD));
+    const maal = ordIalt / antal;
+    const stykker = [];
+    let ordFoer = 0;
+    let nu = null;
+    for (const d of dele) {
+      if (!nu || nu.ord >= maal) {
+        nu = { ordFoer, skel: d.skel, tekst: d.tekst, ord: 0 };
+        stykker.push(nu);
+      } else {
+        nu.tekst += d.skel + d.tekst;
+      }
+      const n = antalOrd(d.tekst);
+      nu.ord += n;
+      ordFoer += n;
+    }
+    // Et lille stykke til sidst lægges til det før, så der ikke står en tid over en enkelt sætning.
+    if (stykker.length > 1 && stykker.at(-1).ord < maal / 3) {
+      const sidste = stykker.pop();
+      stykker.at(-1).tekst += sidste.skel + sidste.tekst;
+    }
+    return stykker.map((s) => ({ sek: a.sek + Math.floor((spaend * s.ordFoer) / ordIalt), tekst: s.tekst }));
+  });
+}
+
 /** "04:26", og over en time "1:04:12". */
 function formaterTid(sek) {
   const s = Math.max(0, Math.round(sek));
@@ -120,11 +180,15 @@ function knytEmner(afsnit, raa) {
 // Et afsnit, der ikke slutter med punktum, spørgsmålstegn eller udråbstegn, fortsætter i det næste.
 const fortsaetter = (tekst) => !/[.!?…]["'”»)\]]*$/.test(tekst);
 
-/** Afsnittenes tekster. Et afsnit, der fortsætter en sætning, sættes sammen med det før med et mellemrum. */
+/**
+ * Afsnittenes tekster. Et afsnit, der fortsætter en sætning, sættes sammen med det før med et mellemrum,
+ * men højst til 150 ord, så linjer midt i en sætning (mindst hvert 30. s) ikke bliver én lang blok.
+ */
 function saml(afsnit) {
   const ud = [];
   for (const a of afsnit) {
-    if (ud.length && fortsaetter(ud.at(-1))) ud[ud.length - 1] += ` ${a.tekst}`;
+    const forrige = ud.at(-1);
+    if (forrige && fortsaetter(forrige) && antalOrd(forrige) < 150) ud[ud.length - 1] += ` ${a.tekst}`;
     else ud.push(a.tekst);
   }
   return ud;
@@ -155,5 +219,5 @@ function lavBilag(afsnit, emner = []) {
 }
 
 module.exports = {
-  laesAfsnit, harTider, samletTekst, skalerTider, formaterTid, laesTid, medTider, trimUndertitel, knytEmner, lavBilag,
+  laesAfsnit, harTider, samletTekst, skalerTider, delLangeAfsnit, formaterTid, laesTid, medTider, trimUndertitel, knytEmner, lavBilag,
 };

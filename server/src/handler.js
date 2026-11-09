@@ -5,7 +5,9 @@ const { GeminiFejl, fejltype } = require('./gemini.js');
 const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
 const wordDel = require('./docx.js');
-const { laesAfsnit, skalerTider, samletTekst, lavBilag } = require('./afsnit.js');
+const {
+  laesAfsnit, skalerTider, delLangeAfsnit, harTider, samletTekst, lavBilag,
+} = require('./afsnit.js');
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -278,10 +280,17 @@ function lavHandler({
         bytes, mime, signal: afbryd.signal, varighedSek: varighed,
       });
       // Flashs tidspunkter deler kun bilaget op. Alt andet bruger teksten uden dem.
-      const afsnit = skalerTider(laesAfsnit(raa), varighed);
-      const tekst = samletTekst(afsnit);
+      const fraFlash = skalerTider(laesAfsnit(raa), varighed);
+      // Appens tekst følger Flashs afsnit. Lange afsnit deles kun til referatets emner og bilaget.
+      const tekst = samletTekst(fraFlash);
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
       if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
+      // Transskriptionen er betalt: fejler delingen, bruges Flashs afsnit som de er.
+      let afsnit = fraFlash;
+      try {
+        afsnit = delLangeAfsnit(fraFlash, varighed);
+      } catch { /* bilaget får Flashs afsnit */ }
+      if (harTider(fraFlash)) log({ haendelse: 'afsnit', fraFlash: fraFlash.length, efterDeling: afsnit.length });
 
       let resultat;
       try {

@@ -829,7 +829,9 @@ test('Flash-prompten beder om afsnit med tidspunktet som [mm:ss] og forbyder ikk
   assert.match(tekst, /\[mm:ss\]/);
   assert.match(tekst, /\[t:mm:ss\]/);
   assert.match(tekst, /ny linje/);
-  assert.match(tekst, /pauser eller nyt emne/);
+  // En samtale uden lange pauser blev ellers ét afsnit med kun [00:00].
+  assert.match(tekst, /ny person taler/);
+  assert.match(tekst, /mindst hvert 30\. sekund/);
   assert.ok(!tekst.includes('tidskoder'), 'tidskoder er ikke længere forbudt');
   assert.match(tekst, /talernavne/);
 });

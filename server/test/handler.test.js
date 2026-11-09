@@ -684,3 +684,52 @@ test('flere dele via /referat har intet opdelt bilag', async () => {
   assert.equal(s.pdf.valg.bilag, null);
   assert.equal(s.referat.valg.afsnit, undefined);
 });
+
+// En samtale, hvor Flash kun skrev [00:00]: afsnittet deles, så emnerne kan få tider.
+
+const SAMTALE = Array.from({ length: 120 }, (_, i) => `Replik nummer ${i + 1} handler om pladsen ved vinduet.`).join(' ');
+
+test('ét langt afsnit med kun [00:00] deles til referatet, men appens tekst er uændret', async () => {
+  const s = await start({ gemini: medTiderGemini(`[00:00] ${SAMTALE}`) });
+  const j = await (await post(s.adresse, { headers: { 'x-varighed': '600' } })).json();
+  assert.equal(j.tekst, SAMTALE);
+  assert.equal(s.referat.valg.tekst, SAMTALE);
+  const afsnit = s.referat.valg.afsnit;
+  assert.ok(afsnit.length >= 10, `kun ${afsnit.length} afsnit`);
+  assert.equal(afsnit.map((a) => a.tekst).join(' '), SAMTALE);
+  assert.ok(afsnit.at(-1).sek > 500);
+});
+
+test('loggen viser antal afsnit fra Flash og efter deling, aldrig tekst', async () => {
+  const s = await start({ gemini: medTiderGemini(`[00:00] ${SAMTALE}`) });
+  await post(s.adresse, { headers: { 'x-varighed': '600' } });
+  const linje = s.logs.map((l) => JSON.parse(l)).find((l) => l.haendelse === 'afsnit');
+  assert.ok(linje, s.logs.join());
+  assert.equal(linje.fraFlash, 1);
+  assert.ok(linje.efterDeling >= 10);
+  assert.deepEqual(Object.keys(linje).sort(), ['efterDeling', 'fraFlash', 'haendelse']);
+  assert.ok(!s.logs.join('\n').includes('Replik'));
+});
+
+test('uden tidspunkter logges ingen afsnit', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-varighed': '300' } });
+  assert.ok(!s.logs.some((l) => JSON.parse(l).haendelse === 'afsnit'));
+});
+
+test('bilaget til PDF og Word får flere emner, når Flash kun skrev [00:00]', async () => {
+  const referat = falskReferat(async ({ afsnit }) => ({
+    ...REFERAT, emner: [{ fra: 0, undertitel: 'Start' }, { fra: Math.floor(afsnit.length / 2), undertitel: 'Midt' }],
+  }));
+  const s = await start({ gemini: medTiderGemini(`[00:00] ${SAMTALE}`), referat });
+  await post(s.adresse, { headers: { 'x-varighed': '600' } });
+  assert.equal(s.pdf.valg.bilag.length, 2);
+  assert.ok(s.pdf.valg.bilag[1].sek > 200, `fik ${s.pdf.valg.bilag[1].sek}`);
+});
+
+test('dele af en afbrudt optagelse (x-kun-tekst) logger ingen deling', async () => {
+  const s = await start({ gemini: medTiderGemini(`[00:00] ${SAMTALE}`) });
+  const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-varighed': '600' } })).json();
+  assert.deepEqual(j, { tekst: SAMTALE });
+  assert.ok(!s.logs.some((l) => JSON.parse(l).haendelse === 'afsnit'));
+});

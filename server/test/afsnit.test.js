@@ -253,3 +253,74 @@ test('lavBilag: afsnit uden punktum lægges højst sammen i 60 s, så tiderne ik
   for (let i = 1; i < bilag.length; i++) assert.ok(bilag[i].sek - bilag[i - 1].sek <= 70);
   assert.deepEqual(bilag.flatMap((b) => b.afsnit).join(' ').split(' '), afsnit.map((a) => a.tekst).join(' ').split(' '));
 });
+
+// Lange afsnit: i en samtale uden lange pauser kan Flash skrive alt som ét afsnit med kun [00:00].
+
+const { delLangeAfsnit } = require('../src/afsnit.js');
+// En sætning på 10 ord.
+const saetning = (n) => `Sætning nummer ${n} handler om noget helt andet end den før.`;
+const langTekst = (antal, skille = ' ') => Array.from({ length: antal }, (_, i) => saetning(i + 1)).join(skille);
+
+test('delLangeAfsnit: ét afsnit over 10 minutter deles ved punktum med anslåede, stigende tider', () => {
+  const ud = delLangeAfsnit([{ sek: 0, tekst: langTekst(150) }], 600);
+  assert.ok(ud.length >= 10, `kun ${ud.length} afsnit`);
+  assert.equal(ud[0].sek, 0);
+  for (let i = 1; i < ud.length; i += 1) assert.ok(ud[i].sek > ud[i - 1].sek, `tid ${i} stiger ikke`);
+  assert.ok(ud.at(-1).sek < 600);
+  // Hvert stykke slutter ved et punktum og er højst ca. 45 s.
+  for (const a of ud) assert.match(a.tekst, /\.$/);
+  for (let i = 1; i < ud.length; i += 1) assert.ok(ud[i].sek - ud[i - 1].sek <= 60);
+});
+
+test('delLangeAfsnit: tiderne fordeles efter antal ord mellem de kendte tidspunkter', () => {
+  // 100 sætninger på 400 s: sætning 51 begynder efter halvdelen af ordene, altså ca. 200 s.
+  const ud = delLangeAfsnit([{ sek: 0, tekst: langTekst(100) }, { sek: 400, tekst: 'Slut.' }], 410);
+  const midt = ud.find((a) => a.tekst.startsWith(saetning(51)));
+  if (midt) assert.ok(Math.abs(midt.sek - 200) <= 2, `fik ${midt.sek}`);
+  assert.deepEqual(ud.at(-1), { sek: 400, tekst: 'Slut.' });
+  assert.ok(ud.filter((a) => a.sek < 400).length >= 8);
+});
+
+test('delLangeAfsnit: hele teksten er med ord for ord, og linjeskift bevares som skel', () => {
+  const kilde = [{ sek: 0, tekst: langTekst(40, '\n') }, { sek: 300, tekst: langTekst(30) }];
+  const ud = delLangeAfsnit(kilde, 500);
+  assert.deepEqual(ord(samletTekst(ud)), ord(samletTekst(kilde)));
+  assert.ok(ud.length > kilde.length);
+});
+
+test('delLangeAfsnit: korte afsnit og afsnit uden punktum røres ikke', () => {
+  const kort = [{ sek: 0, tekst: langTekst(5) }, { sek: 40, tekst: langTekst(5) }];
+  assert.deepEqual(delLangeAfsnit(kort, 80), kort);
+  const udenPunktum = [{ sek: 0, tekst: 'og så videre '.repeat(300).trim() }];
+  assert.deepEqual(delLangeAfsnit(udenPunktum, 600), udenPunktum);
+});
+
+test('delLangeAfsnit: uden tider eller ukendt slutning af sidste afsnit deles ikke', () => {
+  const udenTider = [{ sek: null, tekst: langTekst(150) }];
+  assert.deepEqual(delLangeAfsnit(udenTider, 600), udenTider);
+  const sidste = [{ sek: 0, tekst: langTekst(150) }];
+  assert.deepEqual(delLangeAfsnit(sidste, null), sidste);
+});
+
+test('delLangeAfsnit: mange ord på kort tid deles også (Flash har presset tiderne)', () => {
+  const ud = delLangeAfsnit([{ sek: 0, tekst: langTekst(60) }, { sek: 60, tekst: 'Slut.' }], 70);
+  assert.ok(ud.length >= 4, `kun ${ud.length} afsnit`);
+  for (let i = 1; i < ud.length; i += 1) assert.ok(ud[i].sek >= ud[i - 1].sek);
+});
+
+test('delLangeAfsnit: så kan referatets emner knyttes til hele optagelsen', () => {
+  const ud = delLangeAfsnit([{ sek: 0, tekst: langTekst(150) }], 600);
+  const emner = knytEmner(ud, [{ tid: '00:00', undertitel: 'Start' }, { tid: '05:00', undertitel: 'Midt' }]);
+  assert.equal(emner.length, 2);
+  assert.ok(emner[1].fra > 0);
+});
+
+test('lavBilag: med emner lægges linjer uden punktum højst sammen til ca. 150 ord', () => {
+  // Flash skal skrive en ny linje mindst hvert 30. sekund, også midt i en sætning.
+  const linjer = Array.from({ length: 40 }, (_, i) => ({ sek: i * 15, tekst: 'og så går vi videre med det næste punkt på listen og' }));
+  const bilag = lavBilag(linjer, [{ fra: 0, undertitel: 'Hele mødet' }]);
+  assert.equal(bilag.length, 1);
+  assert.ok(bilag[0].afsnit.length >= 3, `kun ${bilag[0].afsnit.length} afsnit`);
+  for (const a of bilag[0].afsnit) assert.ok(ord(a).length <= 160);
+  assert.deepEqual(ord(bilag[0].afsnit.join(' ')), ord(samletTekst(linjer)));
+});

@@ -27,8 +27,8 @@ const FLASH = 'flash';
 const FLASH_MIN_MS = 60 * 1000;
 // Tidspunkterne bruges kun til at dele bilaget i PDF'en op og fjernes fra teksten bagefter (afsnit.js).
 const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter '
-  + 'eller talernavne. Del teksten i afsnit ved naturlige pauser eller nyt emne, og start hvert afsnit på en ny linje '
-  + 'med tidspunktet i lyden som [mm:ss], eller [t:mm:ss] efter den første time. '
+  + 'eller talernavne. Start en ny linje, hver gang en ny person taler, og mindst hvert 30. sekund, også midt i '
+  + 'en lang tale. Start hver linje med tidspunktet i lyden som [mm:ss], eller [t:mm:ss] efter den første time. '
   + 'Skriv tal, som de bliver sagt. Skriv "[uklart]", hvor noget ikke kan høres. Opfind aldrig noget.';
 // Det trin, en fejl skete i, som det står i loggen.
 const TRIN = { 'upload-start': 'upload', upload: 'upload', interactions: 'transskription', referat: 'referat' };
