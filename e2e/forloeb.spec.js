@@ -1,11 +1,13 @@
 'use strict';
-const { test, before, after } = require('node:test');
+const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
 after(async () => { await miljoe.stop(); });
+// En test, der fejler, før den selv har slået serverens fejl fra, må ikke vælte de næste.
+afterEach(async () => { await saetNaesteFejl(miljoe, 'ingen'); });
 
 const knap = (side, navn) => side.getByRole('button', { name: navn, exact: true });
 const SENDT = 'Referatet er sendt til test@ollgaard.dk';
