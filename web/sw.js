@@ -65,8 +65,8 @@ self.addEventListener('notificationclick', (e) => {
 
 /**
  * Del-menuen (Web Share Target, kun Android): Filen lægges midlertidigt, og appen åbnes med ?delt=1.
- * Enhver side kan sende hertil, så appen spørger først brugeren. Først ved "Gem lydfilen" kontrolleres og
- * gemmes filen. Kopien fjernes efter gemning, Annullér eller en fil, der ikke kan bruges.
+ * Appen kontrollerer og gemmer filen straks og åbner navneskærmen. Enhver side kan sende hertil, men intet
+ * sendes, før brugeren selv trykker Send. Kopien fjernes efter gemning, Annullér eller en fil, der ikke kan bruges.
  * Går noget galt, åbnes appen alligevel med en besked i stedet for en fejlside.
  */
 async function modtagDelt(request) {

@@ -273,8 +273,9 @@ async function modtagFil(fil) {
 }
 
 /**
- * En lydfil fra del-menuen på Android, lagt af service workeren. Enhver side kan sende en fil dertil,
- * så intet gemmes, før brugeren selv har trykket Gem lydfilen.
+ * En lydfil fra del-menuen på Android, lagt af service workeren. Den gemmes straks, og navneskærmen åbnes,
+ * som ved Upload lydfil. Enhver side kan sende en fil dertil, men intet sendes, før brugeren selv trykker Send.
+ * Ligger kopien der stadig efter en fejl, prøves gemningen igen ved næste start.
  */
 async function modtagDeltFil() {
   const svar = new URLSearchParams(location.search).get('delt');
@@ -295,11 +296,13 @@ async function modtagDeltFil() {
   t.besked = null;
   t.visning = 'delt';
   tegn();
+  await gemDeltFil();
 }
 
-/** Brugeren har valgt Gem lydfilen: filen kontrolleres og gemmes som en valgt lydfil. */
+/** Den delte fil kontrolleres og gemmes som en valgt lydfil. Også Prøv igen efter en fejl. */
 async function gemDeltFil() {
   if (!t.delt || t.gemmerFil) return;
+  t.delt.fejl = null;
   await afslutDelt(await modtagFil(t.delt.fil));
 }
 
@@ -311,10 +314,12 @@ function annullerDelt() {
 
 /**
  * Fjerner den midlertidige kopi, når den ikke skal bruges igen. Ved fuldt lager og læsefejl bliver den,
- * og skærmen bliver stående, så Gem lydfilen kan prøves igen.
+ * og skærmen viser fejlen med Prøv igen og Annullér.
  */
 async function afslutDelt(udfald) {
+  if (udfald === undefined || !t.delt) return;
   if (!fjernDeltKopi(udfald)) {
+    t.delt.fejl = udfald;
     tegn();
     return;
   }
@@ -1112,29 +1117,30 @@ function filKort(note) {
   );
 }
 
-/** En lydfil fra del-menuen. Den gemmes først, når brugeren selv vælger det. */
+/** En lydfil fra del-menuen, mens den gemmes, eller når den ikke kunne gemmes (fuldt lager, læsefejl). */
 function skaermDelt() {
   if (!t.delt) {
     t.visning = 'start';
     return skaermStart();
   }
   const { fil } = t.delt;
+  const fejl = Boolean(t.delt.fejl) && !t.gemmerFil;
   return [
     h('header', { klasse: 'top' }, ordmaerke()),
-    h('h1', { klasse: 'titel' }, 'Vil du gemme lydfilen?'),
-    beskedElement(),
+    h('h1', { klasse: 'titel' }, fejl ? 'Lydfilen er ikke gemt' : 'Lydfil fra Del-menuen'),
+    fejl ? beskedElement() : null,
     h(
       'div',
       { klasse: 'navn' },
       filKort({ filnavn: fil.name, bytes: fil.size }),
-      h('p', { klasse: 'hjaelpetekst' }, 'En lydfil er delt med appen. Den gemmes kun på telefonen, hvis du vælger det.'),
-      t.gemmerFil ? venter('Gemmer lydfilen …') : null,
-      h(
-        'div',
-        { klasse: 'knapper' },
-        h('button', { type: 'button', vedTryk: gemDeltFil, disabled: t.gemmerFil }, ikon('tjek'), 'Gem lydfilen'),
-        h('button', { type: 'button', klasse: 'hvid', vedTryk: annullerDelt, disabled: t.gemmerFil }, 'Annullér'),
-      ),
+      fejl
+        ? h(
+          'div',
+          { klasse: 'knapper' },
+          h('button', { type: 'button', vedTryk: gemDeltFil }, ikon('igen'), 'Prøv igen'),
+          h('button', { type: 'button', klasse: 'hvid', vedTryk: annullerDelt }, 'Annullér'),
+        )
+        : venter('Gemmer lydfilen på telefonen …'),
     ),
   ];
 }
