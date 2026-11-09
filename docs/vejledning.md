@@ -24,6 +24,7 @@ Disse filer kommer ikke på GitHub og følger ikke med `git clone`. Skifter du c
 - `docs/plan.md` og alle `docs/plan-*.md`
 - `docs/it-opsaetning.md`
 - `docs/test-resultater.md`
+- `docs/udrulning.md`
 
 Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv et sted med sikkerhedskopi. `npm run tjek:hemmeligheder` fejler, hvis en af dem nogensinde har ligget i git, også i et tag eller en gammel gren.
 
@@ -131,7 +132,9 @@ gcloud secrets versions add gemini-api-key --data-file=-
 
 ## Referat og PDF
 
-Efter transskriptionen laver serveren et referat med Gemini 3.8 Flash og en PDF med ØLLGAARD-logo, skriften Lato og hele transskriptionen som bilag. Intet gemmes på serveren eller hos Google (`store: false`). Et referat koster ca. 2 øre for 5 minutters tale.
+Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, hvis Flash rammer en grænse (kun op til 400 s lyd) eller Googles indholdsfilter (alle længder). Derefter laver serveren et referat med Gemini 3.8 Flash, en PDF med ØLLGAARD-logo og skriften Lato og et Word-dokument. Hele transskriptionen ligger som bilag i begge, delt i emner med tidspunkt og undertitel. Intet gemmes på serveren eller hos Google (`store: false`). Hele kæden koster ca. 0,01 USD for 5 minutter og 0,11 USD for en time.
+
+Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes aldrig.
 
 En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til `POST /transskriber` med `x-kun-tekst: 1` og transskriberes for sig. Derefter laver `POST /referat` ét referat af delteksterne, samlet med "[Optagelsen blev afbrudt her]". Serveren gemmer heller ikke her noget.
 
@@ -143,7 +146,17 @@ En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til
 | Tekst, referat og PDF | Bliver 7 dage efter første afsendelse (til "Send referat igen"), og slettes så, når appen åbnes | Gemmes ikke (`store: false`) |
 | Ikke sendt eller fejlet | Slettes aldrig automatisk | – |
 
-- Modellen kan skiftes med miljøvariablen `REFERAT_MODEL` på serveren, fx `gemini-3.5-flash-lite`.
+- Indstillinger på serveren (sat i `.github/workflows/server.yml`, standarder i `server/src/konfig.js`):
+
+| Variabel | Betydning |
+|---|---|
+| `FLASH_MODEL`, `GEMINI_MODEL`, `REFERAT_MODEL` | Flash, Transcribe og modellen til referatet |
+| `TRANSSKRIPTION_FOERST` | `flash` (standard) eller `transcribe` |
+| `TRANSCRIBE_MAKS_SEK` | Længste lyd, Transcribe tager over ved en grænse hos Flash (400 s) |
+| `TRANSSKRIPTION_TILSTAND` | `verbatim` (standard). `smart` sprang replikker over |
+| `MAX_LYD_BYTES`, `GEMINI_TIMEOUT_MS` | 500 MiB og 840 s |
+
+- Rammer Googles dagsgrænse, svarer serveren `kvote`, og brugeren får en besked om at prøve igen i morgen. Lyden bliver på telefonen.
 - Reglerne for referatet står i `server/src/referat.js`.
 - Prøv et referat og en PDF på din computer (koster penge, brug kun opdigtede tekster):
 

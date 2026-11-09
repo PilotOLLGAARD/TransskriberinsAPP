@@ -4,7 +4,7 @@ Medarbejderen indtaler en note på telefonen, giver den et navn og får et refer
 
 **Ny session: læs først `docs/overdragelse.md`.** Den beskriver, hvad der er bygget, beslutninger, konti, kendte mangler og næste skridt. Opsætning og udgivelse: `docs/vejledning.md`.
 
-Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan.md`, `docs/plan-*.md` (design og planer), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`. `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
+Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan.md`, `docs/plan-*.md` (design og planer), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`, `docs/udrulning.md` (tjekliste før udrulning). `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
 
 ## Krav der aldrig må brydes
 
@@ -28,13 +28,21 @@ iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | Fil | Ansvar |
 |---|---|
 | `server/src/adgang.js` | Tjek af Entra-bevis |
-| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF. Headere `x-titel`, `x-type`, `x-varighed`, `x-optaget`, `x-kun-tekst` (kun teksten). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
-| `server/src/gemini.js` | Upload, transskription og sletning hos Google |
+| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF og Word. Headere `x-titel`, `x-type` (kun gamle noter), `x-varighed` (over 9000 s afvises), `x-optaget`, `x-kun-tekst` (kun teksten), `x-referat-mangler` (appen forstår `{tekst, referatMangler}`, når referatet fejler efter transskriptionen). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
+| `server/src/gemini.js` | Upload, transskription og sletning hos Google. Flash først; Transcribe tager over ved 429/5xx (højst 400 s lyd) og ved Googles indholdsfilter (alle længder) |
+| `server/src/genforsoeg.js` | Genforsøg ved 429, 5xx og netfejl. Dagsgrænsen giver 503 `kvote` |
+| `server/src/afsnit.js` | Flashs `[mm:ss]`-markører: fjernes fra teksten, rettes med varigheden og deler bilaget i emner med undertitel |
+| `server/src/referat.js` | Referatets prompt, skema og emner. `server/src/tal.js`: tal, der ikke blev sagt, bliver [uklart] |
+| `server/src/pdf.js`, `server/src/docx.js` | PDF og Word med samme indhold |
+| `server/src/konfig.js` | Miljøvariabler og standarder (500 MiB, 840 s, verbatim, modeller) |
 | `web/js/optager.js` | Optagelse, afbrydelser, varighed |
 | `web/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
 | `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
 | `web/js/app.js` | Kun brugerflade |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |
+| `scripts/testbaenk/` | Testlyd og målinger mod rigtig Gemini (koster penge, spørg først). Forbrug logges i `testlyd/forbrug.json` |
+
+Googles grænser på Tier 1: Flash 1.000 kald/min og 10.000/dag, Transcribe 10 kald/min, 10.000 tokens/min og 100/dag. Indholdsfilteret kan ikke slås fra. Forsidens browsertests måler med Arial/Liberation Sans, så de også består med Linux' skrifter på GitHub.
 
 ## Kommandoer
 
@@ -51,6 +59,7 @@ node --env-file=.env scripts/proev-referat.js testlyd/x.txt --pdf .   # rigtig G
 - Push til `main` udgiver straks: `web/` til GitHub Pages og `server/` til Cloud Run. Begge kører hele testsuiten først.
 - Arbejd på en separat gren, og push først, når alt er testet.
 - Ændrer en opgave både server og app, skal serveren udgives først. Vent, til "Udgiv serveren" er grøn.
+- Arbejdsgrenen hedder `forbedringer`. Den udgives med `git push origin forbedringer:main`.
 
 ## Arbejdsform
 
