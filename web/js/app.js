@@ -35,6 +35,7 @@ const t = {
   delt: null, // { fil, fjern } en lydfil fra del-menuen, der venter på brugerens svar
   noter: [],
   aabenNote: null,
+  infoAaben: new Set(), // afsnit under Information, brugeren har foldet ud
   fraVisning: 'start', // skærmen, Læs vender tilbage til
   fremdriftNote: null, // noten, skærmen efter Send viser
   fortryd: null, // { id, tekst, timer } mens en sletning kan fortrydes
@@ -76,6 +77,10 @@ const IKONER = {
   mere: '<circle cx="12" cy="12" r="9"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>',
   mappe: '<path d="M3 6.5h6l2 2.5h10v10.5H3z"/>',
   delAndroid: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
+  tilfoej: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>',
+  menu: '<path d="M12 5.5h.01M12 12h.01M12 18.5h.01" stroke-width="3"/>',
+  // Pilen på et afsnit, der kan foldes ud.
+  pil: '<path d="m6 9.5 6 6 6-6"/>',
 };
 
 function ikon(navn) {
@@ -1001,9 +1006,11 @@ function tlfKnap(ikonEl, tekst, skjultTekst) {
  * Sådan kommer en optagelse fra telefonens egen optager ind i appen. Knapnavnene er som på en dansk telefon
  * (Apples vejledning: Memoer → ⋯ → Del → Gem i Arkiver). Kun afsnittet for ens egen telefon vises.
  */
+/** Nummererede trin på et kort. Hvert punkt er en liste af tekst og telefonens knapnavne. */
+const trin = (...punkter) => h('ol', { klasse: 'guide' }, ...punkter.map((indhold) => h('li', {}, h('span', {}, ...indhold))));
+
 function lydfilVejledninger(afsnit) {
   const p = platform();
-  const trin = (...punkter) => h('ol', { klasse: 'guide' }, ...punkter.map((indhold) => h('li', {}, h('span', {}, ...indhold))));
   const iphone = afsnit(
     'Lydfil fra Memoer',
     trin(
@@ -1030,6 +1037,94 @@ function lydfilVejledninger(afsnit) {
   return [iphone, android];
 }
 
+/** Sådan lægges appen på hjemmeskærmen. Knapnavnene er som i Safari og Chrome på en dansk telefon. */
+function hjemmeskaermVejledning() {
+  const installeret = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (installeret) return [h('p', {}, 'Du bruger allerede appen fra hjemmeskærmen.')];
+  const p = platform();
+  const iphone = [
+    trin(
+      ['Åbn appen i Safari.'],
+      ['Tryk på ', tlfKnap(ikon('del'), 'Del'), ' nederst på skærmen.'],
+      ['Rul ned, og tryk på ', tlfKnap(ikon('tilfoej'), 'Føj til hjemmeskærm'), '.'],
+      ['Tryk Tilføj. Åbn derefter appen fra ikonet på hjemmeskærmen.'],
+    ),
+    h('p', { klasse: 'guide-note' }, 'Så bliver dine optagelser ikke slettet af browseren.'),
+  ];
+  const android = [
+    trin(
+      ['Åbn appen i Chrome.'],
+      ['Tryk på ', tlfKnap(ikon('menu'), null, 'Menu'), ' øverst til højre.'],
+      ['Tryk på ', tlfKnap(ikon('tilfoej'), 'Føj til startskærm'), '. Står der Installer app, så tryk på den.'],
+      ['Tryk Installer. Åbn derefter appen fra ikonet på startskærmen.'],
+    ),
+    h('p', { klasse: 'guide-note' }, 'Så står appen i Del-menuen, og dine optagelser bliver ikke slettet af browseren.'),
+  ];
+  if (p === 'ios') return iphone;
+  if (p === 'android') return android;
+  return [h('h3', {}, 'iPhone'), ...iphone, h('h3', {}, 'Android'), ...android];
+}
+
+/**
+ * Et afsnit, der er foldet sammen, til man trykker på overskriften. Hvad der er foldet ud, huskes,
+ * så det ikke klapper sammen, når skærmen tegnes igen, eller man kommer tilbage til Information.
+ */
+function foldAfsnit(titel, ...indhold) {
+  const el = h(
+    'details',
+    { klasse: 'info-fold', open: t.infoAaben.has(titel) },
+    h('summary', {}, h('span', {}, titel), ikon('pil')),
+    h('div', { klasse: 'fold-indhold' }, ...indhold),
+  );
+  el.addEventListener('toggle', () => {
+    if (el.open) t.infoAaben.add(titel);
+    else t.infoAaben.delete(titel);
+  });
+  return el;
+}
+
+const punkter = (...linjer) => h('ul', { klasse: 'info-liste' }, ...linjer.map((l) => h('li', {}, l)));
+
+function godeRaad() {
+  return h(
+    'section',
+    { klasse: 'info-afsnit' },
+    h('h2', {}, 'Gode råd'),
+    foldAfsnit('Læg appen på hjemmeskærmen', ...hjemmeskaermVejledning()),
+    foldAfsnit(
+      'Gode optagelser',
+      punkter(
+        'Læg telefonen tæt på den, der taler, med skærmen opad. Til møder: midt på bordet.',
+        'Sig i starten, hvad det handler om, hvor du er, og hvem der er med.',
+        'Sig navne, tal, mål og datoer tydeligt. Det, der ikke kan høres, skrives som [uklart] i stedet for at blive gættet.',
+      ),
+    ),
+    foldAfsnit(
+      'Hvis noget afbryder',
+      punkter(
+        'Et opkald eller en låst skærm kan stoppe optagelsen. Det optagede er gemt. Tryk Fortsæt optagelsen for at optage videre i samme optagelse.',
+        'Uden net bliver optagelsen liggende på telefonen. Tryk Prøv igen, når du har net.',
+        'En optagelse slettes aldrig, før referatet er sendt, eller du selv har valgt Slet.',
+      ),
+    ),
+    foldAfsnit(
+      'Tidligere optagelser',
+      punkter(
+        'Under Tidligere optagelser ligger dine optagelser fra de sidste 7 dage. Tryk Læs for at se referatet.',
+        'Send referat igen sender det samme referat en gang til, uden at det skal laves igen.',
+        `Slet kan fortrydes i ${Math.round(FORTRYD_MS / 1000)} sekunder.`,
+      ),
+    ),
+    foldAfsnit(
+      'Grænser',
+      punkter(
+        'En optagelse kan højst vare 59 minutter. Appen advarer 4 minutter før. Er mødet længere, så send optagelsen, og start en ny.',
+        'En lydfil må højst vare 2½ time og 500 MB. Appen kan bruge m4a, mp3, wav, ogg og webm.',
+      ),
+    ),
+  );
+}
+
 function skaermInformation() {
   const afsnit = (titel, ...indhold) => h('section', { klasse: 'info-afsnit' }, h('h2', {}, titel), ...indhold);
   return [
@@ -1051,6 +1146,7 @@ function skaermInformation() {
       ),
     ),
     ...lydfilVejledninger(afsnit),
+    godeRaad(),
     afsnit(
       'Vigtigt at vide',
       h(

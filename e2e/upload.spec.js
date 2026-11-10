@@ -498,6 +498,83 @@ test('Information på Android: trin for Del-menuen, og intet om Memoer', async (
   await kontekst.close();
 });
 
+// Gode råd, foldet sammen under hver sin overskrift, så skærmen ikke bliver lang.
+const FOLDER = ['Læg appen på hjemmeskærmen', 'Gode optagelser', 'Hvis noget afbryder', 'Tidligere optagelser', 'Grænser'];
+const fold = (side, titel) => side.locator('details.info-fold').filter({ has: side.locator('summary', { hasText: titel }) });
+
+async function aabnFold(side, titel) {
+  await fold(side, titel).locator('summary').click();
+  await side.waitForFunction((t) => [...document.querySelectorAll('details.info-fold')].some((d) => d.open && d.querySelector('summary').textContent.includes(t)), titel);
+}
+
+test('Information har gode råd foldet sammen, og hvert afsnit åbner ved tryk', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await aabnInformation(side);
+  for (const titel of FOLDER) {
+    const d = fold(side, titel);
+    assert.equal(await d.count(), 1, `mangler ${titel}`);
+    assert.equal(await d.evaluate((e) => e.open), false, `${titel} er ikke foldet sammen`);
+    const summary = d.locator('summary');
+    assert.ok((await summary.boundingBox()).height >= 56, `${titel} er for lille at trykke på`);
+  }
+  // Det vigtigste står åbent.
+  for (const overskrift of ['Sådan bruger du den', MEMOER, 'Vigtigt at vide', 'Kontakt']) {
+    assert.ok(await side.getByRole('heading', { name: overskrift }).isVisible(), overskrift);
+  }
+  await aabnFold(side, 'Gode optagelser');
+  await vis(side, 'Sig i starten, hvad det handler om');
+  await vis(side, '[uklart]');
+  await aabnFold(side, 'Hvis noget afbryder');
+  await vis(side, 'Fortsæt optagelsen');
+  await aabnFold(side, 'Tidligere optagelser');
+  await vis(side, 'Send referat igen');
+  await vis(side, 'Slet kan fortrydes i 7 sekunder');
+  await aabnFold(side, 'Grænser');
+  await vis(side, '59 minutter');
+  await vis(side, '2½ time og 500 MB');
+  await kontekst.close();
+});
+
+test('Information: hjemmeskærmen forklares med trin for ens egen telefon', async () => {
+  const iphone = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await aabnInformation(iphone.side);
+  await aabnFold(iphone.side, 'Læg appen på hjemmeskærmen');
+  const iTekst = await fold(iphone.side, 'Læg appen på hjemmeskærmen').textContent();
+  for (const ord of ['Safari', 'Del', 'Føj til hjemmeskærm', 'Tilføj']) assert.ok(iTekst.includes(ord), `iPhone mangler ${ord}: ${iTekst}`);
+  assert.ok(!iTekst.includes('Chrome'), iTekst);
+  await iphone.kontekst.close();
+
+  const android = await nyTelefon(miljoe, { userAgent: ANDROID });
+  await aabnInformation(android.side);
+  await aabnFold(android.side, 'Læg appen på hjemmeskærmen');
+  const aTekst = await fold(android.side, 'Læg appen på hjemmeskærmen').textContent();
+  for (const ord of ['Chrome', 'Menu', 'Føj til startskærm', 'Del-menuen']) assert.ok(aTekst.includes(ord), `Android mangler ${ord}: ${aTekst}`);
+  assert.ok(!aTekst.includes('Safari'), aTekst);
+  await android.kontekst.close();
+});
+
+test('Information: appen åbnet fra hjemmeskærmen siger, at den allerede ligger der', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await side.addInitScript(() => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
+  await aabnInformation(side);
+  await aabnFold(side, 'Læg appen på hjemmeskærmen');
+  await vis(side, 'Du bruger allerede appen fra hjemmeskærmen.');
+  assert.equal(await fold(side, 'Læg appen på hjemmeskærmen').locator('ol').count(), 0);
+  await kontekst.close();
+});
+
+test('Information: et åbnet afsnit er stadig åbent, når man kommer tilbage', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { userAgent: IPHONE });
+  await aabnInformation(side);
+  await aabnFold(side, 'Grænser');
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Information').click();
+  await side.getByRole('heading', { name: 'Information' }).waitFor();
+  assert.equal(await fold(side, 'Grænser').evaluate((e) => e.open), true);
+  assert.equal(await fold(side, 'Gode optagelser').evaluate((e) => e.open), false);
+  await kontekst.close();
+});
+
 test('Information på en computer viser begge vejledninger', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await aabnInformation(side);
@@ -512,6 +589,8 @@ for (const [navn, userAgent, bredde] of [['iPhone', IPHONE, 360], ['Android', AN
     const { kontekst, side } = await nyTelefon(miljoe, { userAgent, viewport: { width: bredde, height: 640 } });
     await aabnInformation(side);
     await side.locator('ol.guide').first().waitFor();
+    // Alle foldede afsnit åbnes, så også deres indhold måles.
+    await side.evaluate(() => { for (const d of document.querySelectorAll('details.info-fold')) d.open = true; });
     // En bred skrift som Linux' DejaVu Sans (Verdana på Windows), så testen giver det samme på GitHub.
     await side.evaluate(() => { document.body.style.fontFamily = 'Verdana, "DejaVu Sans", sans-serif'; });
     await side.waitForTimeout(100);

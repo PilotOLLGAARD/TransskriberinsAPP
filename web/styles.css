@@ -615,6 +615,40 @@ input[type="file"] { font: inherit; }
   .tlf { box-shadow: inset 0 0 0 1.5px var(--blaek); }
 }
 
+/* Gode råd under Information: hvert afsnit er et kort, der foldes ud ved tryk på overskriften. */
+.info-fold { margin-top: 10px; border-radius: var(--radius-stor); background: var(--kort); box-shadow: var(--skygge); }
+.info-fold summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 60px;
+  padding: 12px 18px;
+  border-radius: var(--radius-stor);
+  color: var(--blaek);
+  font-size: 20px;
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  overflow-wrap: anywhere;
+}
+.info-fold summary::-webkit-details-marker { display: none; }
+.info-fold summary span { min-width: 0; }
+.info-fold summary svg { flex: none; width: 24px; height: 24px; color: var(--blaa-dyb); transition: transform 200ms var(--ease-out); }
+.info-fold[open] summary svg { transform: rotate(180deg); }
+.info-fold summary:focus-visible { outline: 3px solid var(--blaa); outline-offset: 2px; }
+.fold-indhold { padding: 0 18px 16px; }
+.fold-indhold > :first-child { margin-top: 0; }
+.fold-indhold .guide { box-shadow: none; padding: 0; background: none; }
+.fold-indhold h3 { margin: 14px 0 0; font-size: 19px; }
+@media (prefers-reduced-motion: reduce) {
+  .info-fold summary svg { transition: none; }
+}
+@media (prefers-contrast: more) {
+  .info-fold { box-shadow: inset 0 0 0 2px var(--blaek); }
+}
+
 /* Login-boks på forsiden, kun når man ikke er logget ind. */
 .login-boks {
   display: flex;
