@@ -2,12 +2,12 @@
 
 /**
  * Prøver, at en server afviser kald uden gyldigt bevis, før der kommer noget lyd igennem.
- * Brug: node scripts/test-adgang.js https://serverens-adresse
+ * Brug: node scripts/proev/test-adgang.js https://serverens-adresse
  */
 
 const url = process.argv[2];
 if (!url) {
-  console.error('Brug: node scripts/test-adgang.js <serverens adresse>');
+  console.error('Brug: node scripts/proev/test-adgang.js <serverens adresse>');
   process.exit(2);
 }
 

@@ -3,7 +3,7 @@
 #
 #   git clone https://github.com/PilotOLLGAARD/TransskriberinsAPP.git
 #   cd TransskriberinsAPP
-#   bash scripts/opsaet-google.sh
+#   bash scripts/opsaetning/opsaet-google.sh
 #
 # Kræver et Google Cloud-projekt med aktiv betaling, valgt i Cloud Shell, og en Gemini-nøgle
 # lavet i Google AI Studio til samme projekt. Scriptet beder om nøglen og viser den ikke.
@@ -102,7 +102,7 @@ ADRESSE=$(gcloud run services describe "$TJENESTE" --region "$REGION" --format='
 
 echo
 echo "Færdig. Tjekker, at fremmede afvises:"
-node scripts/test-adgang.js "$ADRESSE" || echo "ADVARSEL: Afvisningen virker ikke som ventet. Brug ikke appen, før det er rettet."
+node scripts/proev/test-adgang.js "$ADRESSE" || echo "ADVARSEL: Afvisningen virker ikke som ventet. Brug ikke appen, før det er rettet."
 
 cat <<EOF
 
