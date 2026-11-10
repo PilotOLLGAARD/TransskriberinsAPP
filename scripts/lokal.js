@@ -16,7 +16,7 @@ const { lavAdgangsTjek } = require('../server/src/adgang.js');
 const { GeminiFejl } = require('../server/src/gemini.js');
 const pdf = require('../server/src/pdf.js');
 
-const WEB = path.resolve(__dirname, '..', 'app');
+const APP = path.resolve(__dirname, '..', 'app');
 const TENANT = '00000000-0000-0000-0000-00000000000a';
 const CLIENT = '00000000-0000-0000-0000-00000000000c';
 const ANDEN_TENANT = '11111111-1111-1111-1111-111111111111';
@@ -155,8 +155,8 @@ function startLokal({ port = 4280 } = {}) {
   }
 
   async function statisk(url, res) {
-    const sti = path.join(WEB, decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
-    if (!sti.startsWith(WEB + path.sep)) {
+    const sti = path.join(APP, decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
+    if (!sti.startsWith(APP + path.sep)) {
       res.writeHead(403);
       res.end();
       return;

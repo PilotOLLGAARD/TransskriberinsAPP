@@ -76,17 +76,19 @@ npm run lokal
 
 Åbn http://localhost:4280. Login, transskription og mail er falske, så det koster ikke noget, og `.env` er ikke nødvendig.
 
-Browsertestene kræver en browser, der kun skal hentes én gang:
+Browsertestene leder efter browseren i `.vaerktoej/browsere`. Den skal kun hentes én gang dertil:
 
 ```bash
-npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH=.vaerktoej/browsere npx playwright install chromium
 ```
+
+I PowerShell: `$env:PLAYWRIGHT_BROWSERS_PATH = ".vaerktoej/browsere"; npx playwright install chromium`.
 
 ```bash
 npm run e2e
 ```
 
-På computeren, hvor projektet blev bygget, ligger browseren i `.vaerktoej/browsere`, så der er installationen ikke nødvendig. Ellers sættes `PLAYWRIGHT_BROWSERS_PATH`, inden testene køres.
+På computeren, hvor projektet blev bygget, ligger browseren der allerede. Er `PLAYWRIGHT_BROWSERS_PATH` sat i miljøet, bruger testene den mappe i stedet.
 
 ## `.env`
 
@@ -95,7 +97,7 @@ På computeren, hvor projektet blev bygget, ligger browseren i `.vaerktoej/brows
 1. Kopiér `.env.example` til `.env`.
 2. Indsæt nøglen ud for `GEMINI_API_KEY`.
 
-Prøv en selvindtalt testoptagelse (koster penge). Den bliver transskriberet og får et referat:
+Prøv en selvindtalt testoptagelse (koster penge, to kald). Den bliver transskriberet og får et referat. Bemærk, at scriptet transskriberer med Transcribe og "smart" (højst 400 s lyd), ikke med Flash og verbatim som serveren:
 
 ```bash
 node --env-file=.env scripts/proev/proev-referat.js testnote.m4a

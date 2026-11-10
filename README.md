@@ -31,12 +31,14 @@ npm run lokal
 
 Åbn http://localhost:4280. Login, transskription og mail er falske, så det koster ikke noget.
 
-Browsertestene kræver Chromium, som hentes én gang:
+Browsertestene kræver Chromium, som hentes én gang til `.vaerktoej/browsere`, hvor testene leder:
 
 ```bash
-npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH=.vaerktoej/browsere npx playwright install chromium
 npm run e2e
 ```
+
+I PowerShell: `$env:PLAYWRIGHT_BROWSERS_PATH = ".vaerktoej/browsere"; npx playwright install chromium`.
 
 ## Mere
 

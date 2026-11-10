@@ -13,7 +13,7 @@ testlyd/
 .superpowers/
 .claude/worktrees/
 .claude/settings.local.json
-arkiv/
+/arkiv/
 # Interne dokumenter: repoet er offentligt, så de bliver kun i projektmappen.
 docs/plan*.md
 docs/planer/

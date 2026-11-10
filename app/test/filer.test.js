@@ -4,20 +4,20 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
-const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
-const laes = (navn) => readFileSync(join(WEB, navn), 'utf8');
+const APP = join(dirname(fileURLToPath(import.meta.url)), '..');
+const laes = (navn) => readFileSync(join(APP, navn), 'utf8');
 
 test('alle filer i service workeren findes', () => {
   // En manglende fil får hele installationen til at fejle, og så virker appen ikke uden net.
   const liste = /const FILER = \[([\s\S]*?)\];/.exec(laes('sw.js'))[1];
   const filer = [...liste.matchAll(/'([^']+)'/g)].map((m) => m[1]).filter((f) => f !== './');
   assert.ok(filer.length > 5);
-  for (const f of filer) assert.ok(existsSync(join(WEB, f)), `${f} mangler`);
+  for (const f of filer) assert.ok(existsSync(join(APP, f)), `${f} mangler`);
 });
 
 test('alle moduler i js/ er med i service workeren', () => {
   const sw = laes('sw.js');
-  for (const f of readdirSync(join(WEB, 'js')).filter((n) => n.endsWith('.js'))) {
+  for (const f of readdirSync(join(APP, 'js')).filter((n) => n.endsWith('.js'))) {
     assert.ok(sw.includes(`'js/${f}'`), `js/${f} mangler i sw.js`);
   }
 });
