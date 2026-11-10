@@ -6,7 +6,7 @@ Sådan fortsætter du på en anden computer, opsætter tjenesterne og udgiver en
 
 | Del | Hvor | Udgives ved |
 |---|---|---|
-| Appen (`web/`) | GitHub Pages | Push til `main` med ændringer i `web/` |
+| Appen (`app/`) | GitHub Pages | Push til `main` med ændringer i `app/` |
 | Serveren (`server/`) | Google Cloud Run | Push til `main` med ændringer i `server/` |
 | Nøglen til Gemini | Google Secret Manager og lokalt i `.env` | Skiftes manuelt, se nedenfor |
 | Login | Microsoft Entra ID | IT, se `docs/it-opsaetning.md` |
@@ -15,16 +15,32 @@ Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Repoet hedder `Transskrib
 
 **Opret aldrig andre GitHub Pages-sider på kontoen PilotOLLGAARD**, og aldrig repoet `pilotollgaard.github.io`. Alle sider på kontoen deler adressen `https://pilotollgaard.github.io`. En anden side ville derfor kunne læse medarbejdernes login og optagelser i browseren. Skal kontoen bruges til andet, skal appen først flyttes til sit eget domæne.
 
+## Mappestruktur
+
+| Mappe | Indhold |
+|---|---|
+| `app/` | Appen (PWA): `index.html`, `styles.css`, `sw.js`, `manifest.webmanifest`, ikoner og `js/`. Ren HTML og JavaScript uden build. Unit-tests i `app/test/` (kommer ikke med i udgivelsen) |
+| `server/` | Serveren til Cloud Run: `src/`, `assets/` (skrift og logo til PDF og Word), `Dockerfile`. Unit-tests i `server/test/` |
+| `e2e/` | Browsertests af hele forløbet med falsk login og falsk Gemini |
+| `scripts/` | `lokal.js` (lokal server, bruges også af browsertestene) og `tjek-hemmeligheder.js` |
+| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, køres én gang) og `lav-ikoner.js` (appens ikoner og logoet til PDF'en) |
+| `scripts/proev/` | `proev-referat.js` (rigtig Gemini, koster penge) og `test-adgang.js` (tjekker, at en udgivet server afviser fremmede) |
+| `scripts/testbaenk/` | Målinger af transskription og referat mod rigtig Gemini (koster penge) |
+| `scripts/test/` | Unit-tests af scripts |
+| `docs/` | Denne vejledning og vejledningen til medarbejdere |
+| `.github/workflows/` | `tjek.yml` (alle tests), `app.yml` ("Udgiv appen") og `server.yml` ("Udgiv serveren") |
+
 ## Filer, der kun ligger i projektmappen
 
-Disse filer kommer ikke på GitHub og følger ikke med `git clone`. Skifter du computer, skal du selv kopiere dem:
+Disse filer og mapper kommer ikke på GitHub og følger ikke med `git clone`. Skifter du computer, skal du selv kopiere dem:
 
 - `.env`
 - `docs/overdragelse.md`
-- `docs/plan.md` og alle `docs/plan-*.md`
+- `docs/plan-*.md` (aktuelle planer) og `docs/planer/` (gamle planer)
 - `docs/it-opsaetning.md`
 - `docs/test-resultater.md`
 - `docs/udrulning.md`
+- `testlyd/` (testlyd og forbrug ved målinger), `.vaerktoej/` (browsere og ffmpeg), `.superpowers/` (skitser og måleskripter) og `arkiv/` (ting, der er taget ud af projektet). De kan hentes eller laves igen, men det tager tid
 
 Tag en sikkerhedskopi af dem, for eksempel på OneDrive. Mappen ligger ikke selv et sted med sikkerhedskopi. `npm run tjek:hemmeligheder` fejler, hvis en af dem nogensinde har ligget i git, også i et tag eller en gammel gren.
 
@@ -44,6 +60,10 @@ cd TransskriberinsAPP
 
 ```bash
 npm install
+```
+
+```bash
+npm install --prefix server
 ```
 
 ```bash
@@ -75,13 +95,11 @@ På computeren, hvor projektet blev bygget, ligger browseren i `.vaerktoej/brows
 1. Kopiér `.env.example` til `.env`.
 2. Indsæt nøglen ud for `GEMINI_API_KEY`.
 
-Prøv en selvindtalt testoptagelse (koster penge):
+Prøv en selvindtalt testoptagelse (koster penge). Den bliver transskriberet og får et referat:
 
 ```bash
-node --env-file=.env scripts/proev-gemini.js testnote.m4a
+node --env-file=.env scripts/proev/proev-referat.js testnote.m4a
 ```
-
-Der er ingen `local.settings.json`, da projektet ikke bruger Azure Functions.
 
 ## Opsætning af Google Cloud
 
@@ -100,7 +118,7 @@ cd TransskriberinsAPP
 ```
 
 ```bash
-bash scripts/opsaet-google.sh
+bash scripts/opsaetning/opsaet-google.sh
 ```
 
    Scriptet slår tjenesterne til, gemmer nøglen i Secret Manager, giver GitHub adgang uden fast nøgle (kun fra dette repo), udgiver serveren i Stockholm og tjekker, at fremmede afvises.
@@ -137,7 +155,7 @@ Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, 
 Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes aldrig.
 
 **Lydfil fra telefonens optager:**
-- **Android:** Appen står i Del-menuen (`share_target` i `web/manifest.webmanifest`), når den er lagt på startskærmen fra Chrome. Service workeren lægger filen i Cache Storage og åbner appen med `?delt=1`. Appen kontrollerer og gemmer filen straks og åbner navneskærmen. Kopien i Cache Storage slettes først, når filen er gemt i IndexedDB. Ved fuldt lager eller læsefejl bevares den og prøves igen ved næste start.
+- **Android:** Appen står i Del-menuen (`share_target` i `app/manifest.webmanifest`), når den er lagt på startskærmen fra Chrome. Service workeren lægger filen i Cache Storage og åbner appen med `?delt=1`. Appen kontrollerer og gemmer filen straks og åbner navneskærmen. Kopien i Cache Storage slettes først, når filen er gemt i IndexedDB. Ved fuldt lager eller læsefejl bevares den og prøves igen ved næste start.
 - **iPhone:** Webapps kan ikke stå i Del-menuen ([WebKit-fejl 194593](https://bugs.webkit.org/show_bug.cgi?id=194593)). Brugeren gemmer optagelsen med Memoer → ⋯ → Del → Gem i Arkiver og vælger den med Upload lydfil. Vejledningen står under Information.
 
 Formatet afgøres af filens første bytes, ikke af MIME-typen fra den app, der deler.
@@ -167,7 +185,7 @@ En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til
 - Prøv et referat og en PDF på din computer (koster penge, brug kun opdigtede tekster):
 
 ```bash
-node --env-file=.env scripts/proev-referat.js testlyd/note.txt --titel "Test" --varighed 120 --pdf .
+node --env-file=.env scripts/proev/proev-referat.js testlyd/note.txt --titel "Test" --varighed 120 --pdf .
 ```
 
 ## Rette ordlisten med fagudtryk

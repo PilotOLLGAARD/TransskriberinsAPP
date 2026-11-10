@@ -4,7 +4,7 @@ Medarbejderen indtaler en note på telefonen, giver den et navn og får et refer
 
 **Ny session: læs først `docs/overdragelse.md`.** Den beskriver, hvad der er bygget, beslutninger, konti, kendte mangler og næste skridt. Opsætning og udgivelse: `docs/vejledning.md`.
 
-Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan.md`, `docs/plan-*.md` (design og planer), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`, `docs/udrulning.md` (tjekliste før udrulning). `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
+Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan-*.md` (aktuelle design og planer), `docs/planer/` (gamle planer), `arkiv/` (lokalt arkiv), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`, `docs/udrulning.md` (tjekliste før udrulning). `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
 
 ## Krav der aldrig må brydes
 
@@ -15,15 +15,15 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
 - Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i Word-dokumentet. Mailen har kun Word-dokumentet; PDF'en sendes kun som reserve, hvis Word mangler (fejlet på serveren eller gamle noter). Serveren laver stadig PDF'en til det og til ældre apps.
-- Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `web/ordmaerke.svg` og `web/maerke.svg`.
-- Ingen hemmeligheder i git, i `web/` eller i logs. Læs aldrig `.env*`.
+- Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `app/ordmaerke.svg` og `app/maerke.svg`.
+- Ingen hemmeligheder i git, i `app/` eller i logs. Læs aldrig `.env*`.
 - GitHub-kontoen PilotOLLGAARD må kun have denne ene GitHub Pages-side, og repoet `pilotollgaard.github.io` må aldrig oprettes. Alle Pages-sider på kontoen deler adressen `https://pilotollgaard.github.io`, så en anden side kunne læse login og optagelser. Skal der flere sider til, skal appen først have sit eget domæne.
 - Kør `npm run tjek:hemmeligheder` før hvert push, også til `main`. Testen på GitHub kører først, når historikken allerede er offentlig. Push aldrig tags eller andre grene end `main`.
 - Brug aldrig rigtige byggepladsnoter i udvikling eller test.
 
 ## Arkitektur
 
-iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument med logo (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med Word-dokumentet via Microsoft Graph (`web/js/mail.js`). Azure bruges ikke.
+iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument med logo (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med Word-dokumentet via Microsoft Graph (`app/js/mail.js`). Azure bruges ikke.
 
 | Fil | Ansvar |
 |---|---|
@@ -35,12 +35,17 @@ iPhone/Android-PWA (`web/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `server/src/referat.js` | Referatets prompt, skema og emner. `server/src/tal.js`: tal, der ikke blev sagt, bliver [uklart] |
 | `server/src/pdf.js`, `server/src/docx.js` | PDF og Word med samme indhold |
 | `server/src/konfig.js` | Miljøvariabler og standarder (500 MiB, 840 s, verbatim, modeller) |
-| `web/js/optager.js` | Optagelse, afbrydelser, varighed |
-| `web/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
-| `web/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
-| `web/js/app.js` | Kun brugerflade |
+| `app/js/optager.js` | Optagelse, afbrydelser, varighed |
+| `app/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
+| `app/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
+| `app/js/app.js` | Kun brugerflade |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |
+| `scripts/tjek-hemmeligheder.js` | Finder nøgler og interne dokumenter i git og historikken |
+| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, én gang) og `lav-ikoner.js` (ikoner og logo-PNG) |
+| `scripts/proev/` | `proev-referat.js` (rigtig Gemini, koster penge) og `test-adgang.js` (udgivet server afviser fremmede) |
 | `scripts/testbaenk/` | Testlyd og målinger mod rigtig Gemini (koster penge, spørg først). Forbrug logges i `testlyd/forbrug.json` |
+
+Mapper: `app/` (PWA, tests i `app/test/`), `server/` (tests i `server/test/`), `e2e/` (browsertests), `scripts/` (tests i `scripts/test/`), `docs/`. Workflows: `tjek.yml`, `app.yml` ("Udgiv appen", `app/**`) og `server.yml` ("Udgiv serveren", `server/**`). Kun lokalt: `testlyd/`, `.vaerktoej/` (browsere, ffmpeg), `.superpowers/`, `arkiv/`. Appens offentlige adresse `/TransskriberinsAPP/` følger repoets navn, ikke mappen: den må aldrig ændres, for login og telefonernes lager hænger på den.
 
 Googles grænser på Tier 1: Flash 1.000 kald/min og 10.000/dag, Transcribe 10 kald/min, 10.000 tokens/min og 100/dag. Indholdsfilteret kan ikke slås fra. Forsidens browsertests måler med Arial/Liberation Sans, så de også består med Linux' skrifter på GitHub.
 
@@ -51,12 +56,12 @@ npm test                     # alle unit-tests
 npm run e2e                  # hele forløbet i Chromium med falsk login og falsk Gemini
 npm run lokal                # lokal server på :4280
 npm run tjek:hemmeligheder   # finder nøgler og interne dokumenter i git
-node --env-file=.env scripts/proev-referat.js testlyd/x.txt --pdf .   # rigtig Gemini, koster penge
+node --env-file=.env scripts/proev/proev-referat.js testlyd/x.txt --pdf .   # rigtig Gemini, koster penge
 ```
 
 ## Udgivelse
 
-- Push til `main` udgiver straks: `web/` til GitHub Pages og `server/` til Cloud Run. Begge kører hele testsuiten først.
+- Push til `main` udgiver straks: `app/` til GitHub Pages og `server/` til Cloud Run. Begge kører hele testsuiten først.
 - Arbejd på en separat gren, og push først, når alt er testet.
 - Ændrer en opgave både server og app, skal serveren udgives først. Vent, til "Udgiv serveren" er grøn.
 - Arbejdsgrenen hedder `forbedringer`. Den udgives med `git push origin forbedringer:main`.
