@@ -21,7 +21,7 @@ const HEMMELIGT = [
 ];
 
 // Appens oversættelse af HTTP-status læses direkte fra appen, så testen følger den.
-const appKilde = fs.readFileSync(path.join(__dirname, '../../web/js/transskribering.js'), 'utf8');
+const appKilde = fs.readFileSync(path.join(__dirname, '../../app/js/transskribering.js'), 'utf8');
 const FEJLTYPER = Function(`return ${/const FEJLTYPER = (\{[^}]*\});/.exec(appKilde)[1]}`)();
 const appType = (status) => FEJLTYPER[status] || 'tjeneste';
 
@@ -191,12 +191,12 @@ test('for lang optagelse: 413 for-lang med log, og appen viser sin egen besked',
   assert.equal(svar.headers['access-control-allow-origin'], OPRINDELSE);
   for (const o of svar.logs) tjekLog(o);
   assert.ok(svar.logs.some((o) => o.haendelse === 'anmodning-afvist' && o.grund === 'for-lang' && o.status === 413), JSON.stringify(svar.logs));
-  const { BESKEDER } = await import('../../web/js/beskeder.js');
+  const { BESKEDER } = await import('../../app/js/beskeder.js');
   assert.ok(BESKEDER.forLang);
 });
 
 test('appen har en besked til hver type, serveren kan give', async () => {
-  const { BESKEDER } = await import('../../web/js/beskeder.js');
+  const { BESKEDER } = await import('../../app/js/beskeder.js');
   for (const [, , , status, type] of FEJLVEJE) assert.ok(BESKEDER[type], `${status} → ${type}`);
 });
 

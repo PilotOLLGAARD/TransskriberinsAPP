@@ -2,7 +2,7 @@
 // Kun appens egne filer caches. Kald til serveren, Microsoft og Graph røres ikke.
 //
 // Hver udgave hentes samlet i sit eget cache, så gamle og nye filer aldrig blandes.
-// VERSION sættes til commit-nummeret, når appen udgives (.github/workflows/web.yml).
+// VERSION sættes til commit-nummeret, når appen udgives (.github/workflows/app.yml).
 
 const VERSION = 'udvikling';
 const UDVIKLING = ['localhost', '127.0.0.1'].includes(self.location.hostname);

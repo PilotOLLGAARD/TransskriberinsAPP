@@ -16,7 +16,7 @@ const { lavAdgangsTjek } = require('../server/src/adgang.js');
 const { GeminiFejl } = require('../server/src/gemini.js');
 const pdf = require('../server/src/pdf.js');
 
-const WEB = path.resolve(__dirname, '..', 'web');
+const WEB = path.resolve(__dirname, '..', 'app');
 const TENANT = '00000000-0000-0000-0000-00000000000a';
 const CLIENT = '00000000-0000-0000-0000-00000000000c';
 const ANDEN_TENANT = '11111111-1111-1111-1111-111111111111';

@@ -3,7 +3,7 @@ name: Udgiv appen
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/web.yml']
+    paths: ['app/**', '.github/workflows/app.yml']
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
           SERVER_ADRESSE: ${{ vars.SERVER_ADRESSE }}
         run: |
           mkdir _site
-          cp -r web/. _site/
+          cp -r app/. _site/
           rm -rf _site/test _site/package.json
           # Hver udgivelse får sin egen version, så telefonerne henter den nye udgave samlet.
           sed -i "s/const VERSION = 'udvikling';/const VERSION = '${GITHUB_SHA}';/" _site/sw.js

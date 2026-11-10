@@ -16,7 +16,7 @@ const FORMATER = new Set([
 ]);
 const MAX_TITEL = 120;
 const MAX_VARIGHED_SEK = 3600;
-// Længste lydfil, der tages imod: 2½ time. Samme grænse som i appen (web/js/lydfil.js).
+// Længste lydfil, der tages imod: 2½ time. Samme grænse som i appen (app/js/lydfil.js).
 const MAX_UPLOAD_SEK = 9000;
 const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
 const DAG_MS = 24 * 60 * 60 * 1000;

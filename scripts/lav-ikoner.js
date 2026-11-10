@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Laver appens ikoner ud fra ØLLGAARDs Ø-mærke (web/maerke.svg): blåt mærke på hvid flade.
+ * Laver appens ikoner ud fra ØLLGAARDs Ø-mærke (app/maerke.svg): blåt mærke på hvid flade.
  * Laver også ordmærket som PNG til PDF'erne (server/assets/ordmaerke.png).
  * Brug: node scripts/lav-ikoner.js
  */
@@ -12,7 +12,7 @@ const fs = require('node:fs');
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.resolve(__dirname, '..', '.vaerktoej', 'browsere');
 const { chromium } = require('playwright');
 
-const WEB = path.resolve(__dirname, '..', 'web');
+const WEB = path.resolve(__dirname, '..', 'app');
 // Mærket fylder 58 %, så det også ligger inden for Androids runde beskæring.
 const IKONER = [['icon-192.png', 192], ['icon-512.png', 512], ['apple-touch-icon.png', 180]];
 
