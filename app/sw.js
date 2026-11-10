@@ -12,6 +12,7 @@ const FILER = [
   'styles.css',
   'manifest.webmanifest',
   'ordmaerke.svg',
+  'ordmaerke-lys.svg',
   'maerke.svg',
   'icon-192.png',
   'icon-512.png',

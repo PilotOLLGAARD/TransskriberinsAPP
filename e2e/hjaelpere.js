@@ -82,4 +82,38 @@ async function forsideLuft(side) {
   });
 }
 
-module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar, boks };
+/**
+ * Laveste kontrast (WCAG) mellem tekst og baggrund for de synlige elementer, der passer på selector.
+ * Baggrunden er alle forfædres farver lagt oven på hinanden. Giver { forhold, tekst } for det svageste element.
+ */
+async function kontrast(side, selector) {
+  return side.evaluate((sel) => {
+    const tal = (s) => {
+      const m = /rgba?\(([^)]+)\)/.exec(s);
+      if (!m) throw new Error(`Ukendt farve: ${s}`);
+      const [r, g, b, a = 1] = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+      return [r, g, b, a];
+    };
+    const over = ([r, g, b, a], [R, G, B]) => [r * a + R * (1 - a), g * a + G * (1 - a), b * a + B * (1 - a)];
+    const lys = (f) => {
+      const [r, g, b] = f.map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    let svagest = null;
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const kaede = [];
+      for (let e = el; e; e = e.parentElement) kaede.unshift(e);
+      let bg = [255, 255, 255];
+      for (const e of kaede) bg = over(tal(getComputedStyle(e).backgroundColor), bg);
+      const fg = over(tal(getComputedStyle(el).color), bg);
+      const [a, b] = [lys(fg), lys(bg)].sort((x, y) => y - x);
+      const forhold = (a + 0.05) / (b + 0.05);
+      if (!svagest || forhold < svagest.forhold) svagest = { forhold, tekst: `${el.className || el.tagName}: ${el.textContent.trim().slice(0, 40)}` };
+    }
+    return svagest ?? { forhold: Infinity, tekst: 'ingen elementer' };
+  }, selector);
+}
+
+module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar, boks, kontrast };

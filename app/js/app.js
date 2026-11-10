@@ -28,7 +28,9 @@ const medier = browserMedier();
 const optager = lavOptager({ lager, medier });
 
 const app = document.getElementById('app');
-const temaFarve = document.querySelector('meta[name="theme-color"]');
+// Statuslinjens farve: én pr. tilstand på telefonen. Optageskærmen er mørk i begge.
+const NAT = '#0f1a26';
+const TEMA = [[document.getElementById('tema-lys'), '#f3f5f8'], [document.getElementById('tema-moerk'), NAT]];
 
 const t = {
   visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt
@@ -620,7 +622,13 @@ function topMedTilbage(vedTryk) {
 }
 
 function ordmaerke() {
-  return h('img', { klasse: 'ordmaerke', src: 'ordmaerke.svg', alt: 'ØLLGAARD', width: '145', height: '28' });
+  // I mørk tilstand en udgave med lyse bogstaver. Ø'et er blåt i begge.
+  return h(
+    'picture',
+    {},
+    h('source', { srcset: 'ordmaerke-lys.svg', media: '(prefers-color-scheme: dark)' }),
+    h('img', { klasse: 'ordmaerke', src: 'ordmaerke.svg', alt: 'ØLLGAARD', width: '145', height: '28' }),
+  );
 }
 
 function beskedElement() {
@@ -1353,7 +1361,7 @@ function tegn() {
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();
-  temaFarve?.setAttribute('content', t.visning === 'optager' ? '#0f1a26' : '#f3f5f8');
+  for (const [meta, farve] of TEMA) meta?.setAttribute('content', t.visning === 'optager' ? NAT : farve);
   // En note, der bliver færdig i baggrunden, tegner skærmen på ny. Skriver brugeren, skal feltet beholde fokus.
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];

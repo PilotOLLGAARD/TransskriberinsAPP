@@ -2,7 +2,8 @@
 
 /**
  * Laver appens ikoner ud fra ØLLGAARDs Ø-mærke (app/maerke.svg): blåt mærke på hvid flade.
- * Laver også ordmærket som PNG til PDF'erne (server/assets/ordmaerke.png).
+ * Laver også ordmærket som PNG til PDF'erne (server/assets/ordmaerke.png) og en udgave med lyse bogstaver
+ * til appens mørke tilstand (app/ordmaerke-lys.svg).
  * Brug: node scripts/opsaetning/lav-ikoner.js
  */
 
@@ -14,6 +15,7 @@ const { chromium } = require('playwright');
 
 const APP = path.resolve(__dirname, '..', '..', 'app');
 // Mærket fylder 58 %, så det også ligger inden for Androids runde beskæring.
+const LYS_TEKST = '#f1f4f8';
 const IKONER = [['icon-192.png', 192], ['icon-512.png', 512], ['apple-touch-icon.png', 180]];
 
 async function main() {
@@ -31,6 +33,9 @@ async function main() {
       console.log(`${navn}: ${str}x${str}`);
     }
     const ord = fs.readFileSync(path.join(APP, 'ordmaerke.svg'), 'utf8');
+    // Mørk tilstand: bogstaverne i appens lyse tekstfarve. Ø'et beholder logoets blå.
+    fs.writeFileSync(path.join(APP, 'ordmaerke-lys.svg'), ord.replaceAll('#282828', LYS_TEKST));
+    console.log('ordmaerke-lys.svg');
     const side = await browser.newPage({ viewport: { width: 1200, height: 240 } });
     await side.setContent(`<!doctype html><style>html,body{margin:0;background:transparent}svg{display:block;width:1200px;height:auto}</style>${ord}`);
     const ud = path.resolve(__dirname, '..', '..', 'server', 'assets', 'ordmaerke.png');

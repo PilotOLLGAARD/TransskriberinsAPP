@@ -5,32 +5,78 @@
  */
 
 :root {
+  color-scheme: light dark;
   --blaa: #2d89e5;
   --blaa-dyb: #0e5aa3;
-  --blaa-tone: #e8f1fb;
+  --nat: #0f1a26;
+  --optag-roed: #ff453a;
+  --stop-roed: #c62828;
+
+  /* Farver, der skifter med telefonens lyse og mørke tilstand. */
+  --tone: #e8f1fb;
+  --tone-tekst: #0e5aa3;
   --blaek: #282828;
   --graa: #5b6470;
   --flade: #f3f5f8;
   --kort: #ffffff;
+  --felt: #ffffff;
+  --felt-kant: #0e5aa3;
   --linje: rgba(40, 40, 40, 0.1);
-  --nat: #0f1a26;
-  --optag-roed: #ff453a;
-  --stop-roed: #c62828;
+  --spor: rgba(40, 40, 40, 0.15);
+  --ring: rgba(40, 40, 40, 0.25);
+  --daempet: rgba(40, 40, 40, 0.04);
+  --tast: #eceef2;
+  --materiale: rgba(243, 245, 248, 0.78);
+  --knap-kant: transparent;
+  --toast-bund: #282828;
   --fejl-bund: #fff4e5;
   --fejl-tekst: #8e2a00;
+  --fejl-fyld: #8e2a00;
   --ok-bund: #e7f5ec;
   --ok-tekst: #17572e;
+  --ok-fyld: #17572e;
   --slet-bund: #fdeceb;
   --slet-tekst: #a3221b;
+  --skygge: 0 1px 2px rgba(15, 26, 38, 0.06), 0 8px 24px rgba(15, 26, 38, 0.06);
 
   --radius-stor: 22px;
   --radius: 16px;
-  --skygge: 0 1px 2px rgba(15, 26, 38, 0.06), 0 8px 24px rgba(15, 26, 38, 0.06);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --kant-top: env(safe-area-inset-top, 0px);
   --kant-bund: env(safe-area-inset-bottom, 0px);
   --kant-v: env(safe-area-inset-left, 0px);
   --kant-h: env(safe-area-inset-right, 0px);
+}
+
+/* Mørk tilstand følger telefonen. Knapperne beholder den dybe blå med hvid tekst (7:1). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tone: #17324f;
+    --tone-tekst: #a9d2ff;
+    --blaek: #f1f4f8;
+    --graa: #a7b4c4;
+    --flade: #0f1a26;
+    --kort: #192839;
+    --felt: #132131;
+    --felt-kant: #2d89e5;
+    --linje: rgba(255, 255, 255, 0.14);
+    --spor: rgba(255, 255, 255, 0.2);
+    --ring: rgba(255, 255, 255, 0.34);
+    --daempet: rgba(255, 255, 255, 0.05);
+    --tast: #24364a;
+    --materiale: rgba(15, 26, 38, 0.78);
+    --knap-kant: rgba(255, 255, 255, 0.14);
+    --toast-bund: #2a3b4f;
+    --fejl-bund: #3a2410;
+    --fejl-tekst: #ffc58a;
+    --fejl-fyld: #b5460f;
+    --ok-bund: #12331f;
+    --ok-tekst: #8fe0a8;
+    --ok-fyld: #1f7a41;
+    --slet-bund: #3b1716;
+    --slet-tekst: #ffb0aa;
+    --skygge: 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -84,6 +130,7 @@ p { margin: 0; font-size: 19px; }
   min-height: 44px;
 }
 
+picture { display: block; flex: none; }
 .ordmaerke { display: block; height: 28px; width: auto; }
 
 /* Lille knap i toppen. Stadig over 44 px, så den kan rammes med handsker. */
@@ -94,8 +141,8 @@ p { margin: 0; font-size: 19px; }
   padding: 8px 16px 8px 12px;
   gap: 8px;
   border-radius: 999px;
-  color: var(--blaa-dyb);
-  background: var(--blaa-tone);
+  color: var(--tone-tekst);
+  background: var(--tone);
   font-size: 18px;
 }
 .top-knap svg { width: 22px; height: 22px; }
@@ -127,6 +174,7 @@ button {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  box-shadow: inset 0 0 0 1px var(--knap-kant);
   transition: transform 140ms var(--ease-out), background-color 140ms var(--ease-out);
 }
 
@@ -135,7 +183,7 @@ button:focus-visible { outline: 3px solid var(--blaa); outline-offset: 3px; }
 button:disabled { opacity: 0.5; cursor: default; }
 button svg { width: 26px; height: 26px; }
 
-.tonet { color: var(--blaa-dyb); background: var(--blaa-tone); }
+.tonet { color: var(--tone-tekst); background: var(--tone); }
 .slet { color: var(--slet-tekst); background: var(--slet-bund); }
 .hvid { color: var(--blaek); background: var(--kort); box-shadow: inset 0 0 0 1.5px var(--linje); }
 
@@ -220,8 +268,8 @@ input[type="file"] { font: inherit; }
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  color: var(--blaa-dyb);
-  background: var(--blaa-tone);
+  color: var(--tone-tekst);
+  background: var(--tone);
 }
 
 .status-ikon svg { width: 22px; height: 22px; }
@@ -260,10 +308,10 @@ input[type="file"] { font: inherit; }
   padding: 16px;
   border-radius: var(--radius-stor);
   color: var(--graa);
-  background: rgba(40, 40, 40, 0.04);
+  background: var(--daempet);
 }
 
-.hjaelp svg { width: 24px; height: 24px; color: var(--blaa-dyb); }
+.hjaelp svg { width: 24px; height: 24px; color: var(--tone-tekst); }
 .hjaelp p { font-size: 18px; }
 .hjaelp div { display: flex; flex-direction: column; gap: 6px; }
 
@@ -347,7 +395,7 @@ input[type="file"] { font: inherit; }
   height: 168px;
   min-height: 168px;
   border-radius: 50%;
-  color: var(--blaek);
+  color: #282828;
   background: #fff;
   font-size: 22px;
   font-weight: 700;
@@ -385,7 +433,7 @@ input[type="file"] { font: inherit; }
   flex-direction: column;
   gap: 10px;
   padding: 14px calc(16px + var(--kant-h)) calc(14px + var(--kant-bund)) calc(16px + var(--kant-v));
-  background: rgba(243, 245, 248, 0.78);
+  background: var(--materiale);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
   box-shadow: 0 -1px 0 var(--linje);
@@ -397,8 +445,8 @@ input[type="file"] { font: inherit; }
   flex: none;
   width: 22px;
   height: 22px;
-  border: 3px solid rgba(40, 40, 40, 0.15);
-  border-top-color: var(--blaa-dyb);
+  border: 3px solid var(--spor);
+  border-top-color: var(--tone-tekst);
   border-radius: 50%;
   animation: drej 800ms linear infinite;
 }
@@ -440,10 +488,10 @@ input[type="file"] { font: inherit; }
   width: 100%;
   min-height: 72px;
   padding: 0 18px;
-  border: 2px solid var(--blaa-dyb);
+  border: 2px solid var(--felt-kant);
   border-radius: var(--radius);
   color: var(--blaek);
-  background: var(--kort);
+  background: var(--felt);
   font-family: inherit;
   font-size: 22px;
 }
@@ -464,13 +512,13 @@ input[type="file"] { font: inherit; }
   box-shadow: inset 0 0 0 1.5px var(--linje);
 }
 .fil-kort > div { min-width: 0; }
-.fil-kort svg { width: 30px; height: 30px; color: var(--blaa-dyb); }
+.fil-kort svg { width: 30px; height: 30px; color: var(--tone-tekst); }
 .fil-navn { font-weight: 650; overflow-wrap: anywhere; }
 .fil-meta { color: var(--graa); font-size: 18px; }
 
 /* Fremdrift, mens lyden sendes. Kun transform, så linjen ikke giver ny opsætning af siden. */
-.bar { height: 8px; margin-top: 10px; border-radius: 999px; background: var(--blaa-tone); overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--blaa-dyb); border-radius: inherit; transform-origin: left center; transform: scaleX(0); transition: transform 200ms linear; }
+.bar { height: 8px; margin-top: 10px; border-radius: 999px; background: var(--tone); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--felt-kant); border-radius: inherit; transform-origin: left center; transform: scaleX(0); transition: transform 200ms linear; }
 
 .tekst p { margin: 0 0 12px; font-size: 20px; }
 .tekst ul { margin: 0; padding-left: 22px; }
@@ -487,7 +535,7 @@ input[type="file"] { font: inherit; }
 
 .trin { margin: 0; padding-left: 26px; font-size: 19px; }
 .trin li { margin: 4px 0; padding-left: 4px; }
-.trin li::marker { color: var(--blaa-dyb); font-weight: 700; }
+.trin li::marker { color: var(--tone-tekst); font-weight: 700; }
 
 /* Tidligere optagelser */
 
@@ -534,17 +582,17 @@ input[type="file"] { font: inherit; }
 .trin-punkt > div { min-width: 0; }
 .trin-ikon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; }
 .trin-ikon svg { width: 20px; height: 20px; }
-.trin-punkt.faerdig .trin-ikon { color: #fff; background: var(--ok-tekst); }
-.trin-punkt.igang .trin-ikon { background: var(--blaa-tone); }
-.trin-punkt.venter .trin-ikon { box-shadow: inset 0 0 0 2px rgba(40, 40, 40, 0.25); }
-.trin-punkt.fejl .trin-ikon { color: #fff; background: var(--fejl-tekst); }
+.trin-punkt.faerdig .trin-ikon { color: #fff; background: var(--ok-fyld); }
+.trin-punkt.igang .trin-ikon { background: var(--tone); }
+.trin-punkt.venter .trin-ikon { box-shadow: inset 0 0 0 2px var(--ring); }
+.trin-punkt.fejl .trin-ikon { color: #fff; background: var(--fejl-fyld); }
 .trin-titel { font-size: 20px; font-weight: 650; overflow-wrap: anywhere; }
 .trin-punkt.venter .trin-titel { color: var(--graa); font-weight: 550; }
 .trin-punkt.fejl .trin-titel { color: var(--fejl-tekst); }
 .trin-tekst { margin-top: 2px; color: var(--graa); font-size: 18px; }
 .mail-linje { margin: 16px 0 0; color: var(--graa); font-size: 18px; }
 .mail-linje strong { color: var(--blaek); overflow-wrap: anywhere; }
-.info { display: flex; gap: 12px; margin-top: 16px; padding: 16px; border-radius: var(--radius); color: var(--blaa-dyb); background: var(--blaa-tone); font-size: 18px; font-weight: 550; }
+.info { display: flex; gap: 12px; margin-top: 16px; padding: 16px; border-radius: var(--radius); color: var(--tone-tekst); background: var(--tone); font-size: 18px; font-weight: 550; }
 .info svg { width: 24px; height: 24px; margin-top: 1px; }
 .trin-kort + .knapper, .mail-linje + button, .info + button { margin-top: 20px; }
 
@@ -570,7 +618,7 @@ input[type="file"] { font: inherit; }
   padding: 12px 12px 12px 18px;
   border-radius: var(--radius);
   color: #fff;
-  background: var(--blaek);
+  background: var(--toast-bund);
   box-shadow: 0 8px 24px rgba(15, 26, 38, 0.25);
   font-size: 18px;
   font-weight: 550;
@@ -578,7 +626,7 @@ input[type="file"] { font: inherit; }
   @starting-style { opacity: 0; transform: translateY(12px); }
 }
 .toast span { flex: 1; }
-.toast button { width: auto; min-height: 56px; padding: 8px 20px; color: var(--blaek); background: #fff; font-size: 19px; }
+.toast button { width: auto; min-height: 56px; padding: 8px 20px; color: #282828; background: #fff; font-size: 19px; }
 
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: none; }
@@ -593,17 +641,17 @@ input[type="file"] { font: inherit; }
 .info-afsnit p, .info-afsnit li { font-size: 19px; }
 .info-liste { margin: 0; padding-left: 22px; }
 .info-liste li { margin: 8px 0; padding-left: 2px; }
-.info-afsnit a { color: var(--blaa-dyb); font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.info-afsnit a { color: var(--tone-tekst); font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .info-afsnit:last-child { margin-bottom: 24px; }
 
 /* Vejledning til telefonens optager: nummererede trin på et kort, og telefonens egne knapnavne som små grå knapper. */
 .guide { list-style: none; margin: 10px 0 0; padding: 4px 18px; border-radius: var(--radius-stor); background: var(--kort); box-shadow: var(--skygge); counter-reset: guide; }
 .guide li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; margin: 0; padding: 14px 0; border-bottom: 1px solid var(--linje); }
 .guide li:last-child { border-bottom: 0; }
-.guide li::before { counter-increment: guide; content: counter(guide); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--blaa-dyb); background: var(--blaa-tone); font-weight: 700; font-size: 18px; }
+.guide li::before { counter-increment: guide; content: counter(guide); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--tone-tekst); background: var(--tone); font-weight: 700; font-size: 18px; }
 .guide li > span { min-width: 0; overflow-wrap: break-word; }
 /* Knapnavnet må bryde, når teksten er forstørret i telefonens indstillinger. */
-.tlf { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0; padding: 1px 10px 1px 7px; border-radius: 9px; background: #eceef2; font-weight: 650; overflow-wrap: anywhere; vertical-align: 1px; }
+.tlf { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0; padding: 1px 10px 1px 7px; border-radius: 9px; background: var(--tast); font-weight: 650; overflow-wrap: anywhere; vertical-align: 1px; }
 /* Tekst kun til skærmlæsere. */
 .skjult { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tlf.kun-ikon { padding: 1px 7px; }
@@ -635,7 +683,7 @@ input[type="file"] { font: inherit; }
 }
 .info-fold summary::-webkit-details-marker { display: none; }
 .info-fold summary span { min-width: 0; }
-.info-fold summary svg { flex: none; width: 24px; height: 24px; color: var(--blaa-dyb); transition: transform 200ms var(--ease-out); }
+.info-fold summary svg { flex: none; width: 24px; height: 24px; color: var(--tone-tekst); transition: transform 200ms var(--ease-out); }
 .info-fold[open] summary svg { transform: rotate(180deg); }
 .info-fold summary:focus-visible { outline: 3px solid var(--blaa); outline-offset: 2px; }
 .fold-indhold { padding: 0 18px 16px; }
@@ -657,8 +705,8 @@ input[type="file"] { font: inherit; }
   margin-top: 10px;
   padding: 14px;
   border-radius: var(--radius-stor);
-  color: var(--blaa-dyb);
-  background: var(--blaa-tone);
+  color: var(--tone-tekst);
+  background: var(--tone);
 }
 .login-boks p { margin: 0; font-size: 19px; font-weight: 550; }
 .info-afsnit .konto { overflow-wrap: anywhere; }
