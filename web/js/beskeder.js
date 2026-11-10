@@ -13,6 +13,7 @@ export const BESKEDER = {
   tomOptagelse: 'Der blev ikke optaget noget lyd. Prøv igen.',
   pladsMangler: 'Telefonen er løbet tør for plads. Det indtalte indtil nu er gemt.',
   pladsTom: 'Telefonen er løbet tør for plads, så intet blev gemt. Frigør plads, og prøv igen.',
+  lagerTom: 'Telefonen kunne ikke gemme optagelsen. Prøv igen.',
   plads: 'Telefonen er løbet tør for plads. Optagelsen er gemt. Slet gamle optagelser eller frigør plads på telefonen, og prøv igen.',
   lager: 'Telefonen kunne ikke gemme ændringen. Optagelsen er gemt. Prøv igen.',
   loginKraeverNet: 'Du skal have net for at logge ind. Optagelsen er gemt.',

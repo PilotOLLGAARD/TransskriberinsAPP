@@ -566,6 +566,7 @@ const AFSLUT_BESKEDER = {
   afbrudt: 'afbrudt',
   plads: 'pladsMangler',
   pladsTom: 'pladsTom',
+  lagerTom: 'lagerTom',
   maks: 'maksNaaet',
   tom: 'tomOptagelse',
 };
@@ -580,7 +581,7 @@ optager.naarAfsluttet(({ id, grund }) => {
   }
   t.visning = 'start';
   if (AFSLUT_BESKEDER[grund]) visFejl(AFSLUT_BESKEDER[grund]);
-  if (grund === 'tom' || grund === 'pladsTom') {
+  if (grund === 'tom' || grund === 'pladsTom' || grund === 'lagerTom') {
     opdater();
     return;
   }

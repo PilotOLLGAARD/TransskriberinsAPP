@@ -39,7 +39,7 @@ function alleFejltyper() {
 test('fundet de kendte fejltyper i koden', () => {
   const typer = alleFejltyper();
   for (const t of ['net', 'login', 'adgang', 'tjeneste', 'kanIkkeBehandles', 'ingenTale', 'mailFejl', 'mailUkendt',
-    'mikrofonNaegtet', 'kanIkkeOptage', 'ingenFlereDele', 'plads', 'pladsTom', 'pladsMangler', 'maksNaaet', 'tomOptagelse', 'afbrudt',
+    'mikrofonNaegtet', 'kanIkkeOptage', 'ingenFlereDele', 'plads', 'pladsTom', 'pladsMangler', 'lagerTom', 'maksNaaet', 'tomOptagelse', 'afbrudt',
     'ikkeLydfil', 'forStorFil', 'filKanIkkeLaeses']) {
     assert.ok(typer.has(t), `${t} blev ikke fundet`);
   }

@@ -14,6 +14,10 @@ const MAKS_MS = 59 * 60 * 1000;
 const MAKS_DELE = 20;
 const STOP_VENTETID_MS = 3000;
 const LAGER_VENTETID_MS = 5000;
+// Pauser før genforsøg, når et stykke ikke kunne gemmes. Et stop venter højst LAGER_VENTETID_MS på dem;
+// et genforsøg, der når længere, gemmes stadig, og låsen holdes til da (se frigivLaasNaarGemt).
+const GENFORSOEG_PAUSER_MS = [300, 1000];
+const LAAS_MAKS_MS = 30000;
 // Andre faner og den installerede app ser optagelsen som i gang, så længe denne lås holdes.
 export const LAAS_PRAEFIKS = 'optag-';
 
@@ -102,16 +106,58 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
     if (!data || !data.size || o.fuld) return;
     const nr = o.naesteNr++;
     o.sidsteStykke = ur.nu();
+    o.ventende++;
     o.kaede = o.kaede.then(async () => {
       if (o.fuld) return;
       try {
-        await lager.gemStykke(o.id, nr, await data.arrayBuffer(), o.del);
+        const bytes = await data.arrayBuffer();
+        await gemMedGenforsoeg(o.id, nr, bytes, o.del);
         o.gemte++;
       } catch (e) {
         o.fuld = true;
-        afslut(o, e?.name === 'QuotaExceededError' ? 'plads' : 'afbrudt');
+        o.lagerFejl = e?.name === 'QuotaExceededError' ? 'plads' : 'fejl';
+        afslut(o, o.lagerFejl === 'plads' ? 'plads' : 'afbrudt');
       }
-    });
+    }).finally(() => { o.ventende--; });
+  }
+
+  /**
+   * Låsen frigives først, når de sidste stykker er gemt eller opgivet. Ellers kunne Fortsæt læse det
+   * højeste stykkenummer, før et sent stykke er skrevet, og senere overskrive det. En skrivning,
+   * der aldrig bliver færdig, holder dog højst låsen i LAAS_MAKS_MS.
+   */
+  function frigivLaasNaarGemt(o) {
+    if (!o.frigivLaas) return;
+    if (o.ventende === 0) {
+      o.frigivLaas();
+      return;
+    }
+    let frigivet = false;
+    const frigiv = () => {
+      if (frigivet) return;
+      frigivet = true;
+      ur.ryd(timer);
+      o.frigivLaas();
+    };
+    const timer = ur.saetTimeout(frigiv, LAAS_MAKS_MS);
+    o.kaede.then(frigiv);
+  }
+
+  /**
+   * Fuldt lager er endeligt. Andre fejl kan være forbigående (fx når iPhone et øjeblik mister forbindelsen
+   * til lageret), så samme stykke prøves igen. Det er sikkert: stykket gemmes under samme nøgle.
+   * Optagelsen kører videre imens, og de næste stykker venter i kæden, så rækkefølgen bevares.
+   */
+  async function gemMedGenforsoeg(id, nr, bytes, del) {
+    for (let forsoeg = 0; ; forsoeg++) {
+      try {
+        await lager.gemStykke(id, nr, bytes, del);
+        return;
+      } catch (e) {
+        if (e?.name === 'QuotaExceededError' || forsoeg >= GENFORSOEG_PAUSER_MS.length) throw e;
+        await new Promise((ok) => ur.saetTimeout(ok, GENFORSOEG_PAUSER_MS[forsoeg]));
+      }
+    }
   }
 
   /** Giver true, hvis optageren selv meldte stop. Sene stykker gemmes også bagefter. */
@@ -160,7 +206,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       if (o.ny && (ingenLyd || ingenPlads)) {
         await lager.sletNote(o.id);
         if (ingenLyd && endelig !== 'plads') endelig = 'tom';
-        else if (ingenPlads) endelig = 'pladsTom';
+        else if (ingenPlads) endelig = o.lagerFejl === 'plads' ? 'pladsTom' : 'lagerTom';
       } else if (!o.ny && (ingenLyd || ingenPlads)) {
         // Noten har lyd fra de tidligere dele og slettes aldrig. Den tomme del tælles ikke med.
         if (ingenLyd && endelig === 'stop') endelig = 'tom';
@@ -176,7 +222,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       // Noten står som optager og rettes ved næste start. Lyden er gemt.
     }
     if (aktiv === o) aktiv = null;
-    o.frigivLaas?.();
+    frigivLaasNaarGemt(o);
     vedAfsluttet({ id: o.id, grund: endelig });
   }
 
@@ -290,7 +336,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       }
 
       const o = {
-        id, ny, del, foersteNr, tidligereMs, frigivLaas, stream, recorder, naesteNr: foersteNr, gemte: 0,
+        id, ny, del, foersteNr, tidligereMs, frigivLaas, stream, recorder, naesteNr: foersteNr, gemte: 0, ventende: 0,
         kaede: Promise.resolve(), sidsteStykke: ur.nu(), startet: ur.nu(), fuld: false,
       };
 

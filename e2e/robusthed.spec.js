@@ -346,6 +346,61 @@ test('fuldt lager under optagelse: dansk besked, det optagede er gemt, og det ka
   await kontekst.close();
 });
 
+// Andre skrivefejl end fuldt lager, som når iPhone et øjeblik mister forbindelsen til lageret.
+// window.__skrivefejl er antallet af lydstykker, der skal afvises med UnknownError, før det lykkes.
+function skrivefejlScript() {
+  window.__skrivefejl = 0;
+  const original = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (vaerdi, ...rest) {
+    const r = original.call(this, vaerdi, ...rest);
+    if (vaerdi && 'nr' in vaerdi && 'noteId' in vaerdi && window.__skrivefejl > 0) {
+      window.__skrivefejl--;
+      const t = this.transaction;
+      r.addEventListener('success', () => {
+        Object.defineProperty(t, 'error', { value: new DOMException('Forbindelsen til lageret blev afbrudt', 'UnknownError'), configurable: true });
+        t.abort();
+      });
+    }
+    return r;
+  };
+}
+
+test('kortvarig skrivefejl under optagelse: optagelsen fortsætter, og den sendes som normalt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await kontekst.addInitScript(skrivefejlScript);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  // Tre afvisninger: lagerets eget genforsøg tager to, optagerens genforsøg den sidste.
+  await side.evaluate(() => { window.__skrivefejl = 3; });
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await navngiv(side, 'Skrivefejl');
+  await vis(side, SENDT);
+  assert.equal(await side.evaluate(() => window.__skrivefejl), 0);
+  assert.equal((await tal(miljoe)).mailKald - foer.mailKald, 1);
+  assert.equal(await side.getByText('løbet tør for plads').count(), 0);
+  await kontekst.close();
+});
+
+test('vedvarende skrivefejl før noget er gemt: besked om, at den ikke kunne gemmes, ikke om plads', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await kontekst.addInitScript(skrivefejlScript);
+  await logInd(side);
+  await side.evaluate(() => { window.__skrivefejl = 1000; });
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await vis(side, 'Telefonen kunne ikke gemme optagelsen. Prøv igen.');
+  assert.equal(await side.getByText('løbet tør for plads').count(), 0);
+  assert.equal((await side.evaluate(async () => (await import('/js/lager.js')).alleNoter())).length, 0);
+  await side.evaluate(() => { window.__skrivefejl = 0; });
+  await knap(side, 'Optag').waitFor();
+  await kontekst.close();
+});
+
 test('fuldt lager, når optagelsen skal starte: dansk besked om plads, ikke "kan ikke optage her"', async () => {
   const { kontekst, side } = await telefonMedFuldtLager();
   await logInd(side);

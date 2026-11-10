@@ -4,15 +4,21 @@ import { lavOptager, vaelgFormat, visAdvarsel, bedOmTilladelse } from '../js/opt
 
 const MINUT = 60 * 1000;
 
-function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity } = {}) {
+/** skrivefejl(nr, forsoeg) giver en fejl, som gemStykke kaster, eller null. forsoeg tæller fra 1 for hvert stykke. */
+function falskLager({ fejlFraStykke = Infinity, haengFraStykke = Infinity, skrivefejl = () => null, vent = () => null } = {}) {
   const l = {
     noter: new Map(),
     stykker: [],
+    forsoeg: new Map(),
     async opretNote(valg) {
       l.noter.set(valg.id, { ...valg, status: 'optager' });
       return valg.id;
     },
     async gemStykke(id, nr, bytes) {
+      l.forsoeg.set(nr, (l.forsoeg.get(nr) ?? 0) + 1);
+      await vent(nr);
+      const fejl = skrivefejl(nr, l.forsoeg.get(nr));
+      if (fejl) throw fejl;
       if (nr >= fejlFraStykke) throw new DOMException('fuld', 'QuotaExceededError');
       if (nr >= haengFraStykke) await new Promise(() => {});
       l.stykker.push({ id, nr, bytes, del: arguments[3] ?? 0 });
@@ -259,6 +265,101 @@ test('fuldt lager før noget er gemt melder pladsTom og sletter noten', async ()
   s.tilstand.recorder.send('a');
   assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'pladsTom' });
   assert.equal(s.lager.noter.has(id), false);
+});
+
+test('fuldt lager prøves ikke igen', async () => {
+  const s = opsaet({ lager: falskLager({ fejlFraStykke: 0 }) });
+  await s.optager.start();
+  s.tilstand.recorder.send('a');
+  await s.venTilAfsluttet();
+  assert.equal(s.lager.forsoeg.get(0), 1);
+});
+
+// Andre skrivefejl end fuldt lager, fx når iPhone mister forbindelsen til lageret et øjeblik.
+
+const UKENDT = () => new DOMException('Connection to Indexed Database server lost', 'UnknownError');
+
+/** Lader tiden gå i små skridt, så genforsøgenes pauser udløber, og løfterne når at køre imellem. */
+async function lad(s, ms) {
+  for (let t = 0; t < ms; t += 100) {
+    await new Promise((ok) => setTimeout(ok, 0));
+    s.skrid(100);
+  }
+  await new Promise((ok) => setTimeout(ok, 0));
+}
+
+test('en kortvarig skrivefejl gemmes ved genforsøg, og optagelsen fortsætter', async () => {
+  const s = opsaet({ lager: falskLager({ skrivefejl: (nr, forsoeg) => (nr === 0 && forsoeg <= 2 ? UKENDT() : null) }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  await lad(s, 3000);
+  s.tilstand.recorder.send('b');
+  await lad(s, 200);
+  assert.deepEqual(s.afsluttet, []);
+  assert.equal(s.tilstand.recorder.state, 'recording');
+  assert.deepEqual(s.lager.stykker.map((x) => [x.id, x.nr]), [[id, 0], [id, 1]]);
+  assert.equal(s.lager.forsoeg.get(0), 3);
+});
+
+test('stykkerne gemmes i rækkefølge, også når et stykke skal prøves igen', async () => {
+  const s = opsaet({ lager: falskLager({ skrivefejl: (nr, forsoeg) => (nr === 0 && forsoeg === 1 ? UKENDT() : null) }) });
+  await s.optager.start();
+  s.tilstand.recorder.send('a');
+  s.tilstand.recorder.send('b');
+  await lad(s, 3000);
+  assert.deepEqual(s.lager.stykker.map((x) => x.nr), [0, 1]);
+});
+
+test('vedvarende skrivefejl før noget er gemt: lagerTom, ikke pladsTom, og noten slettes', async () => {
+  const s = opsaet({ lager: falskLager({ skrivefejl: UKENDT }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  await lad(s, 5000);
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'lagerTom' });
+  assert.equal(s.lager.noter.has(id), false);
+  assert.equal(s.lager.forsoeg.get(0), 3);
+  assert.equal(s.spor.stoppet, true);
+});
+
+test('vedvarende skrivefejl efter gemte stykker: afbrudt, og det gemte bevares', async () => {
+  const s = opsaet({ lager: falskLager({ skrivefejl: (nr) => (nr >= 1 ? UKENDT() : null) }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  s.tilstand.recorder.send('b');
+  await lad(s, 5000);
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'afbrudt' });
+  assert.deepEqual(s.lager.stykker.map((x) => x.nr), [0]);
+  assert.equal(s.lager.noter.get(id).status, 'gemt');
+  assert.equal(s.lager.noter.get(id).afbrudt, true);
+});
+
+test('låsen holdes, til et sent stykke er gemt, så Fortsæt ikke kan genbruge dets nummer', async () => {
+  let gemFaerdig;
+  const holdt = new Promise((ok) => { gemFaerdig = ok; });
+  const s = opsaet({ lager: falskLager({ vent: (nr) => (nr === 0 ? holdt : null) }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  const stoppet = s.optager.stop();
+  await lad(s, 5100);
+  assert.equal(await stoppet, id);
+  assert.equal(s.tilstand.haendelser.some((h) => h[0] === 'frigiv'), false, 'låsen blev frigivet før stykket var gemt');
+  gemFaerdig();
+  await lad(s, 100);
+  // Stykke 0 og stopstykket 1, gemt i rækkefølge efter stop.
+  assert.deepEqual(s.lager.stykker.map((x) => x.nr), [0, 1]);
+  assert.deepEqual(s.tilstand.haendelser.at(-1), ['frigiv', `optag-${id}`]);
+});
+
+test('en skrivning, der aldrig bliver færdig, holder højst låsen i 30 s', async () => {
+  const s = opsaet({ lager: falskLager({ haengFraStykke: 0 }) });
+  const id = await s.optager.start();
+  s.tilstand.recorder.send('a');
+  const stoppet = s.optager.stop();
+  await lad(s, 5100);
+  await stoppet;
+  assert.equal(s.tilstand.haendelser.some((h) => h[0] === 'frigiv'), false);
+  await lad(s, 30000);
+  assert.deepEqual(s.tilstand.haendelser.at(-1), ['frigiv', `optag-${id}`]);
 });
 
 test('advarer ved 55 minutter', async () => {
