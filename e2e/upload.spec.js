@@ -3,13 +3,13 @@
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, randomFillSync } = require('node:crypto');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar, boks } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
 after(async () => { await miljoe.stop(); });
-// En test, der fejler, før den selv har slået serverens fejl fra, må ikke vælte de næste.
-afterEach(async () => { await saetNaesteFejl(miljoe, 'ingen'); });
+// En test, der fejler, før den selv har slået serverens fejl fra eller lukket sin telefon, må ikke vælte de næste.
+afterEach(async () => { await ryd(miljoe); });
 
 const knap = (side, navn) => side.getByRole('button', { name: navn, exact: true });
 const SENDT = 'Referatet er sendt til test@ollgaard.dk';
@@ -85,8 +85,8 @@ test('forsiden har Upload lydfil under Optag, og filvælgeren tager kun lyd', as
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await vis(side, 'Har du allerede en lydfil?');
-  const optag = await knap(side, 'Optag').boundingBox();
-  const upload = await knap(side, 'Upload lydfil').boundingBox();
+  const optag = await boks(knap(side, 'Optag'));
+  const upload = await boks(knap(side, 'Upload lydfil'));
   assert.ok(upload.y > optag.y + optag.height, 'Upload lydfil ligger ikke under Optag');
   assert.ok(upload.height >= 44, `knappen er ${upload.height} px høj`);
   assert.ok(upload.width < optag.width * 1.6, 'Upload lydfil er ikke en lille pilleknap');
@@ -530,7 +530,7 @@ for (const [navn, userAgent, bredde] of [['iPhone', IPHONE, 360], ['Android', AN
 
 async function delGennemServiceWorker(side, { name, mimeType, buffer }) {
   await side.goto(miljoe.adresse);
-  await side.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await swKlar(side);
   await side.goto(`${miljoe.adresse}/test/tom`);
   await side.evaluate(() => {
     const f = document.createElement('form');

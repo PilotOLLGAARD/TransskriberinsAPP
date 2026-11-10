@@ -1,13 +1,13 @@
 'use strict';
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
 after(async () => { await miljoe.stop(); });
-// En test, der fejler, før den selv har slået serverens fejl fra, må ikke vælte de næste.
-afterEach(async () => { await saetNaesteFejl(miljoe, 'ingen'); });
+// En test, der fejler, før den selv har slået serverens fejl fra eller lukket sin telefon, må ikke vælte de næste.
+afterEach(async () => { await ryd(miljoe); });
 
 const knap = (side, navn) => side.getByRole('button', { name: navn, exact: true });
 const SENDT = 'Referatet er sendt til test@ollgaard.dk';
@@ -159,7 +159,7 @@ test('optagelse viser tydeligt, at den kører', async () => {
 test('navnet overlever netværksfejl', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  await side.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await swKlar(side);
   const foer = await tal(miljoe);
 
   await stopOptagelse(side);
@@ -342,7 +342,7 @@ test('måske sendt og udløbet login sender ikke automatisk efter login', async 
 test('login uden net giver en besked og forlader ikke appen', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side, 'udloebet');
-  await side.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await swKlar(side);
   await optag(side);
   await vis(side, 'Du skal logge ind igen. Optagelsen er gemt.');
   await side.evaluate(() => localStorage.setItem('testNaesteType', 'medarbejder'));
@@ -895,7 +895,7 @@ test('skjult app, mens referatet laves, giver en notifikation', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await fangNotifikationer(side);
   await logInd(side);
-  await side.evaluate(() => navigator.serviceWorker.ready);
+  await swKlar(side);
   await saetNaesteFejl(miljoe, 'langsom');
   await optag(side, { titel: 'Langsom' });
   await vis(side, 'Referatet laves');
@@ -932,7 +932,7 @@ async function gemStream(side) {
 
 async function startOptagelse(side) {
   await logInd(side);
-  await side.evaluate(() => navigator.serviceWorker.ready);
+  await swKlar(side);
   await knap(side, 'Optag').click();
   await knap(side, 'Stop').waitFor();
   await side.waitForTimeout(800);
@@ -1297,7 +1297,8 @@ test('Information viser kontoen, og Log ud viser boksen og beholder optagelser',
 test('uden net ved start: ingen fornyelse', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  await side.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.removeItem('testKonto'); });
+  await swKlar(side);
+  await side.evaluate(() => localStorage.removeItem('testKonto'));
   await kontekst.setOffline(true);
   await side.reload();
   await knap(side, 'Optag').waitFor();

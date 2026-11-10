@@ -27,6 +27,36 @@ async function nyTelefon(miljoe, { mikrofon = true, ...valg } = {}) {
   return { kontekst, side };
 }
 
+/**
+ * Efter hver test: en fejlet test må ikke smitte de næste. Den lokale servers "næste fejl" nulstilles
+ * (fx afbrydUpload, der ellers rammer alle uploads), og telefoner, en fejlet test ikke nåede at lukke, lukkes.
+ */
+async function ryd(miljoe) {
+  await Promise.all(miljoe.browser.contexts().map((k) => k.close()));
+  await saetNaesteFejl(miljoe, 'ingen');
+}
+
+/** Venter på service workeren, men aldrig i det uendelige. side.evaluate har ingen tidsgrænse i sig selv. */
+async function swKlar(side, ms = 20000) {
+  const klar = await side.evaluate((ms) => Promise.race([
+    navigator.serviceWorker.ready.then(() => true),
+    new Promise((ok) => setTimeout(() => ok(false), ms)),
+  ]), ms);
+  if (!klar) throw new Error(`Service workeren blev ikke klar på ${ms / 1000} s`);
+}
+
+/** Knappens placering, når den er synlig. Under en ny tegning af skærmen kan boundingBox kortvarigt give null. */
+async function boks(lokator, ms = 15000) {
+  const slut = Date.now() + ms;
+  for (;;) {
+    await lokator.waitFor({ timeout: Math.max(1, slut - Date.now()) });
+    const r = await lokator.boundingBox();
+    if (r) return r;
+    if (Date.now() > slut) throw new Error('Elementet fik ingen placering');
+    await new Promise((ok) => setTimeout(ok, 50));
+  }
+}
+
 async function tal(miljoe) {
   return (await fetch(`${miljoe.adresse}/test/tal`)).json();
 }
@@ -52,4 +82,4 @@ async function forsideLuft(side) {
   });
 }
 
-module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft };
+module.exports = { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar, boks };

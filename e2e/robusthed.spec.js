@@ -2,13 +2,13 @@
 // Dårligt net, afbrudt upload, udløbet login og fuld lagerplads. Intet må gå tabt, og ingen mail må sendes to gange.
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, ryd } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
 after(async () => { await miljoe.stop(); });
-// En test, der fejler, før den selv har slået serverens fejl fra, må ikke vælte de næste.
-afterEach(async () => { await saetNaesteFejl(miljoe, 'ingen'); });
+// En test, der fejler, før den selv har slået serverens fejl fra eller lukket sin telefon, må ikke vælte de næste.
+afterEach(async () => { await ryd(miljoe); });
 
 const knap = (side, navn) => side.getByRole('button', { name: navn, exact: true });
 const SENDT = 'Referatet er sendt til test@ollgaard.dk';
