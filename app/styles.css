@@ -187,54 +187,118 @@ button svg { width: 26px; height: 26px; }
 .slet { color: var(--slet-tekst); background: var(--slet-bund); }
 .hvid { color: var(--blaek); background: var(--kort); box-shadow: inset 0 0 0 1.5px var(--linje); }
 
-/* Startskærm */
+/* Forsiden: fast bundlinje med Tidligere, Optag og Upload lydfil, inden for tommelfingerens rækkevidde. */
 
-.scene {
+:root { --optag-str: 148px; }
+@media (max-height: 700px) { :root { --optag-str: 120px; } }
+
+.bund {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 28px 0 32px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px calc(16px + var(--kant-h)) calc(12px + var(--kant-bund)) calc(16px + var(--kant-v));
+  background: var(--materiale);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 -1px 0 var(--linje);
 }
+
+/* Lige så høj som bundlinjen og Optag, der rager op over den. */
+.bund-plads { flex: none; height: calc(var(--optag-str) + 24px + var(--kant-bund)); }
+
+.bund-knap {
+  /* Deler pladsen ved siden af Optag. Aldrig smallere end 76 px. */
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 76px;
+  max-width: 104px;
+  min-height: 84px;
+  padding: 8px 2px;
+  border-radius: 20px;
+  color: var(--tone-tekst);
+  background: var(--tone);
+  font-size: 18px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.bund-knap svg { width: 26px; height: 26px; }
+@media (max-width: 340px) { .bund { gap: 6px; padding-left: calc(10px + var(--kant-v)); padding-right: calc(10px + var(--kant-h)); } }
 
 .optag {
-  position: relative;
+  flex: none;
   flex-direction: column;
-  gap: 8px;
-  width: 196px;
-  height: 196px;
-  min-height: 196px;
+  gap: 6px;
+  width: var(--optag-str);
+  height: var(--optag-str);
+  min-height: var(--optag-str);
+  padding: 0;
   border-radius: 50%;
   background: var(--blaa-dyb);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
-  /* Ring i logoets blå, som Ø'et */
-  box-shadow: 0 0 0 10px rgba(45, 137, 229, 0.18), 0 12px 32px rgba(14, 90, 163, 0.35);
+  /* Ring i fladens farve, så knappen står frit over linjen, og en blød skygge i logoets blå. */
+  box-shadow: 0 0 0 8px var(--flade), 0 0 0 9.5px var(--linje), 0 14px 30px rgba(14, 90, 163, 0.38);
 }
 
-.optag svg { width: 56px; height: 56px; }
+.optag svg { width: 46px; height: 46px; }
 .optag:active { transform: scale(0.96); }
-/* Optag midt på den ledige plads. På små skærme (iPhone SE) lidt mindre, så forsiden kan ses uden at rulle. */
-.scene { flex: 1; justify-content: center; }
-/* Under Optag: lille vej til en lydfil, brugeren allerede har. Samme pilleknap som Information. */
-.upload-felt { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 4px; }
-.upload-felt .lille-spoerg { color: var(--graa); font-size: 18px; }
-.upload-knap { padding: 8px 18px 8px 14px; }
-/* Den skjulte filvælger får samme skrift som resten, hvis telefonen viser den. */
-input[type="file"] { font: inherit; }
-
 @media (max-height: 700px) {
-  .optag { width: 144px; height: 144px; min-height: 144px; }
+  .optag { font-size: 20px; }
+  .optag svg { width: 38px; height: 38px; }
   .titel { margin-top: 12px; }
-  .scene { gap: 10px; padding-top: 10px; padding-bottom: 4px; }
-  .upload-felt { gap: 2px; }
   .start-navn { margin-top: 12px; }
 }
 
-/* Kort om appen og vej til Information øverst på forsiden. */
+/* "Logger ind …" og "Gemmer lydfilen …" lige over bundlinjen. */
+.bund-status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--optag-str) + 32px + var(--kant-bund));
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.bund-status .venter { min-height: 44px; padding: 6px 18px 6px 14px; border-radius: 999px; background: var(--kort); box-shadow: var(--skygge), inset 0 0 0 1px var(--linje); }
+
+/* Den skjulte filvælger får samme skrift som resten, hvis telefonen viser den. */
+input[type="file"] { font: inherit; }
+
+/* Kort om appen øverst på forsiden. */
 .intro { margin-top: 2px; color: var(--graa); }
-.info-knap { align-self: flex-start; margin-top: 12px; }
 .start-navn { margin-top: 18px; }
+
+/* Intet venter: en kort forklaring. Skjules på de laveste skærme, så forsiden ikke ruller. */
+.kom-i-gang {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1.5px dashed var(--ring);
+  border-radius: var(--radius-stor);
+  color: var(--graa);
+  font-size: 18px;
+}
+.kom-i-gang svg { width: 24px; height: 24px; margin-top: 1px; color: var(--tone-tekst); }
+@media (max-height: 600px) { .kom-i-gang { display: none; } }
+
+@media (prefers-reduced-transparency: reduce) {
+  .bund { background: var(--flade); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .bund-knap { box-shadow: inset 0 0 0 2px currentColor; }
+  .bund { background: var(--flade); box-shadow: 0 -2px 0 var(--blaek); }
+}
 
 .sektion-titel {
   margin: 8px 4px 10px;
@@ -711,3 +775,9 @@ input[type="file"] { font: inherit; }
 .login-boks p { margin: 0; font-size: 19px; font-weight: 550; }
 .info-afsnit .konto { overflow-wrap: anywhere; }
 .info-afsnit .konto + button, .info-afsnit p + button { margin-top: 12px; }
+
+/* Smalleste skærme (iPhone SE 1. gen., 320 px): logo og knap i toppen skal kunne stå ved siden af hinanden. */
+@media (max-width: 340px) {
+  .top .ordmaerke { height: 22px; }
+  .top-knap { gap: 6px; padding: 8px 12px 8px 10px; font-size: 17px; }
+}

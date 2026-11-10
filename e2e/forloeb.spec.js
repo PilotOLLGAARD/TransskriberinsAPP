@@ -862,7 +862,7 @@ test('navneskærmen med Fortsæt optagelsen kan betjenes på 360 px', async () =
   await kontekst.close();
 });
 
-test('Tidligere optagelser kan ses øverst uden at rulle', async () => {
+test('Tidligere optagelser står i bundlinjen og kan ses uden at rulle', async () => {
   const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 360, height: 640 } });
   await logInd(side);
   // Startskærmen tegnes forfra, når login og noter er hentet. Mål først, når knappen står stille.
@@ -872,8 +872,9 @@ test('Tidligere optagelser kan ses øverst uden at rulle', async () => {
     r = await knap(side, TIDLIGERE).boundingBox();
     if (!r) await side.waitForTimeout(50);
   }
-  assert.ok(r.y >= 0 && r.y + r.height <= 120, `knappen ligger ${Math.round(r.y)} px nede`);
-  assert.ok(r.height >= 44, `knappen er ${r.height} px høj`);
+  // Nederst, inden for tommelfingerens rækkevidde.
+  assert.ok(r.y >= 320 && r.y + r.height <= 640, `knappen ligger ${Math.round(r.y)} px nede`);
+  assert.ok(r.height >= 72, `knappen er ${r.height} px høj`);
   assert.ok(r.x + r.width <= 360);
   await kontekst.close();
 });
@@ -1364,7 +1365,7 @@ test('to optagelser venter på login: begge sendes efter login, og boksen forsvi
 
 // Forsiden kan ses uden at rulle
 
-for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['stor iPhone', { width: 393, height: 759 }]]) {
+for (const [navn, viewport] of [['lille iPhone SE', { width: 320, height: 568 }], ['iPhone SE', { width: 375, height: 647 }], ['stor iPhone', { width: 393, height: 759 }]]) {
   test(`forsiden kan ses uden at rulle på ${navn}`, async () => {
     const { kontekst, side } = await nyTelefon(miljoe, { viewport });
     // Som den installerede app på hjemmeskærmen: uden hjælpen til at lægge den der.
@@ -1373,12 +1374,14 @@ for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['st
     await side.waitForTimeout(300);
     const m = await forsideLuft(side);
     assert.ok(m.rul <= 0, `${navn}: rul ${m.rul} px`);
-    // Ikke på kanten: en lidt bredere skrift eller større tekst må ikke få forsiden til at rulle.
+    // Ikke på kanten: en lidt bredere skrift eller større tekst må ikke skubbe indholdet ind under Optag.
     assert.ok(m.luft >= 12, `${navn}: kun ${m.luft} px luft`);
-    for (const k of [knap(side, 'Optag'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
+    for (const k of [knap(side, 'Optag'), knap(side, 'Upload lydfil'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
       const r = await k.boundingBox();
-      assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde, `${navn}: knap uden for skærmen`);
+      assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde && r.x >= 0 && r.x + r.width <= viewport.width, `${navn}: knap uden for skærmen`);
     }
+    // På lave skærme er Optag lidt mindre, så der er plads til navnefeltet.
+    assert.equal(Math.round((await knap(side, 'Optag').boundingBox()).height), viewport.height < 700 ? 120 : 148);
     await kontekst.close();
   });
 }

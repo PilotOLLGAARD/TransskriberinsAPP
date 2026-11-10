@@ -867,14 +867,25 @@ function loginBoks() {
   );
 }
 
-/** Under Optag: en lille vej til en lydfil, brugeren allerede har. Optag er stadig det vigtigste. */
-function uploadFelt() {
+/**
+ * Fast bundlinje på forsiden, inden for tommelfingerens rækkevidde: Tidligere, Optag og Upload lydfil.
+ * Optag er stadig det vigtigste og står i midten.
+ */
+function bundlinje() {
+  const spaerret = t.starter || t.fornyer || t.gemmerFil;
   return h(
     'div',
-    { klasse: 'upload-felt' },
-    h('p', { klasse: 'lille-spoerg' }, 'Har du allerede en lydfil?'),
-    h('button', { type: 'button', klasse: 'top-knap upload-knap', vedTryk: vaelgFil, disabled: t.starter || t.fornyer }, ikon('upload'), 'Upload lydfil'),
+    { klasse: 'bund' },
+    h('button', { type: 'button', klasse: 'bund-knap', 'aria-label': 'Tidligere optagelser', vedTryk: aabnTidligere }, ikon('liste'), 'Tidligere'),
+    h('button', { klasse: 'optag', vedTryk: optag, disabled: spaerret }, ikon('mikrofon'), 'Optag'),
+    h('button', { type: 'button', klasse: 'bund-knap', vedTryk: vaelgFil, disabled: spaerret }, ikon('upload'), 'Upload lydfil'),
   );
+}
+
+/** Det, appen er i gang med, står lige over bundlinjen. */
+function bundStatus() {
+  const tekst = t.fornyer ? 'Logger ind …' : t.gemmerFil ? 'Gemmer lydfilen …' : null;
+  return tekst ? h('div', { klasse: 'bund-status' }, venter(tekst)) : null;
 }
 
 function skaermStart() {
@@ -885,25 +896,23 @@ function skaermStart() {
       'header',
       { klasse: 'top' },
       ordmaerke(),
-      // Øverst, så den altid kan ses uden at rulle.
-      h('button', { klasse: 'top-knap', 'aria-label': 'Tidligere optagelser', vedTryk: aabnTidligere }, ikon('liste'), 'Tidligere'),
+      h('button', { klasse: 'top-knap', vedTryk: aabnInformation }, ikon('info'), 'Information'),
     ),
     h('h1', { klasse: 'titel' }, 'Transskribering'),
     beskedElement(),
     // Er man ikke logget ind, står det i stedet for introen.
     loginBoks() ?? h('p', { klasse: 'intro' }, 'Indtal noter, møder og påmindelser. Du får referatet i Word på mail.'),
-    h('button', { klasse: 'top-knap info-knap', vedTryk: aabnInformation }, ikon('info'), 'Information'),
     startNavn(),
-    h(
-      'div',
-      { klasse: 'scene' },
-      h('button', { klasse: 'optag', vedTryk: optag, disabled: t.starter || t.fornyer || t.gemmerFil }, ikon('mikrofon'), 'Optag'),
-      t.fornyer ? venter('Logger ind …') : null,
-      t.gemmerFil ? venter('Gemmer lydfilen …') : uploadFelt(),
-    ),
     afventer.length ? h('h2', { klasse: 'sektion-titel' }, 'Afventer') : null,
-    afventer.length ? h('div', { klasse: 'liste' }, ...afventer.map(kort)) : null,
+    afventer.length
+      ? h('div', { klasse: 'liste' }, ...afventer.map(kort))
+      // Intet venter: en kort forklaring til den, der åbner appen første gang.
+      : h('p', { klasse: 'kom-i-gang' }, ikon('mikrofon'), h('span', {}, 'Tryk Optag, og tal. Tryk Stop, når du er færdig. Så laver appen referatet.')),
     hjaelpTilHjemmeskaerm(),
+    // Plads, så det nederste indhold kan rulles fri af bundlinjen.
+    h('div', { klasse: 'bund-plads', 'aria-hidden': 'true' }),
+    bundStatus(),
+    bundlinje(),
   ];
 }
 

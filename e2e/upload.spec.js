@@ -3,7 +3,7 @@
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, randomFillSync } = require('node:crypto');
-const { startMiljoe, nyTelefon, tal, saetNaesteFejl, forsideLuft, ryd, swKlar, boks } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, ryd, swKlar, boks } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
@@ -81,41 +81,27 @@ const lydSha = (side, id) => side.evaluate(async (i) => {
 
 // Forsiden
 
-test('forsiden har Upload lydfil under Optag, og filvælgeren tager kun lyd', async () => {
+test('bundlinjen har Tidligere, Optag og Upload lydfil, og filvælgeren tager kun lyd', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  await vis(side, 'Har du allerede en lydfil?');
   const optag = await boks(knap(side, 'Optag'));
+  const tidligere = await boks(knap(side, 'Tidligere optagelser'));
   const upload = await boks(knap(side, 'Upload lydfil'));
-  assert.ok(upload.y > optag.y + optag.height, 'Upload lydfil ligger ikke under Optag');
-  assert.ok(upload.height >= 44, `knappen er ${upload.height} px høj`);
-  assert.ok(upload.width < optag.width * 1.6, 'Upload lydfil er ikke en lille pilleknap');
+  assert.ok(tidligere.x + tidligere.width <= optag.x, 'Tidligere ligger ikke til venstre for Optag');
+  assert.ok(upload.x >= optag.x + optag.width, 'Upload lydfil ligger ikke til højre for Optag');
+  for (const [navn, r] of [['Tidligere', tidligere], ['Upload lydfil', upload]]) {
+    const midte = r.y + r.height / 2;
+    assert.ok(midte > optag.y && midte < optag.y + optag.height, `${navn} står ikke på linje med Optag`);
+    assert.ok(r.height >= 72, `${navn} er ${r.height} px høj`);
+    assert.ok(r.width >= 76, `${navn} er ${r.width} px bred`);
+  }
   const accept = await side.locator('input[type=file]').getAttribute('accept');
   assert.equal(accept, 'audio/*,.m4a,.mp3,.wav,.webm,.ogg,.oga,.aac,.flac');
   assert.equal(await side.locator('input[type=file]').isVisible(), false);
   await kontekst.close();
 });
 
-for (const [navn, viewport] of [['iPhone SE', { width: 375, height: 647 }], ['stor iPhone', { width: 393, height: 759 }]]) {
-  test(`forsiden med Upload lydfil kan ses uden at rulle på ${navn}`, async () => {
-    const { kontekst, side } = await nyTelefon(miljoe, { viewport });
-    await side.addInitScript(() => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
-    await logInd(side);
-    await side.waitForTimeout(300);
-    const m = await forsideLuft(side);
-    assert.ok(m.rul <= 0, `${navn}: rul ${m.rul} px`);
-    // Ikke på kanten: en lidt bredere skrift eller større tekst må ikke få forsiden til at rulle.
-    assert.ok(m.luft >= 12, `${navn}: kun ${m.luft} px luft`);
-    for (const k of [knap(side, 'Optag'), knap(side, 'Upload lydfil'), knap(side, 'Tidligere optagelser'), knap(side, 'Information')]) {
-      const r = await k.boundingBox();
-      assert.ok(r.y >= 0 && r.y + r.height <= m.hoejde, `${navn}: knap uden for skærmen`);
-    }
-    if (viewport.height < 700) assert.equal(Math.round((await knap(side, 'Optag').boundingBox()).height), 144);
-    await kontekst.close();
-  });
-}
 
-// Hele forløbet
 
 test('en m4a gemmes byte for byte før afsendelse, navneskærmen viser filen, og referatet sendes', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);

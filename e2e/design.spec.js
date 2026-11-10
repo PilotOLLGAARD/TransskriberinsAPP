@@ -125,3 +125,56 @@ test('telefonen skifter til mørk, mens appen er åben, og statuslinjen følger 
   assert.deepEqual(await tema(side), [LYS, NAT]);
   await kontekst.close();
 });
+
+// Forsidens bundlinje
+
+test('Afventer-kort kan rulles fri af bundlinjen, også med lange navne på den mindste skærm', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 320, height: 568 } });
+  await logInd(side);
+  for (const titel of ['Kort navn', 'Langtnavnudenmellemrum'.repeat(6).slice(0, 120), 'Byggemøde']) {
+    await saetNaesteFejl(miljoe, 'tjeneste');
+    await optag(side, { titel });
+    await knap(side, 'Prøv igen').waitFor({ timeout: 15000 });
+    await tilForsiden(side);
+  }
+  assert.equal(await side.locator('.kort').count(), 3);
+  await side.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  await side.waitForTimeout(200);
+  const slet = await knap(side, 'Slet').last().boundingBox();
+  const optagKnap = await knap(side, 'Optag').boundingBox();
+  assert.ok(slet.y + slet.height <= optagKnap.y, `Slet (${Math.round(slet.y + slet.height)}) ligger under Optag (${Math.round(optagKnap.y)})`);
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'siden ruller vandret');
+  // Bundlinjen står stille, mens der rulles.
+  assert.ok(optagKnap.y + optagKnap.height <= 568 && optagKnap.y > 568 / 2);
+  await kontekst.close();
+});
+
+test('mens appen logger ind, står det lige over bundlinjen, og Optag og Upload er spærret', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.evaluate(() => { localStorage.removeItem('testKonto'); localStorage.setItem('testFornyVent', '1500'); });
+  await side.reload();
+  await vis(side, 'Logger ind …');
+  const status = await side.locator('.bund-status').boundingBox();
+  const optagKnap = await knap(side, 'Optag').boundingBox();
+  assert.ok(status.y + status.height <= optagKnap.y, 'beskeden ligger ikke over Optag');
+  assert.ok(optagKnap.y - (status.y + status.height) < 40, 'beskeden ligger langt fra bundlinjen');
+  assert.equal(await knap(side, 'Optag').isDisabled(), true);
+  assert.equal(await knap(side, 'Upload lydfil').isDisabled(), true);
+  assert.equal(await knap(side, 'Tidligere optagelser').isDisabled(), false);
+  await kontekst.close();
+});
+
+test('forsiden uden ventende optagelser forklarer, hvad man gør', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await vis(side, 'Tryk Optag, og tal. Tryk Stop, når du er færdig. Så laver appen referatet.');
+  assert.equal(await side.getByText('Har du allerede en lydfil?').count(), 0);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side);
+  await knap(side, 'Prøv igen').waitFor({ timeout: 15000 });
+  await tilForsiden(side);
+  await vis(side, 'Afventer');
+  assert.equal(await side.locator('.kom-i-gang').count(), 0);
+  await kontekst.close();
+});
