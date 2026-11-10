@@ -1,5 +1,4 @@
 node_modules/
-api/local.settings.json
 .env
 .env.*
 !.env.example
@@ -7,12 +6,17 @@ api/local.settings.json
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+# Lokale værktøjer, testlyd og arbejdsmapper. Ligger kun i projektmappen.
 testlyd/
 .vaerktoej/
 .playwright-mcp/
 .superpowers/
+.claude/worktrees/
+.claude/settings.local.json
+arkiv/
 # Interne dokumenter: repoet er offentligt, så de bliver kun i projektmappen.
 docs/plan*.md
+docs/planer/
 docs/it-opsaetning.md
 docs/test-resultater.md
 docs/overdragelse.md

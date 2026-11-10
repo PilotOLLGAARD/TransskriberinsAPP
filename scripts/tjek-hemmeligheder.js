@@ -12,8 +12,9 @@ const { spawnSync } = require('node:child_process');
 
 const NOEGLE_MOENSTER = /AIza[0-9A-Za-z_-]{30,}/;
 const NOEGLE_MOENSTER_GIT = 'AIza[0-9A-Za-z_-]{30,}';
-// Repoet er offentligt, så interne dokumenter må heller ikke komme med. Alle planer i docs/ er interne.
-const FORBUDTE_FILER = /(^|\/)(\.env(\.(?!example$)[^/]+)?|local\.settings\.json)$|^docs\/(plan[^/]*|it-opsaetning|test-resultater|overdragelse|udrulning)\.md$/i;
+// Repoet er offentligt, så interne dokumenter må heller ikke komme med. Alle planer i docs/ er interne,
+// også de gamle i docs/planer/. arkiv/ er en lokal mappe til det, der er taget ud af projektet.
+const FORBUDTE_FILER = /(^|\/)(\.env(\.(?!example$)[^/]+)?|local\.settings\.json)$|^docs\/(plan[^/]*|it-opsaetning|test-resultater|overdragelse|udrulning)\.md$|^docs\/planer\/|^arkiv\//i;
 const REVISIONER_PR_KALD = 200;
 
 function erForbudtFil(navn) {

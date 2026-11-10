@@ -39,6 +39,15 @@ test('interne dokumenter og hemmelige filer må ikke ligge i git', () => {
   }
 });
 
+test('de gamle planer i docs/planer/ og det lokale arkiv/ må ikke ligge i git', () => {
+  for (const navn of ['docs/planer/plan.md', 'docs/planer/plan-fase3.md', 'docs/planer/noter.txt', 'docs/Planer/plan.md', 'arkiv/scripts/proev-gemini.js', 'arkiv/x', 'Arkiv/x']) {
+    assert.equal(erForbudtFil(navn), true, navn);
+  }
+  for (const navn of ['scripts/arkiv.js', 'app/arkiv/x', 'docs/vejledning.md']) {
+    assert.equal(erForbudtFil(navn), false, navn);
+  }
+});
+
 test('interne dokumenter findes også med store bogstaver og andre navne', () => {
   for (const navn of ['docs/Plan.md', 'docs/PLAN-fase4.md', 'docs/plan_ny.md', 'docs/plan-fase 4.md', 'docs/Overdragelse.md', 'docs/IT-opsaetning.md']) {
     assert.equal(erForbudtFil(navn), true, navn);
