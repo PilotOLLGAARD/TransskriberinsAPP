@@ -33,3 +33,12 @@ test('appens filer indeholder ingen nøgle', () => {
     assert.ok(!laes(f).includes('GEMINI_API_KEY'), f);
   }
 });
+
+test('login-biblioteket blokerer ikke første tegning', () => {
+  const html = laes('index.html');
+  const msal = html.indexOf('<script defer src="js/vendor/msal-browser.min.js">');
+  const app = html.indexOf('<script type="module" src="js/app.js">');
+  assert.ok(msal > 0, 'MSAL hentes ikke med defer');
+  // Scripts med defer og moduler køres i den rækkefølge, de står. MSAL skal være klar, når app.js starter.
+  assert.ok(app > msal, 'MSAL skal stå før app.js');
+});

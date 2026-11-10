@@ -620,7 +620,7 @@ function topMedTilbage(vedTryk) {
 }
 
 function ordmaerke() {
-  return h('img', { klasse: 'ordmaerke', src: 'ordmaerke.svg', alt: 'ØLLGAARD' });
+  return h('img', { klasse: 'ordmaerke', src: 'ordmaerke.svg', alt: 'ØLLGAARD', width: '145', height: '28' });
 }
 
 function beskedElement() {
