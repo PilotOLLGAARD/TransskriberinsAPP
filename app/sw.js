@@ -27,6 +27,7 @@ const FILER = [
   'js/login.js',
   'js/mail.js',
   'js/optager.js',
+  'js/tilbage.js',
   'js/tilstand.js',
   'js/transskribering.js',
   'js/typer.js',

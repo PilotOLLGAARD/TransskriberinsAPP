@@ -9,6 +9,7 @@ import { ACCEPT, fjernDeltKopi, formaterMB, gemFil, hentDeltFil, kontrollerFil, 
 import { lavLydkurve } from './lydkurve.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
+import { lavTilbage } from './tilbage.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
 import { typeNavn } from './typer.js';
@@ -1424,6 +1425,22 @@ function skaermTekst() {
   ];
 }
 
+/**
+ * Telefonens egen tilbage (Android-knappen og swipe). Under en optagelse, og mens en fil gemmes, sker der intet,
+ * så en optagelse aldrig afbrydes ved et uheld. Ellers som Tilbage-knappen øverst.
+ */
+function vedTelefonTilbage() {
+  if (t.visning === 'optager' || optager.erAktiv() || t.starter || t.gemmerFil) {
+    tilbageStyring.synk(t.visning, t.fraVisning);
+    return;
+  }
+  if (t.visning === 'tekst') tilbage();
+  else if (t.visning === 'delt') delTilForsiden();
+  else if (t.visning !== 'start') tilForsiden();
+}
+
+const tilbageStyring = lavTilbage({ vedTilbage: vedTelefonTilbage });
+
 let forrigeVisning = null;
 
 // Faste dele (bundlinjer) og optageskærmen, som har sin egen faste bundlinje, løftes ikke med. Ellers ville Optag hoppe.
@@ -1462,6 +1479,8 @@ function tegn() {
     forrigeVisning = t.visning;
     window.scrollTo(0, 0);
   }
+  // Hver underskærm ligger et skridt inde i historikken, så telefonens tilbage fører hertil og ikke ud af appen.
+  tilbageStyring.synk(t.visning, t.fraVisning);
   // Tastaturet åbnes med det samme, så navnet kan skrives med én hånd.
   if (t.visning === 'navn') document.getElementById('titel')?.focus();
   else if (markering) {

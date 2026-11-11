@@ -465,3 +465,132 @@ test('fejl og råd står i korte sætninger', async () => {
   await vis(side, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt. Prøv igen.');
   await kontekst.close();
 });
+
+// Telefonens tilbage (Android-knappen og swipe)
+
+const dybde = (side) => side.evaluate(() => history.state?.dybde ?? 0);
+/** Som telefonens tilbage-knap: ét skridt tilbage i historikken, uden at siden hentes igen. */
+const telefonTilbage = (side) => side.evaluate(() => history.back());
+
+test('telefonens tilbage fra Tidligere og Information fører til forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  for (const [navn, tekst] of [['Tidligere optagelser', 'Ingen optagelser endnu'], ['Information', 'Hvad appen kan bruges til']]) {
+    await knap(side, navn).click();
+    await vis(side, tekst);
+    assert.equal(await dybde(side), 1);
+    await telefonTilbage(side);
+    await knap(side, 'Optag').waitFor();
+    assert.equal(await dybde(side), 0);
+  }
+  await kontekst.close();
+});
+
+test('telefonens tilbage fra Læs fører til Tidligere og derfra til forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Tilbagemøde' });
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await knap(side, 'Læs').click();
+  await knap(side, 'Send referat igen').waitFor();
+  await vis(side, 'Testreferat');
+  assert.equal(await dybde(side), 2);
+  await telefonTilbage(side);
+  await vis(side, 'Tidligere optagelser');
+  await knap(side, 'Læs').waitFor();
+  assert.equal(await dybde(side), 1);
+  await telefonTilbage(side);
+  await knap(side, 'Optag').waitFor();
+  assert.equal(await dybde(side), 0);
+  await kontekst.close();
+});
+
+test('under en optagelse sker der intet ved telefonens tilbage', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(600);
+  await telefonTilbage(side);
+  await side.waitForTimeout(600);
+  // Stadig på optageskærmen, og uret går.
+  await knap(side, 'Stop').waitFor();
+  const ur = await side.locator('#ur').textContent();
+  await side.waitForTimeout(1100);
+  assert.notEqual(await side.locator('#ur').textContent(), ur);
+  await stopOgSend(side, foer);
+  await kontekst.close();
+});
+
+test('telefonens tilbage på navneskærmen efter upload: filen ligger under Afventer', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const { randomFillSync } = require('node:crypto');
+  const buffer = Buffer.alloc(100 * 1024);
+  randomFillSync(buffer);
+  Buffer.from([0, 0, 0, 0x20]).copy(buffer, 0);
+  Buffer.from('ftypM4A ').copy(buffer, 4);
+  const [vaelger] = await Promise.all([side.waitForEvent('filechooser'), knap(side, 'Upload lydfil').click()]);
+  await vaelger.setFiles({ name: 'Ny optagelse 14.m4a', mimeType: 'audio/mp4', buffer });
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  await telefonTilbage(side);
+  await knap(side, 'Optag').waitFor();
+  await vis(side, 'Lydfilen er gemt.');
+  await knap(side, 'Navngiv og send').waitFor();
+  assert.equal(await side.evaluate(async () => (await (await import('/js/lager.js')).alleNoter()).length), 1);
+  await kontekst.close();
+});
+
+test('Tilbage-knappen i appen og telefonens tilbage kan blandes', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Optag').waitFor();
+  await knap(side, 'Information').click();
+  await vis(side, 'Hvad appen kan bruges til');
+  await side.waitForTimeout(200);
+  assert.equal(await dybde(side), 1);
+  await telefonTilbage(side);
+  await knap(side, 'Optag').waitFor();
+  assert.equal(await dybde(side), 0);
+  // Appen er stadig den samme side: intet er hentet igen.
+  assert.equal(new URL(side.url()).pathname, '/');
+  await kontekst.close();
+});
+
+test('genindlæsning på en underskærm starter på forsiden, og tilbage går ikke i ring', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await vis(side, 'Ingen optagelser endnu');
+  await side.reload();
+  await knap(side, 'Optag').waitFor({ timeout: 15000 });
+  await side.waitForTimeout(500);
+  assert.equal(await dybde(side), 0);
+  await knap(side, 'Optag').waitFor();
+  await knap(side, 'Information').click();
+  await vis(side, 'Hvad appen kan bruges til');
+  await telefonTilbage(side);
+  await knap(side, 'Optag').waitFor();
+  await kontekst.close();
+});
+
+test('åbnes appen igen fra en underskærm, går den aldrig selv tilbage i historikken', async () => {
+  // Skridtet under kan høre til en tidligere indlæsning eller en anden side (fx Microsofts login).
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await vis(side, 'Ingen optagelser endnu');
+  await side.goto(miljoe.adresse);
+  await knap(side, 'Optag').waitFor({ timeout: 15000 });
+  let navigeret = 0;
+  side.on('framenavigated', () => { navigeret++; });
+  await side.waitForTimeout(700);
+  assert.equal(navigeret, 0, 'appen navigerede af sig selv');
+  assert.equal(await dybde(side), 0);
+  await kontekst.close();
+});
