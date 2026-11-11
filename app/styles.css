@@ -450,8 +450,11 @@ input[type="file"] { font: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
-/* Her tegnes lyden. */
-.kurve-plads { width: 100%; height: 150px; }
+/* Her tegnes lyden. Lærredet går helt ud til skærmens kanter. */
+.kurve-plads { align-self: stretch; height: 150px; margin: 0 calc(-20px - var(--kant-h)) 0 calc(-20px - var(--kant-v)); }
+.kurve { display: block; width: 100%; height: 100%; }
+/* Uden lydmåler: en stille streg, så skærmen ikke ser tom ud. */
+.kurve.rolig { background: linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.28)) center / 100% 2px no-repeat; }
 
 .optager p { color: rgba(255, 255, 255, 0.74); font-size: 19px; max-width: 22em; }
 .optager .advarsel { color: #ffd60a; font-weight: 650; }

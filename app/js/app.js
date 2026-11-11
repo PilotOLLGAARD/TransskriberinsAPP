@@ -6,6 +6,7 @@ import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
 import { ACCEPT, fjernDeltKopi, formaterMB, gemFil, hentDeltFil, kontrollerFil, navnUdenEndelse } from './lydfil.js';
+import { lavLydkurve } from './lydkurve.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
@@ -24,8 +25,18 @@ const forloeb = lavForloeb({
   vedAendring: () => { opdater().catch(() => {}); },
   vedUpload: (id, sendt, ialt) => visUpload(id, sendt, ialt),
 });
-const medier = browserMedier();
+// Lydkurven lytter med på den strøm, optagelsen bestiller. Derfor huskes den seneste strøm her.
+const browser = browserMedier();
+let sidsteStroem = null;
+const medier = {
+  ...browser,
+  getUserMedia: async (krav) => {
+    sidsteStroem = await browser.getUserMedia(krav);
+    return sidsteStroem;
+  },
+};
 const optager = lavOptager({ lager, medier });
+const kurve = lavLydkurve();
 
 const app = document.getElementById('app');
 // Statuslinjens farve: én pr. tilstand på telefonen. Optageskærmen er mørk i begge.
@@ -182,6 +193,7 @@ async function optag() {
     // Navnet gælder kun denne optagelse. Det ligger nu på noten.
     t.valgtNavn = '';
     if (optager.erAktiv()) {
+      kurve.start(sidsteStroem);
       t.visning = 'optager';
       t.startTid = Date.now();
       t.advarsel = false;
@@ -210,6 +222,7 @@ async function fortsaetOptagelse(id) {
     nyDelStartet(id);
     maerkbar();
     if (optager.erAktiv()) {
+      kurve.start(sidsteStroem);
       t.visning = 'optager';
       // Uret fortsætter fra den samlede tid.
       t.startTid = Date.now() - (note?.varighedMs ?? 0);
@@ -580,6 +593,8 @@ const AFSLUT_BESKEDER = {
 
 optager.naarAfsluttet(({ id, grund }) => {
   clearInterval(urTimer);
+  kurve.stop();
+  sidsteStroem = null;
   if (grund === 'afbrudt') {
     sidstAfbrudt = { id, tid: Date.now() };
     if (document.visibilityState === 'hidden') advarStoppet(id);
@@ -1216,7 +1231,8 @@ function skaermOptager() {
         'div',
         { klasse: 'ur-felt' },
         h('div', { klasse: 'ur', id: 'ur' }, formaterTid(Date.now() - t.startTid)),
-        h('div', { klasse: 'kurve-plads' }),
+        // Lyden som søjler. Kan lydmåleren ikke køre, vises en stille streg, og optagelsen kører som før.
+        h('div', { klasse: 'kurve-plads' }, kurve.erAktiv() ? h('canvas', { klasse: 'kurve', 'aria-hidden': 'true' }) : h('div', { klasse: 'kurve rolig', 'aria-hidden': 'true' })),
         t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, BESKEDER.snartSlut) : null,
         h('p', {}, 'Lad skærmen være tændt — læg telefonen med skærmen opad'),
       ),
@@ -1377,6 +1393,7 @@ function tegn() {
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
   app.replaceChildren(...indhold.filter(Boolean));
+  if (t.visning === 'optager') kurve.vis(app.querySelector('canvas.kurve'));
   if (t.visning !== forrigeVisning) {
     forrigeVisning = t.visning;
     window.scrollTo(0, 0);

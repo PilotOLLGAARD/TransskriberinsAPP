@@ -22,6 +22,7 @@ const FILER = [
   'js/forloeb.js',
   'js/konfig.js',
   'js/lydfil.js',
+  'js/lydkurve.js',
   'js/lager.js',
   'js/login.js',
   'js/mail.js',

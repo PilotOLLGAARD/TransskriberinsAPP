@@ -202,3 +202,87 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 375, height: 647 }
     await kontekst.close();
   });
 }
+
+// Lydkurven
+
+const lydBytes = (side) => side.evaluate(async () => {
+  const l = await import('/js/lager.js');
+  const [note] = await l.alleNoter();
+  return (await l.hentLyd(note.id)).size;
+});
+
+/** Antal hvide billedpunkter på lydkurvens lærred. */
+const hvidePunkter = (side) => side.locator('canvas.kurve').evaluate((c) => {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200 && d[i + 3] > 80) n++;
+  return n;
+});
+
+async function stopOgSend(side, foer) {
+  await knap(side, 'Stop').click();
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  assert.ok(await lydBytes(side) > 0, 'ingen lyd blev gemt');
+  await knap(side, 'Send').click();
+  await vis(side, SENDT);
+  assert.equal((await tal(miljoe)).mailKald, foer.mailKald + 1);
+}
+
+test('lydkurven tegner, og optagelsen gemmes og sendes som før', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(1500);
+  assert.equal(await side.locator('canvas.kurve').getAttribute('aria-hidden'), 'true');
+  assert.ok(await hvidePunkter(side) > 50, 'kurven er tom');
+  const r = await side.locator('canvas.kurve').boundingBox();
+  assert.ok(r.width > 300 && r.height >= 96, `lærredet er ${r.width} x ${r.height}`);
+  await stopOgSend(side, foer);
+  await kontekst.close();
+});
+
+test('kan lydmåleren ikke starte, virker optagelsen alligevel', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript(() => {
+    const Nej = class { constructor() { throw new Error('ingen lydmåler'); } };
+    window.AudioContext = Nej;
+    window.webkitAudioContext = Nej;
+  });
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.locator('.kurve.rolig').waitFor();
+  assert.equal(await side.locator('canvas.kurve').count(), 0);
+  await side.waitForTimeout(1000);
+  await stopOgSend(side, foer);
+  await kontekst.close();
+});
+
+test('afbrydes lydmåleren midt i optagelsen, gemmes optagelsen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  // Som på en iPhone, hvor et opkald eller en låst skærm afbryder lydmåleren.
+  await side.addInitScript(() => {
+    const original = AnalyserNode.prototype.getByteTimeDomainData;
+    const start = Date.now();
+    AnalyserNode.prototype.getByteTimeDomainData = function proev(buffer) {
+      if (window.maalerStartet && Date.now() - window.maalerStartet > 500) throw new DOMException('afbrudt', 'InvalidStateError');
+      window.maalerStartet ||= Date.now();
+      return original.call(this, buffer);
+    };
+    void start;
+  });
+  await logInd(side);
+  const foer = await tal(miljoe);
+  const fejl = [];
+  side.on('pageerror', (e) => fejl.push(e.message));
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(1500);
+  assert.ok(await side.evaluate(() => Date.now() - window.maalerStartet > 500), 'lydmåleren blev aldrig afbrudt');
+  await stopOgSend(side, foer);
+  assert.deepEqual(fejl, []);
+  await kontekst.close();
+});
