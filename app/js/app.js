@@ -560,9 +560,17 @@ function visFortrydBjaelke() {
   document.body.append(bjaelke);
 }
 
+/** Bjælken glider ud samme vej, som den kom ind. Med reduceret bevægelse forsvinder den straks. */
 function fjernFortrydBjaelke() {
-  bjaelke?.remove();
+  const gammel = bjaelke;
   bjaelke = null;
+  if (!gammel) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    gammel.remove();
+    return;
+  }
+  gammel.classList.add('ud');
+  setTimeout(() => gammel.remove(), 180);
 }
 
 function aabnTekst(id) {
@@ -646,19 +654,37 @@ function ordmaerke() {
   );
 }
 
+// Beskeden, der sidst stod på skærmen. Samme besked glider ikke ind igen, når skærmen tegnes på ny.
+let sidsteBesked = null;
+let tegnetBesked = null;
+
 function beskedElement() {
   if (!t.besked) return null;
   const fejl = t.besked.type === 'fejl';
+  tegnetBesked = t.besked.tekst;
   return h(
     'p',
-    { klasse: `besked ${t.besked.type}`, role: fejl ? 'alert' : 'status' },
+    { klasse: `besked ${t.besked.type}${t.besked.tekst === sidsteBesked ? '' : ' ny'}`, role: fejl ? 'alert' : 'status' },
     ikon(fejl ? 'advarsel' : 'tjek'),
     h('span', {}, t.besked.tekst),
   );
 }
 
+/**
+ * Lader en animation, der kører i ring, fortsætte i samme takt, selv om elementet er nyt. Skærmen tegnes forfra
+ * ved hver ændring, og uden dette ville spinnere og den røde prik starte forfra hver gang.
+ */
+function iTakt(el, ms) {
+  el.style.setProperty('--takt', `-${Math.round(performance.now() % ms)}ms`);
+  return el;
+}
+
+function spinner() {
+  return iTakt(h('span', { klasse: 'spinner', 'aria-hidden': 'true' }), 800);
+}
+
 function venter(tekst) {
-  return h('p', { klasse: 'venter', role: 'status' }, h('span', { klasse: 'spinner', 'aria-hidden': 'true' }), tekst);
+  return h('p', { klasse: 'venter', role: 'status' }, spinner(), tekst);
 }
 
 function knap(tekst, vedTryk, { klasse, ikonNavn } = {}) {
@@ -687,7 +713,7 @@ function kortHoved(note, ikonNavn, ikonKlasse, forklaring) {
   return h(
     'div',
     { klasse: 'kort-hoved' },
-    h('span', { klasse: `status-ikon ${ikonKlasse}` }, ikonNavn === 'spinner' ? h('span', { klasse: 'spinner' }) : ikon(ikonNavn)),
+    h('span', { klasse: `status-ikon ${ikonKlasse}` }, ikonNavn === 'spinner' ? spinner() : ikon(ikonNavn)),
     h(
       'div',
       {},
@@ -936,7 +962,7 @@ function skaermStart() {
 function trinPunkt(tilstand, titel, tekst, egenskaber = {}, ekstra = null) {
   const tegnet = tilstand === 'faerdig' ? ikon('tjek')
     : tilstand === 'fejl' ? ikon('advarsel')
-      : tilstand === 'igang' ? h('span', { klasse: 'spinner' }) : null;
+      : tilstand === 'igang' ? spinner() : null;
   return h(
     'li',
     { ...egenskaber, klasse: `trin-punkt ${tilstand}` },
@@ -1112,6 +1138,8 @@ function foldAfsnit(titel, ...indhold) {
     if (el.open) t.infoAaben.add(titel);
     else t.infoAaben.delete(titel);
   });
+  // Kun når brugeren selv åbner afsnittet, ikke når skærmen tegnes på ny.
+  el.firstChild.addEventListener('click', () => { el.lastChild.classList.toggle('ny', !el.open); });
   return el;
 }
 
@@ -1226,7 +1254,7 @@ function skaermOptager() {
     h(
       'div',
       { klasse: 'optager' },
-      h('h1', { role: 'status' }, h('span', { klasse: 'prik', 'aria-hidden': 'true' }), 'Optager'),
+      h('h1', { role: 'status' }, iTakt(h('span', { klasse: 'prik', 'aria-hidden': 'true' }), 1400), 'Optager'),
       h(
         'div',
         { klasse: 'ur-felt' },
@@ -1376,7 +1404,13 @@ function skaermTekst() {
 
 let forrigeVisning = null;
 
+// Faste dele (bundlinjer) og optageskærmen, som har sin egen faste bundlinje, løftes ikke med. Ellers ville Optag hoppe.
+const LOEFTES_IKKE = '.bund, .bund-status, .vaerktoej, .optager';
+
+app.addEventListener('animationend', (e) => { if (e.target === app) app.classList.remove('ind'); });
+
 function tegn() {
+  tegnetBesked = null;
   let indhold;
   if (t.visning === 'optager') indhold = skaermOptager();
   else if (t.visning === 'tekst') indhold = skaermTekst();
@@ -1393,8 +1427,16 @@ function tegn() {
   const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
   app.replaceChildren(...indhold.filter(Boolean));
+  sidsteBesked = tegnetBesked;
   if (t.visning === 'optager') kurve.vis(app.querySelector('canvas.kurve'));
   if (t.visning !== forrigeVisning) {
+    // En ny skærm toner ind og løfter sig en smule. Ikke ved appens første tegning, og ikke når samme skærm tegnes igen.
+    if (forrigeVisning !== null) {
+      app.classList.remove('ind');
+      void app.offsetWidth;
+      app.classList.add('ind');
+      for (const barn of app.children) if (!barn.matches(LOEFTES_IKKE)) barn.classList.add('loeft');
+    }
     forrigeVisning = t.visning;
     window.scrollTo(0, 0);
   }

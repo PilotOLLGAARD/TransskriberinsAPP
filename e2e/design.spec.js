@@ -286,3 +286,111 @@ test('afbrydes lydmåleren midt i optagelsen, gemmes optagelsen', async () => {
   assert.deepEqual(fejl, []);
   await kontekst.close();
 });
+
+// Skærmskift og ro
+
+const animation = (side, selector, pseudo = null) => side.locator(selector).first().evaluate((el, p) => getComputedStyle(el, p).animationName, pseudo);
+
+test('en ny skærm toner ind, men ikke appens første skærm', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  // Første tegning efter start: ingen bevægelse, så appen åbner med det samme.
+  assert.equal(await side.locator('#app.ind').count(), 0);
+  await knap(side, 'Tidligere optagelser').click();
+  await side.locator('#app.ind').waitFor();
+  assert.equal(await animation(side, '#app'), 'ton');
+  assert.equal(await animation(side, 'h1'), 'loeft');
+  await knap(side, 'Tilbage').click();
+  // Bundlinjen er fast og løftes ikke med, ellers ville Optag hoppe.
+  assert.equal(await animation(side, '.bund'), 'none');
+  await kontekst.close();
+});
+
+test('med reduceret bevægelse toner en ny skærm kun, den flytter sig ikke', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { reducedMotion: 'reduce' });
+  await logInd(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await side.locator('#app.ind').waitFor();
+  assert.equal(await animation(side, 'h1'), 'none');
+  assert.equal(await animation(side, '#app'), 'ton');
+  await kontekst.close();
+});
+
+test('bundlinjen står stille under et skærmskift', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const foer = await boks(knap(side, 'Optag'));
+  await knap(side, 'Information').click();
+  await knap(side, 'Tilbage').click();
+  await side.waitForTimeout(50);
+  const midt = await boks(knap(side, 'Optag'));
+  await side.waitForTimeout(400);
+  const efter = await boks(knap(side, 'Optag'));
+  for (const r of [midt, efter]) assert.deepEqual([Math.round(r.x), Math.round(r.y)], [Math.round(foer.x), Math.round(foer.y)]);
+  await kontekst.close();
+});
+
+test('kort toner ikke ind igen, og spinnere og prikken fortsætter i takt, når skærmen tegnes på ny', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side);
+  await knap(side, 'Prøv igen').waitFor({ timeout: 15000 });
+  await tilForsiden(side);
+  await side.waitForTimeout(400);
+  assert.equal(await animation(side, '.kort'), 'none');
+  assert.ok(!(await stil(side, '.kort', 'transitionProperty')).includes('opacity'), 'kortet toner ind ved hver tegning');
+  // En besked animerer kun, når den er ny.
+  await side.evaluate(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('nej', 'NotAllowedError'); }; });
+  await knap(side, 'Optag').click();
+  await side.locator('.besked.fejl.ny').waitFor();
+  await knap(side, 'Upload lydfil').evaluate((k) => k.blur());
+  // Trin-skærmen: spinneren får sin takt fra uret, så den ikke starter forfra ved hver ny tegning.
+  await side.evaluate(() => { delete navigator.mediaDevices.getUserMedia; });
+  await saetNaesteFejl(miljoe, 'langsom');
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  assert.match(await side.locator('.prik').evaluate((el) => el.style.getPropertyValue('--takt')), /^-\d+ms$/);
+  assert.equal(await animation(side, '.prik', '::after'), 'puls');
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await navngiv(side);
+  await side.locator('.trin-punkt.igang .spinner').waitFor();
+  assert.match(await side.locator('.trin-punkt.igang .spinner').evaluate((el) => el.style.getPropertyValue('--takt')), /^-\d+ms$/);
+  await vis(side, SENDT);
+  await kontekst.close();
+});
+
+test('Fortryd-bjælken glider ud i stedet for at forsvinde brat', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side);
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await knap(side, 'Slet').click();
+  await knap(side, 'Fortryd').click();
+  await side.locator('.toast.ud').waitFor({ timeout: 2000 });
+  await side.locator('.toast').waitFor({ state: 'detached', timeout: 1000 });
+  // Optagelsen er tilbage.
+  await knap(side, 'Send referat igen').waitFor();
+  await kontekst.close();
+});
+
+test('Fortryd-bjælken dækker ikke bundlinjen på forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side);
+  await knap(side, 'Prøv igen').waitFor({ timeout: 15000 });
+  await tilForsiden(side);
+  await knap(side, 'Slet').click();
+  await knap(side, 'Fortryd').waitFor();
+  await side.waitForTimeout(300);
+  const bjaelke = await side.locator('.toast').boundingBox();
+  const optagKnap = await knap(side, 'Optag').boundingBox();
+  assert.ok(bjaelke.y + bjaelke.height <= optagKnap.y, `bjælken (${Math.round(bjaelke.y + bjaelke.height)}) dækker Optag (${Math.round(optagKnap.y)})`);
+  await knap(side, 'Fortryd').click();
+  await knap(side, 'Prøv igen').waitFor();
+  await kontekst.close();
+});

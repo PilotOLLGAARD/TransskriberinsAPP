@@ -1167,7 +1167,8 @@ test('Fortryd-bjælken er den samme, mens skærmen tegnes igen, og glider derfor
   await knap(side, 'Optag').waitFor();
   assert.equal(await side.evaluate(() => document.querySelector('.toast') === window.foersteBjaelke), true);
   await knap(side, 'Fortryd').click();
-  assert.equal(await side.locator('.toast').count(), 0);
+  // Bjælken glider ud og er væk kort efter.
+  await side.locator('.toast').waitFor({ state: 'detached', timeout: 1000 });
   await kontekst.close();
 });
 

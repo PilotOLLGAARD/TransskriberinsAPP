@@ -321,8 +321,6 @@ input[type="file"] { font: inherit; }
   border-radius: var(--radius-stor);
   background: var(--kort);
   box-shadow: var(--skygge);
-  transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
-  @starting-style { opacity: 0; transform: translateY(6px); }
 }
 
 .kort-hoved { display: flex; align-items: flex-start; gap: 12px; }
@@ -359,9 +357,11 @@ input[type="file"] { font: inherit; }
   border-radius: var(--radius);
   font-size: 18px;
   font-weight: 550;
-  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
-  @starting-style { opacity: 0; transform: translateY(-4px); }
 }
+
+/* Kun en ny besked glider ind. Samme besked står stille, når skærmen tegnes på ny. */
+.besked.ny { animation: besked-ind 200ms var(--ease-out); }
+@keyframes besked-ind { from { opacity: 0; transform: translateY(-4px); } }
 
 .besked svg { width: 22px; height: 22px; margin-top: 1px; }
 .besked.fejl { color: var(--fejl-tekst); background: var(--fejl-bund); }
@@ -428,16 +428,27 @@ input[type="file"] { font: inherit; }
   letter-spacing: -0.01em;
 }
 
+/* Prikken står stille. Ringen om den pulserer med gennemsigtighed og størrelse, som telefonen tegner billigt. */
 .prik {
+  position: relative;
+  flex: none;
   width: 16px;
   height: 16px;
   border-radius: 50%;
   background: var(--optag-roed);
-  box-shadow: 0 0 0 6px rgba(255, 69, 58, 0.22);
-  animation: pulser 1.4s ease-in-out infinite;
 }
 
-@keyframes pulser { 50% { opacity: 0.4; box-shadow: 0 0 0 10px rgba(255, 69, 58, 0); } }
+.prik::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: rgba(255, 69, 58, 0.24);
+  animation: puls 1.4s ease-in-out infinite;
+  animation-delay: var(--takt, 0ms);
+}
+
+@keyframes puls { 50% { opacity: 0; transform: scale(1.35); } }
 
 /* Ur, lydkurve og råd midt på den ledige plads. */
 .ur-felt { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; width: 100%; }
@@ -537,6 +548,8 @@ input[type="file"] { font: inherit; }
   border-top-color: var(--tone-tekst);
   border-radius: 50%;
   animation: drej 800ms linear infinite;
+  /* Takten sættes af appen, så spinneren ikke starter forfra, når skærmen tegnes på ny. */
+  animation-delay: var(--takt, 0ms);
 }
 
 @keyframes drej { to { transform: rotate(360deg); } }
@@ -545,11 +558,20 @@ input[type="file"] { font: inherit; }
   button:not(:disabled):hover { filter: brightness(1.08); }
 }
 
+/* Et nyt skærmbillede toner ind, og indholdet løfter sig en smule. Bundlinjerne er faste og løftes ikke. */
+#app.ind { animation: ton 200ms var(--ease-out); }
+.loeft { animation: loeft 200ms var(--ease-out); }
+@keyframes ton { from { opacity: 0; } }
+@keyframes loeft { from { transform: translateY(8px); } }
+
 @media (prefers-reduced-motion: reduce) {
-  .prik { animation: none; }
+  .prik::after { animation: none; }
   button { transition: none; }
   button:active { transform: none; }
-  .kort, .besked, .optager, .bar > i { transition: none; }
+  .bar > i { transition: none; }
+  /* Kun en kort toning. Intet flytter sig. */
+  #app.ind { animation-duration: 120ms; }
+  .loeft, .besked.ny, .fold-indhold.ny { animation: none; }
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -713,6 +735,8 @@ input[type="file"] { font: inherit; }
   transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
   @starting-style { opacity: 0; transform: translateY(12px); }
 }
+/* Ud samme vej, lidt hurtigere end ind. */
+.toast.ud { opacity: 0; transform: translateY(12px); transition-duration: 150ms; pointer-events: none; }
 .toast span { flex: 1; }
 .toast button { width: auto; min-height: 56px; padding: 8px 20px; color: #282828; background: #fff; font-size: 19px; }
 
@@ -776,6 +800,7 @@ input[type="file"] { font: inherit; }
 .info-fold summary:focus-visible { outline: 3px solid var(--blaa); outline-offset: 2px; }
 .fold-indhold { padding: 0 18px 16px; }
 .fold-indhold > :first-child { margin-top: 0; }
+.fold-indhold.ny { animation: ton 150ms var(--ease-out); }
 .fold-indhold .guide { box-shadow: none; padding: 0; background: none; }
 .fold-indhold h3 { margin: 14px 0 0; font-size: 19px; }
 @media (prefers-reduced-motion: reduce) {
@@ -805,3 +830,6 @@ input[type="file"] { font: inherit; }
   .top .ordmaerke { height: 22px; }
   .top-knap { gap: 6px; padding: 8px 12px 8px 10px; font-size: 17px; }
 }
+
+/* På forsiden står Fortryd-bjælken over bundlinjen, så Optag, Tidligere og Upload stadig kan trykkes. */
+body:has(.bund) .toast { bottom: calc(var(--optag-str) + 32px + var(--kant-bund)); }
