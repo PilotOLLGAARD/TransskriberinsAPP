@@ -2,7 +2,7 @@
 // Design og brugeroplevelse: mørk tilstand, bundlinje, optageskærm, lydkurve, skærmskift og telefonens tilbage.
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMiljoe, nyTelefon, saetNaesteFejl, ryd, kontrast } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, tal, saetNaesteFejl, ryd, kontrast, boks } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
@@ -178,3 +178,27 @@ test('forsiden uden ventende optagelser forklarer, hvad man gør', async () => {
   assert.equal(await side.locator('.kom-i-gang').count(), 0);
   await kontekst.close();
 });
+
+// Optageskærmen
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 375, height: 647 }, { width: 320, height: 568 }]) {
+  test(`Stop ligger, hvor Optag lå (${viewport.width} x ${viewport.height})`, async () => {
+    const { kontekst, side } = await nyTelefon(miljoe, { viewport });
+    await logInd(side);
+    const foer = await boks(knap(side, 'Optag'));
+    await knap(side, 'Optag').click();
+    const efter = await boks(knap(side, 'Stop'));
+    for (const maal of ['x', 'y', 'width', 'height']) {
+      assert.ok(Math.abs(foer[maal] - efter[maal]) <= 2, `${maal}: Optag ${foer[maal]}, Stop ${efter[maal]}`);
+    }
+    // Uret og rådet står over knappen og kan ses uden at rulle.
+    const ur = await side.locator('#ur').boundingBox();
+    const raad = await side.getByText('Lad skærmen være tændt').boundingBox();
+    assert.ok(ur.y > 0 && raad.y + raad.height <= efter.y, 'tekst og Stop overlapper');
+    assert.ok(await side.evaluate(() => document.documentElement.scrollHeight <= innerHeight), 'optageskærmen ruller');
+    await side.waitForTimeout(800);
+    await knap(side, 'Stop').click();
+    await side.getByLabel(FELT).waitFor();
+    await kontekst.close();
+  });
+}

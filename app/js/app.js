@@ -1216,10 +1216,12 @@ function skaermOptager() {
         'div',
         { klasse: 'ur-felt' },
         h('div', { klasse: 'ur', id: 'ur' }, formaterTid(Date.now() - t.startTid)),
+        h('div', { klasse: 'kurve-plads' }),
         t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, BESKEDER.snartSlut) : null,
         h('p', {}, 'Lad skærmen være tændt — læg telefonen med skærmen opad'),
       ),
-      h('button', { klasse: 'stop', vedTryk: stop }, h('span', { klasse: 'firkant', 'aria-hidden': 'true' }), 'Stop'),
+      // Samme sted og samme størrelse som Optag på forsiden.
+      h('div', { klasse: 'bund nat' }, h('button', { klasse: 'stop', vedTryk: stop }, h('span', { klasse: 'firkant', 'aria-hidden': 'true' }), 'Stop')),
     ),
   ];
 }

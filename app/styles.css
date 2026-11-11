@@ -189,8 +189,9 @@ button svg { width: 26px; height: 26px; }
 
 /* Forsiden: fast bundlinje med Tidligere, Optag og Upload lydfil, inden for tommelfingerens rækkevidde. */
 
-:root { --optag-str: 148px; }
-@media (max-height: 700px) { :root { --optag-str: 120px; } }
+/* Optag rager op over linjen. Linjen er lige høj på alle skærme. */
+:root { --optag-str: 148px; --optag-loeft: 56px; }
+@media (max-height: 700px) { :root { --optag-str: 120px; --optag-loeft: 28px; } }
 
 .bund {
   position: fixed;
@@ -239,6 +240,7 @@ button svg { width: 26px; height: 26px; }
   width: var(--optag-str);
   height: var(--optag-str);
   min-height: var(--optag-str);
+  margin-top: calc(-1 * var(--optag-loeft));
   padding: 0;
   border-radius: 50%;
   background: var(--blaa-dyb);
@@ -401,22 +403,20 @@ input[type="file"] { font: inherit; }
 .login .noegle { display: flex; flex-direction: column; gap: 12px; }
 .login .lille { color: var(--graa); font-size: 18px; text-align: center; }
 
-/* Under optagelse: mørk, rolig skærm med rød prik som det eneste signal */
+/* Under optagelse: mørk, rolig skærm. Stop står præcis, hvor Optag stod, så tommelfingeren ikke skal flytte sig. */
 
 .optager {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   margin: calc(-14px - var(--kant-top)) calc(-16px - var(--kant-h)) calc(-24px - var(--kant-bund)) calc(-16px - var(--kant-v));
-  padding: calc(28px + var(--kant-top)) calc(20px + var(--kant-h)) calc(32px + var(--kant-bund)) calc(20px + var(--kant-v));
+  /* Nederst plads til bundlinjen med Stop. */
+  padding: calc(28px + var(--kant-top)) calc(20px + var(--kant-h)) calc(var(--optag-str) + 36px + var(--kant-bund)) calc(20px + var(--kant-v));
   color: #fff;
   background: var(--nat);
   text-align: center;
-  transition: opacity 240ms var(--ease-out);
-  @starting-style { opacity: 0; }
 }
 
 .optager h1 {
@@ -439,7 +439,8 @@ input[type="file"] { font: inherit; }
 
 @keyframes pulser { 50% { opacity: 0.4; box-shadow: 0 0 0 10px rgba(255, 69, 58, 0); } }
 
-.ur-felt { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+/* Ur, lydkurve og råd midt på den ledige plads. */
+.ur-felt { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; width: 100%; }
 
 .ur {
   font-size: 92px;
@@ -449,24 +450,44 @@ input[type="file"] { font: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Her tegnes lyden. */
+.kurve-plads { width: 100%; height: 150px; }
+
 .optager p { color: rgba(255, 255, 255, 0.74); font-size: 19px; max-width: 22em; }
 .optager .advarsel { color: #ffd60a; font-weight: 650; }
 
+@media (max-height: 700px) {
+  .optager { gap: 8px; padding-top: calc(18px + var(--kant-top)); }
+  .ur-felt { gap: 8px; }
+  .ur { font-size: 68px; }
+  .kurve-plads { height: 96px; }
+}
+
+/* Bundlinjen på den mørke optageskærm: kun Stop, samme sted og samme størrelse som Optag. */
+.bund.nat { justify-content: center; background: rgba(255, 255, 255, 0.06); box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.12); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
 .stop {
+  flex: none;
   flex-direction: column;
-  gap: 10px;
-  width: 168px;
-  height: 168px;
-  min-height: 168px;
+  gap: 8px;
+  width: var(--optag-str);
+  height: var(--optag-str);
+  min-height: var(--optag-str);
+  margin-top: calc(-1 * var(--optag-loeft));
+  padding: 0;
   border-radius: 50%;
   color: #282828;
   background: #fff;
   font-size: 22px;
   font-weight: 700;
-  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 8px var(--nat), 0 0 0 9.5px rgba(255, 255, 255, 0.2);
 }
 
-.stop .firkant { width: 44px; height: 44px; border-radius: 10px; background: var(--stop-roed); }
+.stop .firkant { width: 40px; height: 40px; border-radius: 10px; background: var(--stop-roed); }
+@media (max-height: 700px) {
+  .stop { font-size: 20px; }
+  .stop .firkant { width: 32px; height: 32px; border-radius: 8px; }
+}
 
 /* Teksten */
 
