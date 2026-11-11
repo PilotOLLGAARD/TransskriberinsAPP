@@ -64,6 +64,7 @@ const t = {
   fornyer: false, // under et stille skift til Microsoft kan Optag ikke trykkes
   gemmerFil: false, // en valgt lydfil kontrolleres og gemmes på telefonen
   upload: new Map(), // id → { sendt, ialt } i bytes, mens lyden sendes. Kun i hukommelsen.
+  trinTegnet: new Map(), // id → de trin, der allerede er vist som færdige, så fluebenet kun tegnes én gang
 };
 
 let urTimer = null;
@@ -496,6 +497,7 @@ async function sendIgen(id) {
 }
 
 function tilForsiden() {
+  t.trinTegnet.delete(t.fremdriftNote);
   t.visning = 'start';
   t.fremdriftNote = null;
   t.besked = null;
@@ -1014,6 +1016,15 @@ function skaermFremdrift() {
       : p === 4 ? trinPunkt('faerdig', `Referatet er sendt til ${mail}`)
         : trinPunkt(p === 3 && !fejl ? 'igang' : 'venter', 'Referatet sendes til din mail'),
   ];
+  // Fluebenet tegnes, første gang et trin vises som færdigt. Ikke igen, når skærmen tegnes på ny.
+  const vist = t.trinTegnet.get(note.id) ?? new Set();
+  const faerdige = new Set();
+  trin.forEach((punkt, nr) => {
+    if (!punkt.classList.contains('faerdig')) return;
+    faerdige.add(nr);
+    if (!vist.has(nr)) punkt.classList.add('ny');
+  });
+  t.trinTegnet.set(note.id, faerdige);
   const type = typeNavn(note.type);
   const meta = [type, formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ');
   let nederst;
@@ -1043,7 +1054,8 @@ function skaermFremdrift() {
     // Fejl som manglende net ved login vises her. At referatet er sendt, står allerede i trinene.
     t.besked?.type === 'fejl' ? beskedElement() : null,
     h('div', { klasse: 'trin-kort' }, h('ol', { klasse: 'trin-liste', 'aria-live': 'polite' }, ...trin)),
-    ...[nederst].flat(),
+    // Nederst på skærmen, inden for tommelfingeren.
+    h('div', { klasse: 'trin-bund' }, ...[nederst].flat()),
   ];
 }
 
@@ -1241,11 +1253,21 @@ function skaermTidligere() {
   return [
     topMedTilbage(tilbage),
     h('h1', { klasse: 'titel' }, 'Tidligere optagelser'),
-    h('p', { klasse: 'undertitel' }, 'Her finder du dine optagelser fra de sidste 7 dage. Optagelser, der endnu ikke er sendt, gemmes, indtil de er sendt.'),
+    noter.length
+      ? h('p', { klasse: 'undertitel' }, 'Her finder du dine optagelser fra de sidste 7 dage. Optagelser, der endnu ikke er sendt, gemmes, indtil de er sendt.')
+      : null,
     beskedElement(),
     noter.length
       ? h('div', { klasse: 'liste historik-liste' }, ...noter.map(historikKort))
-      : h('p', { klasse: 'tom-liste' }, 'Ingen optagelser endnu.'),
+      // Intet på listen endnu: sig, hvad der kommer til at stå her, og vis vejen til forsiden.
+      : h(
+        'div',
+        { klasse: 'tom-tilstand' },
+        h('span', { klasse: 'rund', 'aria-hidden': 'true' }, ikon('liste')),
+        h('h2', {}, 'Ingen optagelser endnu'),
+        h('p', {}, 'Når du har sendt en optagelse, ligger referatet her i 7 dage.'),
+        knap('Optag den første', tilForsiden, { ikonNavn: 'mikrofon' }),
+      ),
   ];
 }
 
@@ -1262,7 +1284,7 @@ function skaermOptager() {
         // Lyden som søjler. Kan lydmåleren ikke køre, vises en stille streg, og optagelsen kører som før.
         h('div', { klasse: 'kurve-plads' }, kurve.erAktiv() ? h('canvas', { klasse: 'kurve', 'aria-hidden': 'true' }) : h('div', { klasse: 'kurve rolig', 'aria-hidden': 'true' })),
         t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, BESKEDER.snartSlut) : null,
-        h('p', {}, 'Lad skærmen være tændt — læg telefonen med skærmen opad'),
+        h('p', {}, 'Lad skærmen være tændt, og læg telefonen med skærmen opad.'),
       ),
       // Samme sted og samme størrelse som Optag på forsiden.
       h('div', { klasse: 'bund nat' }, h('button', { klasse: 'stop', vedTryk: stop }, h('span', { klasse: 'firkant', 'aria-hidden': 'true' }), 'Stop')),

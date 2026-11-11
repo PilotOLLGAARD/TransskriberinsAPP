@@ -394,3 +394,74 @@ test('Fortryd-bjælken dækker ikke bundlinjen på forsiden', async () => {
   await knap(side, 'Prøv igen').waitFor();
   await kontekst.close();
 });
+
+// Tom liste, trin-skærm og tekster
+
+test('den tomme liste under Tidligere fører til forsiden uden at starte en optagelse', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await side.getByRole('heading', { name: 'Ingen optagelser endnu' }).waitFor();
+  await vis(side, 'Når du har sendt en optagelse, ligger referatet her i 7 dage.');
+  // Forklaringen om de 7 dage står ét sted, ikke to.
+  assert.equal(await side.getByText('Her finder du dine optagelser').count(), 0);
+  await knap(side, 'Optag den første').click();
+  await knap(side, 'Optag').waitFor();
+  await side.waitForTimeout(300);
+  assert.equal(await knap(side, 'Stop').count(), 0, 'optagelsen startede af sig selv');
+  // Med en optagelse på listen er den tomme tilstand væk, og forklaringen står øverst.
+  await optag(side);
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await vis(side, 'Her finder du dine optagelser');
+  assert.equal(await knap(side, 'Optag den første').count(), 0);
+  await kontekst.close();
+});
+
+test('knapperne på trin-skærmen står nederst, inden for tommelfingeren', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 390, height: 844 } });
+  await logInd(side);
+  const nederst = async (navn) => {
+    const r = await boks(knap(side, navn));
+    return 844 - (r.y + r.height);
+  };
+  await optag(side);
+  await vis(side, SENDT);
+  assert.ok(await nederst('Ny optagelse') <= 60, `Ny optagelse står ${await nederst('Ny optagelse')} px over bunden`);
+  await tilForsiden(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side);
+  await knap(side, 'Prøv igen').waitFor({ timeout: 15000 });
+  assert.ok(await nederst('Til forsiden') <= 60, `Til forsiden står ${await nederst('Til forsiden')} px over bunden`);
+  assert.ok(await side.evaluate(() => document.documentElement.scrollHeight <= innerHeight), 'trin-skærmen ruller');
+  await kontekst.close();
+});
+
+test('fluebenet tegnes, første gang et trin er færdigt, og ikke igen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side);
+  await vis(side, SENDT);
+  // Lige efter afsendelsen er de sidste trin nye.
+  assert.ok(await side.locator('.trin-punkt.faerdig.ny').count() >= 1);
+  // Kommer man tilbage til en færdig note, tegnes intet igen.
+  await tilForsiden(side);
+  await knap(side, 'Information').click();
+  await knap(side, 'Tilbage').click();
+  assert.equal(await side.locator('.trin-punkt.ny').count(), 0);
+  await kontekst.close();
+});
+
+test('fejl og råd står i korte sætninger', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await knap(side, 'Optag').click();
+  await vis(side, 'Lad skærmen være tændt, og læg telefonen med skærmen opad.');
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await navngiv(side);
+  await vis(side, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt. Prøv igen.');
+  await kontekst.close();
+});

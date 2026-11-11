@@ -676,7 +676,13 @@ input[type="file"] { font: inherit; }
 .status-maerke.fejl { color: var(--fejl-tekst); background: var(--fejl-bund); }
 .status-maerke.venter { color: var(--graa); background: var(--flade); }
 
-.tom-liste { margin: 24px 4px; color: var(--graa); }
+/* Tom liste: midt på skærmen, med vej til forsiden. */
+.tom-tilstand { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 12px 12vh; text-align: center; }
+.tom-tilstand .rund { display: grid; place-items: center; width: 96px; height: 96px; border-radius: 50%; color: var(--tone-tekst); background: var(--tone); }
+.tom-tilstand .rund svg { width: 44px; height: 44px; }
+.tom-tilstand h2 { margin-top: 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.015em; }
+.tom-tilstand p { color: var(--graa); }
+.tom-tilstand button { margin-top: 10px; }
 .historik-liste { margin: 16px 0 20px; }
 
 @media (prefers-contrast: more) {
@@ -704,7 +710,19 @@ input[type="file"] { font: inherit; }
 .mail-linje strong { color: var(--blaek); overflow-wrap: anywhere; }
 .info { display: flex; gap: 12px; margin-top: 16px; padding: 16px; border-radius: var(--radius); color: var(--tone-tekst); background: var(--tone); font-size: 18px; font-weight: 550; }
 .info svg { width: 24px; height: 24px; margin-top: 1px; }
-.trin-kort + .knapper, .mail-linje + button, .info + button { margin-top: 20px; }
+.mail-linje + button, .info + button { margin-top: 20px; }
+/* Knapperne nederst på trin-skærmen, inden for tommelfingeren. */
+.trin-bund { display: flex; flex-direction: column; margin-top: auto; padding-top: 20px; }
+.trin-bund > .mail-linje:first-child { margin-top: 0; }
+
+/* Et trin bliver færdigt: cirklen springer frem, og fluebenet tegnes. Kun første gang. */
+.trin-punkt.faerdig.ny .trin-ikon { animation: trin-frem 240ms var(--ease-out); }
+.trin-punkt.faerdig.ny .trin-ikon path { stroke-dasharray: 22; animation: flueben 300ms var(--ease-out) 80ms backwards; }
+@keyframes trin-frem { from { opacity: 0; transform: scale(0.9); } }
+@keyframes flueben { from { stroke-dashoffset: 22; } }
+@media (prefers-reduced-motion: reduce) {
+  .trin-punkt.faerdig.ny .trin-ikon, .trin-punkt.faerdig.ny .trin-ikon path { animation: none; }
+}
 
 @media (prefers-contrast: more) {
   .trin-kort { box-shadow: inset 0 0 0 2px var(--blaek); }

@@ -80,3 +80,9 @@ test('en lydfil over 2½ time får en dansk besked om at dele den op', () => {
   assert.equal(BESKEDER.forLang, 'Lydfilen er længere end 2½ time. Del den op i en anden app, og upload delene hver for sig.');
   assert.ok(alleFejltyper().has('forLang'));
 });
+
+test('teksterne siger, hvad der skete, i korte sætninger uden tankestreg', () => {
+  assert.equal(BESKEDER.tjeneste, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt. Prøv igen.');
+  assert.equal(BESKEDER.afbrudt, 'Optagelsen blev afbrudt. Det optagede er gemt. Vil du fortsætte?');
+  for (const [noegle, tekst] of Object.entries(BESKEDER)) assert.ok(!tekst.includes('—'), `${noegle}: ${tekst}`);
+});

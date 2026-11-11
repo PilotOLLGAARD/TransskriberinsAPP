@@ -82,10 +82,10 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 | Ingen forbindelse | Vent, til du har net, og tryk på Prøv igen |
 | Du skal logge ind igen | Tryk på Log ind og prøv igen |
 | Appen må ikke bruge mikrofonen | Giv appen tilladelse i telefonens indstillinger |
-| Optagelsen blev afbrudt — det optagede er gemt | Tryk Fortsæt optagelsen for at optage videre, eller Send for at få referat af det, der er optaget |
+| Optagelsen blev afbrudt. Det optagede er gemt | Tryk Fortsæt optagelsen for at optage videre, eller Send for at få referat af det, der er optaget |
 | Optagelsen kan ikke fortsættes mere | Send den, og start en ny. Grænsen er 59 minutter eller 20 dele |
 | Din konto har ikke adgang | Kontakt IT |
-| Transskriptionen mislykkedes | Tryk på Prøv igen. Navnet er gemt |
+| Det lykkedes ikke at lave referatet | Tryk på Prøv igen. Navnet er gemt |
 | Mailen blev ikke sendt | Tryk på Send igen |
 | Optagelsen kunne ikke behandles | Kontakt IT, hvis det sker igen |
 | Mailen er måske allerede sendt | Tjek din indbakke, før du sender igen |

@@ -387,7 +387,7 @@ test('tjeneste-fejl vises, intet tabt, og det kan prøves igen med samme navn', 
   await logInd(side);
   await saetNaesteFejl(miljoe, 'tjeneste');
   await optag(side, { titel: 'Tjenestefejl' });
-  await vis(side, 'Transskriptionen mislykkedes. Optagelsen er gemt.');
+  await vis(side, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt.');
   assert.ok((await lydBytes(side)) > 0);
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
@@ -416,7 +416,7 @@ test('referat-fejl to gange: Fejlet med lyden gemt, og Prøv igen laver kun refe
   await saetNaesteFejl(miljoe, 'referatTo');
   await optag(side, { titel: 'Referatfejl to' });
   await vis(side, 'Referatet kunne ikke laves lige nu');
-  await vis(side, 'Transskriptionen mislykkedes. Optagelsen er gemt.');
+  await vis(side, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt.');
   assert.ok((await lydBytes(side)) > 0);
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
@@ -510,7 +510,7 @@ test('kan betjenes på 360 px', async () => {
   await tjek('navn');
   await saetNaesteFejl(miljoe, 'tjeneste');
   await navngiv(side, 'Smal skærm');
-  await vis(side, 'Transskriptionen mislykkedes');
+  await vis(side, 'Det lykkedes ikke at lave referatet');
   await tjek('fejl');
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
@@ -598,7 +598,7 @@ test('optageskærmen beder om at lade skærmen være tændt', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await knap(side, 'Optag').click();
-  await vis(side, 'Lad skærmen være tændt — læg telefonen med skærmen opad');
+  await vis(side, 'Lad skærmen være tændt, og læg telefonen med skærmen opad.');
   await side.waitForTimeout(800);
   await knap(side, 'Stop').click();
   await navngiv(side);
@@ -613,7 +613,7 @@ test('langt navn uden mellemrum giver ingen vandret rulning på 360 px', async (
   await saetNaesteFejl(miljoe, 'tjeneste');
   await stopOptagelse(side);
   await knap(side, 'Send').click();
-  await vis(side, 'Transskriptionen mislykkedes');
+  await vis(side, 'Det lykkedes ikke at lave referatet');
   assert.ok(await side.evaluate(() => document.documentElement.scrollWidth) <= 360);
   await knap(side, 'Prøv igen').click();
   await vis(side, SENDT);
@@ -713,7 +713,7 @@ test('fejlet optagelse vises som Fejlet med Slettes ikke, før den er sendt, og 
   await logInd(side);
   await saetNaesteFejl(miljoe, 'tjeneste');
   await optag(side, { titel: 'Fejler' });
-  await vis(side, 'Transskriptionen mislykkedes');
+  await vis(side, 'Det lykkedes ikke at lave referatet');
   await tilForsiden(side);
   await aabnTidligere(side);
   await vis(side, 'Fejlet');
@@ -723,11 +723,11 @@ test('fejlet optagelse vises som Fejlet med Slettes ikke, før den er sendt, og 
   await kontekst.close();
 });
 
-test('tom liste viser Ingen optagelser endnu.', async () => {
+test('tom liste viser Ingen optagelser endnu', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   await aabnTidligere(side);
-  await vis(side, 'Ingen optagelser endnu.');
+  await vis(side, 'Ingen optagelser endnu');
   await kontekst.close();
 });
 
@@ -739,7 +739,7 @@ test('Tidligere optagelser kan betjenes på 360 px', async () => {
   await tilForsiden(side);
   await saetNaesteFejl(miljoe, 'tjeneste');
   await optag(side, { titel: 'Fejler på smal skærm' });
-  await vis(side, 'Transskriptionen mislykkedes');
+  await vis(side, 'Det lykkedes ikke at lave referatet');
   await tilForsiden(side);
   await aabnTidligere(side);
   const m = await side.evaluate(() => ({
@@ -755,7 +755,7 @@ test('Tidligere optagelser kan betjenes på 360 px', async () => {
 
 // Fortsæt optagelsen efter afbrydelse
 
-const AFBRUDT = 'Optagelsen blev afbrudt — det optagede er gemt. Vil du fortsætte?';
+const AFBRUDT = 'Optagelsen blev afbrudt. Det optagede er gemt. Vil du fortsætte?';
 const MARKOER = '[Optagelsen blev afbrudt her]';
 
 /** Som når telefonen låses eller man skifter app. */
@@ -1062,7 +1062,7 @@ test('Slet i Tidligere viser Fortryd, og Fortryd bringer optagelsen tilbage', as
   await aabnTidligere(side);
   await knap(side, 'Slet').click();
   await vis(side, 'Optagelsen er slettet.');
-  await vis(side, 'Ingen optagelser endnu.');
+  await vis(side, 'Ingen optagelser endnu');
   await knap(side, 'Fortryd').click();
   await vis(side, 'Fortrydes');
   await side.waitForTimeout(7500);

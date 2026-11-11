@@ -199,7 +199,7 @@ Ret `server/src/ordliste.js`, og læg ændringen på `main`. Bedst med højst 10
 | Det ser du | Sandsynlig årsag |
 |---|---|
 | Alle får "Din konto har ikke adgang" | Den valgfri claim `acct` er ikke sat op i Entra ID. Se `docs/it-opsaetning.md`. Serverens log viser grunden som `adgang-afvist` |
-| Alle får "Transskriptionen mislykkedes" | Nøglen, forbrugsloftet eller Google. Serverens log viser `gemini-fejl` med en kode. `server-ikke-klar` betyder, at en indstilling mangler |
+| Alle får "Det lykkedes ikke at lave referatet" | Nøglen, forbrugsloftet eller Google. Serverens log viser `gemini-fejl` med en kode. `server-ikke-klar` betyder, at en indstilling mangler |
 | Appen svarer "Ingen forbindelse" trods net | Variablen `SERVER_ADRESSE` på GitHub mangler eller er forkert, eller "Udgiv appen" er ikke kørt efter den blev sat |
 
 Serverens log findes i Google Cloud Console under Cloud Run > transskribering > Logs. Den indeholder aldrig tekst, lyd eller hvem der har kaldt.
