@@ -15,7 +15,9 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
 - Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
 - Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i Word-dokumentet. Mailen har kun Word-dokumentet; PDF'en sendes kun som reserve, hvis Word mangler (fejlet på serveren eller gamle noter). Serveren laver stadig PDF'en til det og til ældre apps.
-- Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper. Logoet ligger i `app/ordmaerke.svg` og `app/maerke.svg`.
+- Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper, tekst mindst 18 px. Mørk tilstand følger telefonen (farverne er variabler øverst i `app/styles.css`). Logoet ligger i `app/ordmaerke.svg` (`app/ordmaerke-lys.svg` i mørk tilstand) og `app/maerke.svg`. App-ikonet er hvidt Ø på `#0E5AA3`.
+- Forsiden har en fast bundlinje med Tidligere, Optag og Upload lydfil, og Stop ligger præcis, hvor Optag lå. Al bevægelse har en udgave til "reducer bevægelse", og kun `transform` og `opacity` animeres.
+- Lydkurven på optageskærmen må aldrig kunne stoppe en optagelse: den lytter kun med, alle dens fejl sluges, og den stopper aldrig mikrofonens spor.
 - Ingen hemmeligheder i git, i `app/` eller i logs. Læs aldrig `.env*`.
 - GitHub-kontoen PilotOLLGAARD må kun have denne ene GitHub Pages-side, og repoet `pilotollgaard.github.io` må aldrig oprettes. Alle Pages-sider på kontoen deler adressen `https://pilotollgaard.github.io`, så en anden side kunne læse login og optagelser. Skal der flere sider til, skal appen først have sit eget domæne.
 - Kør `npm run tjek:hemmeligheder` før hvert push, også til `main`. Testen på GitHub kører først, når historikken allerede er offentlig. Push aldrig tags eller andre grene end `main`.
@@ -39,9 +41,11 @@ iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `app/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
 | `app/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
 | `app/js/app.js` | Kun brugerflade |
+| `app/js/lydkurve.js` | Lydkurven på optageskærmen: måler lyden på optagelsens egen strøm og tegner søjler. Kaster aldrig |
+| `app/js/tilbage.js` | Telefonens tilbage (Android-knappen og swipe) går ét skridt tilbage i appen. Går aldrig selv tilbage ud fra en gammel historik |
 | `scripts/lokal.js` | Lokal server med falsk login, falsk Gemini og falsk referat. Rigtig handler og PDF |
 | `scripts/tjek-hemmeligheder.js` | Finder nøgler og interne dokumenter i git og historikken |
-| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, én gang) og `lav-ikoner.js` (ikoner og logo-PNG) |
+| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, én gang) og `lav-ikoner.js` (ikoner, lyst ordmærke og iPhones startskærme i `app/start/`; kun med `--server` også logo-PNG til PDF'erne) |
 | `scripts/proev/` | `proev-referat.js` (rigtig Gemini, koster penge) og `test-adgang.js` (udgivet server afviser fremmede) |
 | `scripts/testbaenk/` | Testlyd og målinger mod rigtig Gemini (koster penge, spørg først). Forbrug logges i `testlyd/forbrug.json` |
 

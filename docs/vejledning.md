@@ -23,7 +23,7 @@ Repoet er offentligt på GitHub-kontoen PilotOLLGAARD. Repoet hedder `Transskrib
 | `server/` | Serveren til Cloud Run: `src/`, `assets/` (skrift og logo til PDF og Word), `Dockerfile`. Unit-tests i `server/test/` |
 | `e2e/` | Browsertests af hele forløbet med falsk login og falsk Gemini |
 | `scripts/` | `lokal.js` (lokal server, bruges også af browsertestene) og `tjek-hemmeligheder.js` |
-| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, køres én gang) og `lav-ikoner.js` (appens ikoner og logoet til PDF'en) |
+| `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, køres én gang) og `lav-ikoner.js` (appens ikoner, iPhones startskærme og, med `--server`, logoet til PDF'en) |
 | `scripts/proev/` | `proev-referat.js` (rigtig Gemini, koster penge) og `test-adgang.js` (tjekker, at en udgivet server afviser fremmede) |
 | `scripts/testbaenk/` | Målinger af transskription og referat mod rigtig Gemini (koster penge) |
 | `scripts/test/` | Unit-tests af scripts |
