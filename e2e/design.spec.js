@@ -594,3 +594,58 @@ test('åbnes appen igen fra en underskærm, går den aldrig selv tilbage i histo
   assert.equal(await dybde(side), 0);
   await kontekst.close();
 });
+
+// Værste realistiske data
+
+const LANGT_NAVN = 'Byggemøde_uge46_Ørestad_Syd_etape3_installationer_og_ventilation_opfølgning_på_mangelliste_fra_totalentreprenøren_rev2';
+
+test('et meget langt navn fylder højst tre linjer på trin-skærmen, så trinnene kan ses på den mindste skærm', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 320, height: 568 } });
+  await logInd(side);
+  await optag(side, { titel: LANGT_NAVN });
+  await vis(side, SENDT);
+  const h1 = side.locator('h1.titel');
+  const r = await h1.boundingBox();
+  const linje = await h1.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+  assert.ok(r.height <= linje * 3 + 2, `overskriften er ${Math.round(r.height)} px høj (${(r.height / linje).toFixed(1)} linjer)`);
+  // Hele navnet kan stadig læses af skærmlæsere og ved at holde fingeren på det.
+  assert.equal(await h1.getAttribute('title'), LANGT_NAVN);
+  assert.equal(await h1.textContent(), LANGT_NAVN);
+  const trin = await side.locator('.trin-kort').boundingBox();
+  assert.ok(trin.y < 568 / 2, `trinnene starter ${Math.round(trin.y)} px nede`);
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  // Under Læs står hele navnet, i en mindre skrift.
+  await tilForsiden(side);
+  await knap(side, 'Tidligere optagelser').click();
+  await knap(side, 'Læs').click();
+  await side.locator('.tekst').waitFor();
+  assert.equal(await side.locator('h1.titel').textContent(), LANGT_NAVN);
+  assert.equal(await stil(side, 'h1.titel', 'fontSize'), '24px');
+  assert.equal(await side.locator('h1.titel').getAttribute('title'), null);
+  await kontekst.close();
+});
+
+test('et kort navn står i stor skrift, og lange ord deles ved stavelser i stedet for midt i ordet', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await optag(side, { titel: 'Byggemøde' });
+  await vis(side, SENDT);
+  assert.equal(await stil(side, 'h1.titel', 'fontSize'), '34px');
+  assert.equal(await stil(side, 'h1.titel', 'hyphens'), 'auto');
+  await tilForsiden(side);
+  await knap(side, 'Tidligere optagelser').click();
+  assert.equal(await stil(side, '.historik-top .dato', 'hyphens'), 'auto');
+  // Appens egne overskrifter og mailadresser deles aldrig med bindestreg.
+  assert.equal(await stil(side, 'h1.titel', 'hyphens'), 'manual');
+  await knap(side, 'Tilbage').click();
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  await knap(side, 'Stop').click();
+  await side.getByLabel(FELT).waitFor();
+  assert.equal(await stil(side, '.navn-titel', 'hyphens'), 'manual');
+  await knap(side, 'Send').click();
+  await vis(side, SENDT);
+  assert.equal(await stil(side, '.trin-titel', 'hyphens'), 'manual');
+  await kontekst.close();
+});

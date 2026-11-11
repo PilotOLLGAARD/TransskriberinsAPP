@@ -647,6 +647,15 @@ function topMedTilbage(vedTryk) {
   );
 }
 
+/**
+ * Overskrift med en optagelses navn. Et langt navn får mindre skrift. Med klem fylder det højst tre linjer,
+ * så resten af skærmen kan ses; hele navnet står stadig i elementet og i title.
+ */
+function noteTitel(tekst, { klem = false } = {}) {
+  const lang = [...tekst].length > 40;
+  return h('h1', { klasse: `titel note${lang ? ' lang' : ''}${lang && klem ? ' klemt' : ''}`, title: lang && klem ? tekst : undefined }, tekst);
+}
+
 function ordmaerke() {
   // I mørk tilstand en udgave med lyse bogstaver. Ø'et er blåt i begge.
   return h(
@@ -1050,7 +1059,8 @@ function skaermFremdrift() {
   }
   return [
     h('header', { klasse: 'top' }, ordmaerke()),
-    h('h1', { klasse: 'titel' }, note.titel || 'Optagelse'),
+    // Trinnene er det vigtige her. Hele navnet står under Tidligere og i mailen.
+    noteTitel(note.titel || 'Optagelse', { klem: true }),
     meta ? h('p', { klasse: 'undertitel' }, meta) : null,
     // Fejl som manglende net ved login vises her. At referatet er sendt, står allerede i trinene.
     t.besked?.type === 'fejl' ? beskedElement() : null,
@@ -1405,7 +1415,7 @@ function skaermTekst() {
       'div',
       { klasse: 'tekst-skaerm' },
       topMedTilbage(tilbage),
-      h('h1', { klasse: 'titel' }, note.titel || 'Teksten'),
+      noteTitel(note.titel || 'Teksten'),
       h('p', { klasse: 'undertitel' }, formaterDato(note.oprettet)),
       beskedElement(),
       fejl ? advarsel(fejl) : null,

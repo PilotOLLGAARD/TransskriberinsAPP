@@ -148,6 +148,12 @@ picture { display: block; flex: none; }
 .top-knap svg { width: 22px; height: 22px; }
 
 .titel { margin: 18px 0 6px; overflow-wrap: anywhere; }
+/* En optagelses navn: lange ord deles ved stavelser, hvor telefonen kan. Ellers hvor som helst, så intet rager ud.
+   Appens egne overskrifter, filnavne og mailadresser deles aldrig med bindestreg. */
+.titel.note, .kort .dato, .historik-top .dato { -webkit-hyphens: auto; hyphens: auto; }
+/* Et langt navn på en optagelse: mindre skrift, og på trin-skærmen højst tre linjer. */
+.titel.lang { font-size: 24px; line-height: 1.2; letter-spacing: -0.012em; }
+.titel.klemt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 .undertitel { color: var(--graa); }
 
 /* Knapper: feedback ved tryk, ikke ved slip */
