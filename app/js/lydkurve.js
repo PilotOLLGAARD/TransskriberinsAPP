@@ -45,11 +45,12 @@ export function forskydning(sidenMs, reducer) {
   return Math.max(0, Math.min(1, sidenMs / MAALE_MS));
 }
 
-function tegnSoejler(laerred, vaerdier, forskudt) {
+/** Gør lærredet klar i telefonens opløsning og rydder det. null, når det ikke har nogen størrelse. */
+function klargoer(laerred) {
   const taethed = globalThis.devicePixelRatio || 1;
   const bredde = laerred.clientWidth;
   const hoejde = laerred.clientHeight;
-  if (!bredde || !hoejde) return;
+  if (!bredde || !hoejde) return null;
   if (laerred.width !== Math.round(bredde * taethed) || laerred.height !== Math.round(hoejde * taethed)) {
     laerred.width = Math.round(bredde * taethed);
     laerred.height = Math.round(hoejde * taethed);
@@ -57,6 +58,23 @@ function tegnSoejler(laerred, vaerdier, forskudt) {
   const c = laerred.getContext('2d');
   c.setTransform(taethed, 0, 0, taethed, 0, 0);
   c.clearRect(0, 0, bredde, hoejde);
+  return { c, bredde, hoejde };
+}
+
+/** Lydmåleren står på pause: en stille streg. Ikke flade søjler, for de ville ligne stilhed i mikrofonen. */
+function tegnRolig(laerred) {
+  const flade = klargoer(laerred);
+  if (!flade) return;
+  const { c, bredde, hoejde } = flade;
+  c.globalAlpha = 0.28;
+  c.fillStyle = '#ffffff';
+  c.fillRect(0, hoejde / 2 - 1, bredde, 2);
+}
+
+function tegnSoejler(laerred, vaerdier, forskudt) {
+  const flade = klargoer(laerred);
+  if (!flade) return;
+  const { c, bredde, hoejde } = flade;
   c.fillStyle = '#ffffff';
   const nyeste = bredde - HOEJRE - SOEJLE - forskudt * SKRIDT;
   for (let i = 0; i < vaerdier.length; i++) {
@@ -86,6 +104,11 @@ export function lavLydkurve({
   afbrydRaf = (id) => cancelAnimationFrame(id),
   nu = () => performance.now(),
   reducer = () => matchMedia('(prefers-reduced-motion: reduce)').matches,
+  // Et tryk på skærmen må vække en lydmåler på pause. Giver en funktion, der fjerner lytteren igen.
+  vedTryk = (fn) => {
+    document.addEventListener('pointerdown', fn, { passive: true });
+    return () => document.removeEventListener('pointerdown', fn);
+  },
 } = {}) {
   const historik = lavHistorik(HUSKER);
   let kontekst = null;
@@ -95,6 +118,17 @@ export function lavLydkurve({
   let laerred = null;
   let billede = null;
   let sidstMaalt = 0;
+  let sidstVaekket = 0;
+  let fjernTryk = null;
+
+  /** Telefonen kan starte lydmåleren på pause eller sætte den på pause ved et opkald. */
+  function koerer() {
+    return !kontekst?.state || kontekst.state === 'running';
+  }
+
+  function vaek() {
+    try { kontekst?.resume?.()?.catch?.(() => {}); } catch { /* intet */ }
+  }
 
   function kanTegne() {
     return Boolean(maaler && laerred?.isConnected);
@@ -105,6 +139,16 @@ export function lavLydkurve({
     if (!kanTegne()) return;
     try {
       const tid = nu();
+      if (!koerer()) {
+        // Ingen målinger at stole på. Prøv at vække lydmåleren igen, højst hvert halve sekund.
+        if (tid - sidstVaekket >= 500) {
+          sidstVaekket = tid;
+          vaek();
+        }
+        tegnRolig(laerred);
+        planlaeg();
+        return;
+      }
       if (tid - sidstMaalt >= MAALE_MS) {
         maaler.getByteTimeDomainData(buffer);
         historik.tilfoej(niveau(buffer));
@@ -127,6 +171,8 @@ export function lavLydkurve({
       if (billede !== null) afbrydRaf(billede);
     } catch { /* intet */ }
     billede = null;
+    try { fjernTryk?.(); } catch { /* intet */ }
+    fjernTryk = null;
     try { kilde?.disconnect(); } catch { /* intet */ }
     // Kun lydmåleren lukkes. Mikrofonens spor ejes af optagelsen.
     try { kontekst?.close?.()?.catch?.(() => {}); } catch { /* intet */ }
@@ -151,8 +197,10 @@ export function lavLydkurve({
         buffer = new Uint8Array(ny.fftSize);
         maaler = ny;
         // Telefonen kan starte lydmåleren på pause.
-        try { kontekst.resume?.()?.catch?.(() => {}); } catch { /* intet */ }
+        vaek();
+        try { fjernTryk = vedTryk(vaek); } catch { fjernTryk = null; }
         sidstMaalt = 0;
+        sidstVaekket = nu();
         return true;
       } catch {
         stop();

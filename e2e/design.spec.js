@@ -649,3 +649,43 @@ test('et kort navn står i stor skrift, og lange ord deles ved stavelser i stede
   assert.equal(await stil(side, '.trin-titel', 'hyphens'), 'manual');
   await kontekst.close();
 });
+
+// Rettelser efter den uafhængige gennemgang
+
+test('står lydmåleren på pause, vises en rolig streg og ikke flade søjler, og optagelsen sendes som før', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  // Som på en iPhone, hvor lydmåleren kan starte på pause og ikke lader sig vække uden et tryk.
+  await side.addInitScript(() => {
+    const Rigtig = window.AudioContext;
+    window.AudioContext = class extends Rigtig {
+      constructor(...valg) { super(...valg); this.suspend(); }
+      resume() { return Promise.resolve(); }
+    };
+  });
+  await logInd(side);
+  const foer = await tal(miljoe);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(1500);
+  assert.equal(await side.locator('canvas.kurve').count(), 1);
+  assert.equal(await hvidePunkter(side), 0, 'kurven viser flade søjler, som om der var stille');
+  await stopOgSend(side, foer);
+  await kontekst.close();
+});
+
+for (const hoejde of [568, 720]) test(`på den smalleste skærm (320 x ${hoejde}) er al tekst på forsiden mindst 18 px, og intet rager ud`, async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 320, height: hoejde } });
+  await logInd(side);
+  // Arial er bredere end telefonens skrift: passer det her, passer det også på en iPhone SE.
+  await side.evaluate(() => { document.body.style.fontFamily = 'Arial, "Liberation Sans", sans-serif'; });
+  await side.waitForTimeout(100);
+  const m = await side.evaluate(() => ({
+    smaa: [...document.querySelectorAll('button, p, h1, h2, input, label')].filter((e) => e.getBoundingClientRect().height > 0 && parseFloat(getComputedStyle(e).fontSize) < 18).map((e) => `${e.className || e.tagName}: ${getComputedStyle(e).fontSize}`),
+    bred: document.documentElement.scrollWidth,
+    ude: [...document.querySelectorAll('button, img')].filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5).map((e) => e.className || e.tagName),
+  }));
+  assert.deepEqual(m.smaa, []);
+  assert.equal(m.bred, 320);
+  assert.deepEqual(m.ude, []);
+  await kontekst.close();
+});

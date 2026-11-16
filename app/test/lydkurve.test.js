@@ -46,14 +46,15 @@ test('søjlerne glider jævnt mellem to målinger, men står stille med reducere
 });
 
 /** Falsk lydkontekst, strøm og lærred. Tæller, hvad kurven gør ved dem. */
-function falskMiljoe({ lyd = () => sinus(0.2), kontekstFejl = false } = {}) {
+function falskMiljoe({ lyd = () => sinus(0.2), kontekstFejl = false, vaagner = true } = {}) {
   const m = {
-    lukket: 0, afbrudt: 0, sporStoppet: 0, tilsluttet: [], tegnet: 0, tid: 0, koe: [], fortsat: 0,
+    lukket: 0, afbrudt: 0, sporStoppet: 0, tilsluttet: [], tegnet: 0, soejler: 0, streger: 0, tid: 0, koe: [], fortsat: 0,
+    vaagner, kontekst: null, tryk: null, trykFjernet: 0,
     strøm: { getTracks: () => [{ stop: () => { m.sporStoppet++; } }] },
     laerred: {
       isConnected: true, clientWidth: 300, clientHeight: 150, width: 0, height: 0,
       getContext: () => ({
-        setTransform() {}, clearRect() {}, beginPath() {}, fill() { m.tegnet++; }, fillRect() { m.tegnet++; },
+        setTransform() {}, clearRect() {}, beginPath() {}, fill() { m.tegnet++; m.soejler++; }, fillRect() { m.tegnet++; m.streger++; },
         roundRect() {}, rect() {}, set fillStyle(v) {}, set globalAlpha(v) {},
       }),
     },
@@ -61,15 +62,18 @@ function falskMiljoe({ lyd = () => sinus(0.2), kontekstFejl = false } = {}) {
   m.valg = {
     lavKontekst: () => {
       if (kontekstFejl) throw new Error('ingen lyd');
-      return {
+      m.kontekst = {
+        // Som på en telefon: lydmåleren starter på pause og vågner, når den bliver bedt om det.
         state: 'suspended',
-        resume: async () => { m.fortsat++; },
+        resume: async () => { m.fortsat++; if (m.vaagner) m.kontekst.state = 'running'; },
         close: async () => { m.lukket++; },
         createMediaStreamSource: (s) => ({ connect: (maal) => { m.tilsluttet.push([s, maal]); }, disconnect: () => { m.afbrudt++; } }),
         createAnalyser: () => ({ fftSize: 0, getByteTimeDomainData: (buffer) => { buffer.set(lyd().subarray(0, buffer.length)); } }),
         destination: { navn: 'højttaler' },
       };
+      return m.kontekst;
     },
+    vedTryk: (fn) => { m.tryk = fn; return () => { m.tryk = null; m.trykFjernet++; }; },
     raf: (fn) => { m.koe.push(fn); return m.koe.length; },
     afbrydRaf: () => { m.koe.length = 0; },
     nu: () => m.tid,
@@ -98,7 +102,7 @@ test('kurven tegner søjler, når der er lyd', () => {
   kurve.start(m.strøm);
   kurve.vis(m.laerred);
   for (let i = 0; i < 30; i++) m.billede(16);
-  assert.ok(m.tegnet > 3, `kun ${m.tegnet} tegninger`);
+  assert.ok(m.soejler > 3, `kun ${m.soejler} søjler`);
 });
 
 test('stop lukker lydmåleren, men stopper aldrig mikrofonens spor', () => {
@@ -143,6 +147,41 @@ test('afbrydes lydmåleren midt i optagelsen, fryser kurven uden at kaste', () =
   assert.equal(kurve.erAktiv(), true);
   kurve.stop();
   assert.equal(m.sporStoppet, 0);
+});
+
+test('står lydmåleren på pause, tegnes en rolig streg og ikke flade søjler, der ligner stilhed', () => {
+  // På iPhone kan lydmåleren starte på pause eller blive sat på pause af et opkald. Optagelsen kører alligevel,
+  // så kurven må ikke påstå, at mikrofonen intet hører.
+  const m = falskMiljoe({ vaagner: false });
+  const kurve = lavLydkurve(m.valg);
+  assert.equal(kurve.start(m.strøm), true);
+  kurve.vis(m.laerred);
+  for (let i = 0; i < 20; i++) m.billede(50);
+  assert.equal(m.soejler, 0, 'der tegnes søjler, selv om lydmåleren står på pause');
+  assert.ok(m.streger >= 1, 'den rolige streg mangler');
+  // Den prøver selv at vække lydmåleren igen, men ikke i hvert billede.
+  assert.ok(m.fortsat >= 2 && m.fortsat <= 4, `${m.fortsat} forsøg på et sekund`);
+  // Når lydmåleren kører igen, kommer søjlerne.
+  m.kontekst.state = 'running';
+  for (let i = 0; i < 10; i++) m.billede(50);
+  assert.ok(m.soejler > 3, `kun ${m.soejler} søjler efter pausen`);
+});
+
+test('et tryk på skærmen vækker lydmåleren, og lytteren fjernes ved stop', () => {
+  const m = falskMiljoe({ vaagner: false });
+  const kurve = lavLydkurve(m.valg);
+  kurve.start(m.strøm);
+  kurve.vis(m.laerred);
+  m.billede();
+  assert.equal(typeof m.tryk, 'function');
+  m.vaagner = true;
+  m.tryk();
+  assert.equal(m.kontekst.state, 'running');
+  for (let i = 0; i < 10; i++) m.billede(50);
+  assert.ok(m.soejler > 3);
+  kurve.stop();
+  assert.equal(m.trykFjernet, 1);
+  assert.equal(m.tryk, null);
 });
 
 test('kurven tegner ikke, når lærredet er taget ud af siden, og fortsætter på et nyt', () => {

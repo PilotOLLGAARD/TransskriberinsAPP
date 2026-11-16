@@ -198,6 +198,8 @@ button svg { width: 26px; height: 26px; }
 /* Optag rager op over linjen. Linjen er lige høj på alle skærme. */
 :root { --optag-str: 148px; --optag-loeft: 56px; }
 @media (max-height: 700px) { :root { --optag-str: 120px; --optag-loeft: 28px; } }
+/* Smalleste skærme: mindre Optag, så Tidligere og Upload lydfil har plads ved siden af. */
+@media (max-width: 340px) { :root { --optag-str: 120px; --optag-loeft: 28px; } }
 
 .bund {
   position: fixed;
@@ -852,7 +854,7 @@ input[type="file"] { font: inherit; }
 /* Smalleste skærme (iPhone SE 1. gen., 320 px): logo og knap i toppen skal kunne stå ved siden af hinanden. */
 @media (max-width: 340px) {
   .top .ordmaerke { height: 22px; }
-  .top-knap { gap: 6px; padding: 8px 12px 8px 10px; font-size: 17px; }
+  .top-knap { gap: 6px; padding: 8px 12px 8px 10px; }
 }
 
 /* På forsiden står Fortryd-bjælken over bundlinjen, så Optag, Tidligere og Upload stadig kan trykkes. */
