@@ -110,17 +110,20 @@ test('dårligt 4G: en længere optagelse sendes med trin undervejs, og appen giv
   await kontekst.close();
 });
 
-test('net væk midt i upload: lyden bevares, Fejlet med dansk besked, og Prøv igen sender én mail', async () => {
+// Ligger hele lyden i styresystemets netværksbuffer, før serveren lukker, melder browseren den sendt, og fejlen står
+// ved referatet i stedet for ved lyden. Linux har større buffere end Windows. Begge størrelser prøves derfor.
+for (const kb of [100, 2048]) test(`net væk midt i upload af ${kb} KB: lyden bevares, Fejlet med dansk besked, og Prøv igen sender én mail`, async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  const bytes = 512 * KB;
+  const bytes = kb * KB;
   const id = await lagOptagelse(side, { bytes });
   const foer = await tal(miljoe);
   // Forbindelsen tabes, når serveren har fået de første 64 KB.
   await saetNaesteFejl(miljoe, 'afbrydUpload');
   await sendLagt(side, 'Net væk');
-  await vis(side, 'Lyden kunne ikke sendes', 30000);
-  await vis(side, 'Ingen forbindelse. Optagelsen er gemt.');
+  // Samme besked, uanset om browseren nåede at melde lyden sendt.
+  await vis(side, 'Ingen forbindelse. Optagelsen er gemt.', 30000);
+  await knap(side, 'Prøv igen').waitFor();
   assert.equal(await lydBytes(side, id), bytes);
   assert.equal((await note(side, id)).status, 'fejl');
   assert.equal((await tal(miljoe)).mailKald, foer.mailKald);

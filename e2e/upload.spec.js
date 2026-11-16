@@ -363,16 +363,21 @@ test('Sender lyden viser procent, MB og en fremdriftslinje', async () => {
   await kontekst.close();
 });
 
-test('net væk midt i upload af en fil: lyden bevares, og Prøv igen under Afventer sender én mail', async () => {
+// Serveren lukker forbindelsen efter 64 KB. Ligger hele filen allerede i styresystemets netværksbuffer, melder
+// browseren lyden sendt, og fejlen står ved referatet. Ellers står den ved lyden. Linux har større buffere end
+// Windows, så 512 KB kan ende begge steder. Begge størrelser prøves derfor, på alle styresystemer.
+for (const kb of [100, 2048]) test(`net væk midt i upload af en fil på ${kb} KB: lyden bevares, og Prøv igen under Afventer sender én mail`, async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
-  const fil = await upload(side, { buffer: m4a(512 * KB) });
+  const fil = await upload(side, { buffer: m4a(kb * KB) });
   await side.getByLabel(FELT).waitFor();
   const foer = await tal(miljoe);
   await saetNaesteFejl(miljoe, 'afbrydUpload');
   await knap(side, 'Send').click();
-  await vis(side, 'Lyden kunne ikke sendes', 30000);
+  // Samme besked, uanset om browseren nåede at melde lyden sendt.
   await vis(side, 'Ingen forbindelse. Optagelsen er gemt.');
+  await knap(side, 'Prøv igen').waitFor();
+  assert.equal(await side.locator('.trin-punkt.fejl').count(), 1);
   const [n] = await noter(side);
   assert.deepEqual(await lydSha(side, n.id), { bytes: fil.length, sha: sha(fil) });
   await saetNaesteFejl(miljoe, 'ingen');
