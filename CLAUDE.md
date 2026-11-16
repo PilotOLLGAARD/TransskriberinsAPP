@@ -4,7 +4,7 @@ Medarbejderen indtaler en note på telefonen, giver den et navn og får et refer
 
 **Ny session: læs først `docs/overdragelse.md`.** Den beskriver, hvad der er bygget, beslutninger, konti, kendte mangler og næste skridt. Opsætning og udgivelse: `docs/vejledning.md`.
 
-Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan-*.md` (aktuelle design og planer), `docs/planer/` (gamle planer), `arkiv/` (lokalt arkiv), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`, `docs/udrulning.md` (tjekliste før udrulning). `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
+Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git: `.env`, `docs/overdragelse.md`, `docs/plan-*.md` (aktuelle design og planer), `docs/planer/` (gamle planer), `arkiv/` (lokalt arkiv), `docs/it-opsaetning.md` (til IT), `docs/test-resultater.md`, `docs/udrulning.md` (tjekliste før udrulning), `docs/dataoverblik.md` (hvor data ligger, til databeskyttelse og IT). `npm run tjek:hemmeligheder` fejler, hvis de kommer med. Interne beslutninger, navne og aftaler skrives kun der.
 
 ## Krav der aldrig må brydes
 
