@@ -167,15 +167,153 @@ async function bidFragmenteret(kilde, indeks, { fraEnhed, tilEnhed }) {
   return new Blob(dele, { type: 'audio/mp4' });
 }
 
-// Almindelig MP4 (udfyldes med prøvetabeller)
+// Almindelig MP4: prøvetabellerne læses, og en bid får sine egne tabeller med én prøve pr. chunk.
 
-async function almindelig() {
-  return null;
+/** En kasse med type og indhold. */
+function byg(type, ...dele) {
+  const laengde = 8 + dele.reduce((s, d) => s + d.length, 0);
+  const b = new Uint8Array(laengde);
+  new DataView(b.buffer).setUint32(0, laengde);
+  b.set(new TextEncoder().encode(type), 4);
+  let p = 8;
+  for (const d of dele) {
+    b.set(d, p);
+    p += d.length;
+  }
+  return b;
+}
+
+/** En fuld kasse (version 0, ingen flag) med 32-bit tal. */
+function tabel(type, tal) {
+  const b = new Uint8Array(4 + tal.length * 4);
+  const v = new DataView(b.buffer);
+  tal.forEach((x, i) => v.setUint32(4 + i * 4, x));
+  return byg(type, b);
+}
+
+async function almindelig(kilde, top, moov, rod, trak, skala) {
+  if (top.some((k) => k.type === 'moof')) return null;
+  const stbl = find(moov, trak, ['mdia', 'minf', 'stbl']);
+  if (!stbl) return null;
+  const k = (type) => find(moov, stbl, [type]);
+  const [stts, stsz, stsc] = [k('stts'), k('stsz'), k('stsc')];
+  const co = k('stco') || k('co64');
+  const stsd = k('stsd');
+  if (!stts || !stsz || !stsc || !co || !stsd) return null;
+  // Krypteret lyd kan ikke klippes og sendes.
+  const indgang = String.fromCharCode(...moov.subarray(stsd.data + 12, stsd.data + 16));
+  if (indgang !== 'mp4a' && indgang !== 'samr' && indgang !== 'sawb' && indgang !== 'alac') return null;
+
+  const antal = u32(moov, stsz.data + 8);
+  const fast = u32(moov, stsz.data + 4);
+  const str = new Uint32Array(antal);
+  for (let s = 0; s < antal; s++) str[s] = fast || u32(moov, stsz.data + 12 + 4 * s);
+  const varighed = new Uint32Array(antal);
+  for (let e = 0, s = 0, n = u32(moov, stts.data + 4); e < n; e++) {
+    const gange = u32(moov, stts.data + 8 + 8 * e);
+    const delta = u32(moov, stts.data + 12 + 8 * e);
+    for (let g = 0; g < gange && s < antal; g++) varighed[s++] = delta;
+  }
+  const bred = co.type === 'co64';
+  const chunks = u32(moov, co.data + 4);
+  const raekker = u32(moov, stsc.data + 4);
+  const pos = new Float64Array(antal);
+  let s = 0;
+  for (let r = 0; r < raekker; r++) {
+    const foerste = u32(moov, stsc.data + 8 + 12 * r) - 1;
+    const pr = u32(moov, stsc.data + 12 + 12 * r);
+    const sidste = r + 1 < raekker ? u32(moov, stsc.data + 8 + 12 * (r + 1)) - 1 : chunks;
+    for (let c = foerste; c < sidste && s < antal; c++) {
+      let p = bred ? u64(moov, co.data + 8 + 8 * c) : u32(moov, co.data + 8 + 4 * c);
+      for (let j = 0; j < pr && s < antal; j++, s++) {
+        pos[s] = p;
+        p += str[s];
+      }
+    }
+  }
+  if (s !== antal) return null;
+
+  const enheder = [];
+  let tid = 0;
+  for (let p = 0; p < antal; p++) {
+    const tidMs = Math.round((tid / skala) * 1000);
+    if (!enheder.length || tidMs >= enheder.length * 1000) enheder.push({ tidMs, fra: pos[p], til: pos[p] + str[p], foersteProeve: p });
+    else enheder[enheder.length - 1].til = Math.max(enheder[enheder.length - 1].til, pos[p] + str[p]);
+    tid += varighed[p];
+  }
+  if (pos.some((p, i) => p + str[i] > kilde.stoerrelse)) return null;
+  const ftyp = top[0];
+  return {
+    format: 'mp4',
+    varighedMs: Math.round((tid / skala) * 1000),
+    enheder,
+    hoved: { moov, rod, trak, stbl, pos, str, varighed, skala, ftyp: [ftyp.start, ftyp.slut] },
+  };
+}
+
+/** Kopi af en kasse med varigheden sat: felt er positionen for version 0 og 1 i kassens data. */
+function medVarighed(moov, kasse, [v0, v1], vaerdi) {
+  const b = moov.slice(kasse.start, kasse.slut);
+  const v = new DataView(b.buffer);
+  const data = kasse.data - kasse.start;
+  if (b[data] === 1) v.setBigUint64(data + v1, BigInt(Math.round(vaerdi)));
+  else v.setUint32(data + v0, Math.min(0xffffffff, Math.round(vaerdi)));
+  return b;
+}
+
+async function bidAlmindelig(kilde, indeks, { fraEnhed, tilEnhed }) {
+  const { moov, rod, trak, stbl, pos, str, varighed, skala } = indeks.hoved;
+  const s0 = indeks.enheder[fraEnhed].foersteProeve;
+  const s1 = tilEnhed < indeks.enheder.length ? indeks.enheder[tilEnhed].foersteProeve : str.length;
+  let fra = Infinity;
+  let til = 0;
+  let ticks = 0;
+  const stts = [];
+  for (let s = s0; s < s1; s++) {
+    fra = Math.min(fra, pos[s]);
+    til = Math.max(til, pos[s] + str[s]);
+    ticks += varighed[s];
+    if (stts.length && stts.at(-1)[1] === varighed[s]) stts.at(-1)[0]++;
+    else stts.push([1, varighed[s]]);
+  }
+  const antal = s1 - s0;
+  const nyStbl = (offsets) => byg('stbl',
+    moov.slice(find(moov, stbl, ['stsd']).start, find(moov, stbl, ['stsd']).slut),
+    tabel('stts', [stts.length, ...stts.flat()]),
+    tabel('stsc', [1, 1, 1, 1]),
+    tabel('stsz', [0, antal, ...str.subarray(s0, s1)]),
+    tabel('stco', [antal, ...offsets]));
+  const mvhd = find(moov, rod, ['mvhd']);
+  const mvhdSkala = moov[mvhd.data] === 1 ? u32(moov, mvhd.data + 20) : u32(moov, mvhd.data + 12);
+  const filmVarighed = (ticks / skala) * mvhdSkala;
+  const kopi = (kk) => moov.slice(kk.start, kk.slut);
+  const nyMoov = (offsets) => byg('moov', ...kasser(moov, rod.data, rod.slut).map((kk) => {
+    if (kk.type === 'mvhd') return medVarighed(moov, kk, [16, 24], filmVarighed);
+    if (kk.type !== 'trak') return kopi(kk);
+    return byg('trak', ...kasser(moov, trak.data, trak.slut).filter((t) => t.type !== 'edts').map((t) => {
+      if (t.type === 'tkhd') return medVarighed(moov, t, [20, 28], filmVarighed);
+      if (t.type !== 'mdia') return kopi(t);
+      return byg('mdia', ...kasser(moov, t.data, t.slut).map((m) => {
+        if (m.type === 'mdhd') return medVarighed(moov, m, [16, 28], ticks);
+        if (m.type !== 'minf') return kopi(m);
+        return byg('minf', ...kasser(moov, m.data, m.slut).map((x) => (x.type === 'stbl' ? nyStbl(offsets) : kopi(x))));
+      }));
+    }));
+  }));
+  const ftyp = await kilde.laes(...indeks.hoved.ftyp);
+  // Positionerne afhænger af moov's længde, som ikke afhænger af deres værdi (fast 4 bytes hver).
+  const laengde = nyMoov(new Array(antal).fill(0)).length;
+  const lydStart = ftyp.length + laengde + 8;
+  const offsets = Array.from({ length: antal }, (_, k) => lydStart + pos[s0 + k] - fra);
+  const mdatHoved = new Uint8Array(8);
+  new DataView(mdatHoved.buffer).setUint32(0, 8 + til - fra);
+  mdatHoved.set(new TextEncoder().encode('mdat'), 4);
+  return new Blob([ftyp, nyMoov(offsets), mdatHoved, await kilde.udsnit(fra, til)], { type: 'audio/mp4' });
 }
 
 export async function lavBid(kilde, indeks, bid) {
   if (indeks.format === 'mp4f') return bidFragmenteret(kilde, indeks, bid);
-  throw new Error('format');
+  return bidAlmindelig(kilde, indeks, bid);
 }
 
 export { kasser, find, alle, u32, u64, tekst };
