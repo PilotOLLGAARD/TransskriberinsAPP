@@ -172,6 +172,8 @@ function lavHandler({
       ...word,
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
       html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx), huller }),
+      // Et stykke, Googles filter afviste: appen viser det ved referatet.
+      ...(huller > 0 ? { huller } : {}),
     };
   }
 

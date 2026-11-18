@@ -810,6 +810,7 @@ test('/referat med en bid, der mangler, laver referatet af resten og nævner det
   const j = await (await postReferat(s.adresse, { dele })).json();
   assert.equal(j.tekst, 'Før.\n[Dette stykke kunne ikke transskriberes]');
   assert.match(j.html, /Et stykke af optagelsen kunne ikke transskriberes/);
+  assert.equal(j.huller, 1, 'appen får at vide, at et stykke mangler');
 });
 
 test('/referat med kun manglende bidder giver tom tekst og intet referat', async () => {

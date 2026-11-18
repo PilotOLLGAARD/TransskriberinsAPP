@@ -240,13 +240,13 @@ test('en fil, der ikke er lyd, afvises med dansk besked, og intet gemmes', async
   await kontekst.close();
 });
 
-const FOR_LANG = 'Lydfilen er længere end 2½ time. Del den op i en anden app, og upload delene hver for sig.';
+const FOR_LANG = 'Lydfilen er længere end 4 timer. Del den op i en anden app, og upload delene sammen.';
 
-test('en fil over 2½ time afvises med dansk besked, og intet gemmes', async () => {
+test('en fil over 4 timer afvises med dansk besked, og intet gemmes', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
-  // Telefonen læser varigheden af filen. Her siger den 2 t 31 min.
+  // Telefonen læser varigheden af filen. Her siger den 4 t 1 min.
   await kontekst.addInitScript(() => {
-    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { get: () => 9060, configurable: true });
+    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { get: () => 14460, configurable: true });
   });
   await logInd(side);
   const foer = await tal(miljoe);
@@ -257,7 +257,7 @@ test('en fil over 2½ time afvises med dansk besked, og intet gemmes', async () 
   await kontekst.close();
 });
 
-test('serveren afviser over 2½ time med for-lang: appen viser samme besked, lyden bevares, og Prøv igen vises ikke', async () => {
+test('en fil, der ikke kan klippes, og som er over 2½ time, sendes ikke: beskeden står, lyden bevares, og Prøv igen vises ikke', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
   const foer = await tal(miljoe);
@@ -521,8 +521,9 @@ test('Information har gode råd foldet sammen, og hvert afsnit åbner ved tryk',
   await vis(side, 'Send referat igen');
   await vis(side, 'Slet kan fortrydes i 7 sekunder');
   await aabnFold(side, 'Grænser');
-  await vis(side, '59 minutter');
-  await vis(side, '2½ time og 500 MB');
+  await vis(side, 'op til 4 timer');
+  await vis(side, '4 timer og fylde 500 MB');
+  await vis(side, 'op til 10 lydfiler');
   await kontekst.close();
 });
 

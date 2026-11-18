@@ -155,7 +155,8 @@ test('afbrudt efter første del af en fortsat optagelse: kun den manglende del s
   await vis(side, 'Ingen forbindelse. Optagelsen er gemt.');
   const n = await note(side, id);
   assert.equal(n.status, 'fejl');
-  assert.equal(typeof n.deltekster[0], 'string');
+  // Delene sendes samtidig: præcis den ene, der nåede frem, har sin tekst gemt.
+  assert.equal(Object.values(n.bidder).filter((d) => Object.keys(d.tekster).length).length, 1);
   assert.equal(await lydBytes(side, id), 256 * KB);
   await side.unroute('**/transskriber');
   await knap(side, 'Prøv igen').click();

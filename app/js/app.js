@@ -1,11 +1,14 @@
 // Kun brugerflade. Logikken ligger i forloeb.js og optager.js.
 
-import { BESKEDER, besked } from './beskeder.js';
+import { BESKEDER, besked, lidtPlads } from './beskeder.js';
 import { ENTRA, LOKAL } from './konfig.js';
 import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
 import { lavLogin, lavLokalLogin } from './login.js';
-import { ACCEPT, fjernDeltKopi, formaterMB, gemFil, hentDeltFil, kontrollerFil, navnUdenEndelse } from './lydfil.js';
+import {
+  ACCEPT, MAKS_FILER, fjernDeltKopi, formaterMB, gemFil, gemFiler, hentDeltFil, kontrollerFil, kontrollerFiler, navnUdenEndelse,
+} from './lydfil.js';
+import { lavIndeks } from './opdeling/index.js';
 import { lavLydkurve } from './lydkurve.js';
 import { sendMail } from './mail.js';
 import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
@@ -25,6 +28,8 @@ const forloeb = lavForloeb({
   // Fremdriften vises på skærmen efter Send.
   vedAendring: () => { opdater().catch(() => {}); },
   vedUpload: (id, sendt, ialt) => visUpload(id, sendt, ialt),
+  // En lang optagelse sendes i bidder. Skærmen viser, hvor mange der er færdige.
+  vedBidder: (id, fremdrift) => visBidder(id, fremdrift),
 });
 // Lydkurven lytter med på den strøm, optagelsen bestiller. Derfor huskes den seneste strøm her.
 const browser = browserMedier();
@@ -36,7 +41,15 @@ const medier = {
     return sidsteStroem;
   },
 };
-const optager = lavOptager({ lager, medier });
+// Kan en optagelse ikke klippes i bidder (fx et ukendt format), stopper den efter 59 min. som før.
+const optager = lavOptager({
+  lager,
+  medier,
+  kanDeles: async (id) => {
+    const note = await lager.hentNote(id);
+    return Boolean(note) && (await lavIndeks(await lager.lavKilde(id, 0), note.mime)) !== null;
+  },
+});
 const kurve = lavLydkurve();
 
 const app = document.getElementById('app');
@@ -45,7 +58,9 @@ const NAT = '#0f1a26';
 const TEMA = [[document.getElementById('tema-lys'), '#f3f5f8'], [document.getElementById('tema-moerk'), NAT]];
 
 const t = {
-  visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt
+  visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt | filer
+  filListe: null, // [{ noegle, fil, kontrol }] de valgte lydfiler, før de gemmes som én note
+  bidder: new Map(), // id -> { ialt, faerdige } for en lang optagelse, der sendes i bidder
   delt: null, // { fil, fjern } en lydfil fra del-menuen, der venter på brugerens svar
   noter: [],
   aabenNote: null,
@@ -94,6 +109,10 @@ const IKONER = {
   delAndroid: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
   tilfoej: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>',
   menu: '<path d="M12 5.5h.01M12 12h.01M12 18.5h.01" stroke-width="3"/>',
+  // Listen over lydfiler: flyt op, flyt ned, fjern.
+  op: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  ned: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  fjern: '<path d="M6 6l12 12M18 6 6 18"/>',
   // Pilen på et afsnit, der kan foldes ud.
   pil: '<path d="m6 9.5 6 6 6-6"/>',
 };
@@ -122,10 +141,12 @@ function h(navn, egenskaber = {}, ...boern) {
   return el;
 }
 
+/** Optagelsens ur: 04:26, og over en time 1:04:26. */
 function formaterTid(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
-  const mm = String(Math.floor(s / 60)).padStart(2, '0');
-  return `${mm}:${String(s % 60).padStart(2, '0')}`;
+  const ss = String(s % 60).padStart(2, '0');
+  if (s < 3600) return `${String(Math.floor(s / 60)).padStart(2, '0')}:${ss}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${ss}`;
 }
 
 function formaterDato(ms) {
@@ -200,6 +221,7 @@ async function optag() {
       t.startTid = Date.now();
       t.advarsel = false;
       urTimer = setInterval(opdaterUr, 1000);
+      advarOmPlads();
     }
   } catch (e) {
     visFejl(e?.type, 'kanIkkeOptage');
@@ -251,12 +273,15 @@ async function stop() {
 
 // Lydfil, brugeren allerede har. Ligger uden for #app, så den overlever, at skærmen tegnes,
 // mens telefonens filvælger er åben.
-const filVaelger = h('input', { type: 'file', id: 'lydfil', accept: ACCEPT, hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+const filVaelger = h('input', { type: 'file', id: 'lydfil', accept: ACCEPT, multiple: true, hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
 filVaelger.addEventListener('change', () => {
-  const [fil] = filVaelger.files;
+  const filer = [...filVaelger.files];
   // Så samme fil kan vælges igen.
   filVaelger.value = '';
-  if (fil) modtagFil(fil);
+  if (!filer.length) return;
+  // Én fil: som før. Flere, eller en fil mere til listen: listen over lydfiler.
+  if (filer.length > 1 || t.visning === 'filer') tilfoejFiler(filer);
+  else modtagFil(filer[0]);
 });
 document.body.append(filVaelger);
 
@@ -293,6 +318,95 @@ async function modtagFil(fil) {
   } catch (e) {
     visFejl(e?.type, 'filKanIkkeLaeses');
     return e?.type || 'filKanIkkeLaeses';
+  } finally {
+    t.gemmerFil = false;
+    await opdater().catch(() => tegn());
+  }
+}
+
+/**
+ * Lægger valgte filer i listen over lydfiler. Hver fil kontrolleres (format, størrelse og længde), men gemmes
+ * først, når brugeren trykker Næste. En fil, der ikke kan bruges, nævnes med navn og kommer ikke på listen.
+ */
+async function tilfoejFiler(filer) {
+  if (t.gemmerFil) return;
+  t.gemmerFil = true;
+  t.besked = null;
+  tegn();
+  try {
+    const nye = [];
+    for (const fil of filer) {
+      const kontrol = await kontrollerFil(fil);
+      if (kontrol.ok) nye.push({ noegle: crypto.randomUUID(), fil, kontrol });
+      else t.besked = { tekst: `${fil.name}: ${besked(kontrol.fejl)}`, type: 'fejl' };
+    }
+    const liste = [...(t.filListe ?? []), ...nye];
+    if (liste.length > MAKS_FILER) visFejl('forMangeFiler');
+    t.filListe = liste.slice(0, MAKS_FILER);
+    if (t.filListe.length) t.visning = 'filer';
+  } finally {
+    t.gemmerFil = false;
+    tegn();
+  }
+}
+
+/** Flytter en fil op (-1) eller ned (+1). Rækkerne glider på plads, og fokus bliver på samme knap. */
+function flytFil(i, retning) {
+  const liste = t.filListe;
+  const j = i + retning;
+  if (!liste || j < 0 || j >= liste.length) return;
+  const foer = new Map([...app.querySelectorAll('.fil-raekke')].map((el) => [el.dataset.noegle, el.getBoundingClientRect().top]));
+  const fokus = document.activeElement?.getAttribute('aria-label');
+  [liste[i], liste[j]] = [liste[j], liste[i]];
+  tegn();
+  const rolig = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const el of app.querySelectorAll('.fil-raekke')) {
+    const fra = foer.get(el.dataset.noegle);
+    const delta = fra === undefined ? 0 : fra - el.getBoundingClientRect().top;
+    if (delta && !rolig) el.animate([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+  }
+  const knapNu = fokus && [...app.querySelectorAll('.ikon-knap')].find((b) => b.getAttribute('aria-label') === fokus);
+  (knapNu && !knapNu.disabled ? knapNu : app.querySelector('.fil-liste'))?.focus();
+}
+
+function fjernFil(i) {
+  t.filListe?.splice(i, 1);
+  if (!t.filListe?.length) {
+    filerTilForsiden();
+    return;
+  }
+  tegn();
+}
+
+/** Tilbage fra listen: intet er gemt, så listen glemmes. */
+function filerTilForsiden() {
+  t.filListe = null;
+  tilForsiden();
+}
+
+/** Gemmer filerne som én note i den valgte rækkefølge og åbner navneskærmen. */
+async function gemValgteFiler() {
+  const liste = t.filListe;
+  if (t.gemmerFil || !liste?.length) return;
+  t.gemmerFil = true;
+  t.besked = null;
+  tegn();
+  try {
+    const kendte = new Map(liste.map(({ fil, kontrol }) => [fil, kontrol.varighedMs]));
+    const samlet = await kontrollerFiler(liste.map(({ fil }) => fil), { laesVarighed: async (fil) => kendte.get(fil) });
+    if (!samlet.ok) {
+      visFejl(samlet.fejl);
+      return;
+    }
+    const titel = [...(t.valgtNavn.trim() || navnUdenEndelse(liste[0].kontrol.filnavn).trim())].slice(0, 120).join('');
+    const id = await gemFiler({ lager, filer: liste.map(({ fil, kontrol }) => ({ fil, kontrol })), titel, laas: medier.laas });
+    t.filListe = null;
+    t.valgtNavn = '';
+    t.visning = 'navn';
+    t.navnNote = id;
+    t.navnUdkast = null;
+  } catch (e) {
+    visFejl(e?.type, 'filKanIkkeLaeses');
   } finally {
     t.gemmerFil = false;
     await opdater().catch(() => tegn());
@@ -372,6 +486,8 @@ async function afslutDelt(udfald) {
  */
 function visUpload(id, sendt, ialt) {
   t.upload.set(id, { sendt, ialt });
+  // En lang optagelse viser bidder i stedet for procent.
+  if (t.bidder.get(id)?.ialt > 1) return;
   if (t.visning !== 'fremdrift' || t.fremdriftNote !== id) return;
   const felt = document.getElementById('upload');
   const bar = felt?.querySelector('.bar');
@@ -391,8 +507,21 @@ function uploadVaerdier({ sendt, ialt }) {
   return { pct, titel: `Sender lyden … ${pct} %`, tekst: `${formaterMB(sendt)} af ${formaterMB(ialt)} MB. Hold appen åben.` };
 }
 
+/** En lang optagelse: hvor mange bidder der er transskriberet. */
+function visBidder(id, fremdrift) {
+  t.bidder.set(id, fremdrift);
+  if (t.visning === 'fremdrift' && t.fremdriftNote === id) tegn();
+}
+
 /** Trinnet "Sender lyden" med procent, MB og linje, når telefonen melder fremdrift. iPhone gør det ikke altid. */
 function uploadTrin(id) {
+  const b = t.bidder.get(id);
+  if (b?.ialt > 1) {
+    const fyld = h('i');
+    fyld.style.transform = `scaleX(${b.faerdige / b.ialt})`;
+    const bar = h('div', { klasse: 'bar', role: 'progressbar', 'aria-label': 'Dele transskriberet', 'aria-valuemin': '0', 'aria-valuemax': String(b.ialt), 'aria-valuenow': String(b.faerdige) }, fyld);
+    return trinPunkt('igang', `Transskriberer … ${b.faerdige} af ${b.ialt} dele`, 'Et langt møde kan tage nogle minutter. Hold appen åben.', { id: 'upload' }, bar);
+  }
   const u = t.upload.get(id);
   if (!u) return trinPunkt('igang', 'Sender lyden …', null, { id: 'upload' });
   const v = uploadVaerdier(u);
@@ -405,6 +534,7 @@ function uploadTrin(id) {
 
 async function efterAfsendelse(id) {
   t.upload.delete(id);
+  t.bidder.delete(id);
   if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   await opdater();
 }
@@ -599,6 +729,7 @@ const AFSLUT_BESKEDER = {
   pladsTom: 'pladsTom',
   lagerTom: 'lagerTom',
   maks: 'maksNaaet',
+  maksKort: 'maksNaaetKort',
   tom: 'tomOptagelse',
 };
 
@@ -625,10 +756,31 @@ optager.naarAfsluttet(({ id, grund }) => {
   opdater();
 });
 
-optager.naarAdvaret(() => {
-  t.advarsel = true;
+// "Stopper om 5 minutter" eller "har kørt i 2 timer". Den seneste står på optageskærmen.
+optager.naarAdvaret((type) => {
+  t.advarsel = besked(type, 'snartSlut');
   tegn();
 });
+
+/** Hvor mange minutters optagelse (128 kbit/s) der er plads til, eller null, når det ikke kan ses. */
+async function pladsIMinutter() {
+  try {
+    const { quota, usage } = await navigator.storage.estimate();
+    if (!Number.isFinite(quota) || !Number.isFinite(usage)) return null;
+    return Math.floor(Math.max(0, quota - usage) / 960000);
+  } catch {
+    return null;
+  }
+}
+
+/** Under ca. 2 timers plads får brugeren en venlig besked på optageskærmen. Optagelsen kører uanset. */
+async function advarOmPlads() {
+  const minutter = await pladsIMinutter();
+  if (minutter !== null && minutter < 125 && optager.erAktiv() && !t.advarsel) {
+    t.advarsel = lidtPlads(minutter);
+    tegn();
+  }
+}
 
 function opdaterUr() {
   const ur = document.getElementById('ur');
@@ -813,7 +965,10 @@ function klokken(ms) {
 function formaterVarighed(ms) {
   if (!Number.isFinite(ms)) return null;
   const s = Math.max(1, Math.round(ms / 1000));
-  return s < 60 ? `${s} sek` : `${Math.round(s / 60)} min`;
+  if (s < 60) return `${s} sek`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `${min} min`;
+  return min % 60 ? `${Math.floor(min / 60)} t ${min % 60} min` : `${min / 60} t`;
 }
 
 /** Sendt, Venter eller Fejlet. Ikon og tekst, så status ikke kun vises med farve. */
@@ -1039,7 +1194,7 @@ function skaermFremdrift() {
   const meta = [type, formaterVarighed(note.varighedMs)].filter(Boolean).join(' · ');
   let nederst;
   if (fejl) {
-    const kanIgen = !['ingenTale', 'kanIkkeBehandles', 'forLang'].includes(note.fejlType) && !note.maaskeSendt;
+    const kanIgen = !['ingenTale', 'kanIkkeBehandles', 'forLang', 'forLangFormat', 'blokeret'].includes(note.fejlType) && !note.maaskeSendt;
     const igen = note.fejlType === 'login'
       ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: note.status === STATUS.TEKST_KLAR ? 'send' : 'behandl' }), { ikonNavn: 'person' })
       : knap('Prøv igen', () => behandlOgSend(note.id), { ikonNavn: 'igen' });
@@ -1201,8 +1356,10 @@ function godeRaad() {
     foldAfsnit(
       'Grænser',
       punkter(
-        'En optagelse kan højst vare 59 minutter. Appen advarer 4 minutter før. Er mødet længere, så send optagelsen, og start en ny.',
-        'En lydfil må højst vare 2½ time og 500 MB. Appen kan bruge m4a, mp3, wav, ogg og webm.',
+        'En optagelse kan vare op til 4 timer. Appen advarer 5 minutter før. Ved lange møder: sæt telefonen til opladning, og lad skærmen være tændt.',
+        'En lydfil må højst vare 4 timer og fylde 500 MB. Appen kan bruge m4a, mp3, wav, ogg og webm. Filer i ogg kan højst være 2½ time.',
+        'Du kan vælge op til 10 lydfiler på én gang. De bliver til ét referat i den rækkefølge, du vælger.',
+        'Et langt møde sendes i dele og kan tage nogle minutter. Lyden bliver den samme.',
       ),
     ),
   );
@@ -1294,7 +1451,7 @@ function skaermOptager() {
         h('div', { klasse: 'ur', id: 'ur' }, formaterTid(Date.now() - t.startTid)),
         // Lyden som søjler. Kan lydmåleren ikke køre, vises en stille streg, og optagelsen kører som før.
         h('div', { klasse: 'kurve-plads' }, kurve.erAktiv() ? h('canvas', { klasse: 'kurve', 'aria-hidden': 'true' }) : h('div', { klasse: 'kurve rolig', 'aria-hidden': 'true' })),
-        t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, BESKEDER.snartSlut) : null,
+        t.advarsel ? h('p', { klasse: 'advarsel', role: 'alert' }, t.advarsel) : null,
         h('p', {}, 'Lad skærmen være tændt, og læg telefonen med skærmen opad.'),
       ),
       // Samme sted og samme størrelse som Optag på forsiden.
@@ -1334,11 +1491,14 @@ function skaermNavn() {
   });
   felt.value = t.navnUdkast ?? note.titel ?? '';
   felt.addEventListener('input', () => { t.navnUdkast = felt.value; });
-  const erFil = note.kilde === 'fil';
+  const erFil = note.kilde === 'fil' || note.kilde === 'filer';
+  const filKortene = note.kilde === 'filer'
+    ? (note.filer ?? []).map((fil) => filKort({ filnavn: fil.navn, varighedMs: fil.varighedMs, bytes: fil.bytes }))
+    : [filKort(note)];
   const form = h(
     'form',
     { klasse: 'navn' },
-    erFil ? filKort(note) : null,
+    ...(erFil ? filKortene : []),
     // En lydfil kan ikke fortsættes som en optagelse.
     !erFil && note.status === STATUS.GEMT && note.afbrudt ? fortsaetKnap(note.id) : null,
     h('label', { for: 'titel', klasse: 'navn-titel' }, 'Hvad handler optagelsen om?'),
@@ -1354,6 +1514,52 @@ function skaermNavn() {
   });
   // En lydfil er gemt og venter under Afventer, hvis man går tilbage.
   return [erFil ? topMedTilbage(tilForsiden) : h('header', { klasse: 'top' }, ordmaerke()), beskedElement(), form];
+}
+
+/** De valgte lydfiler som en liste, der kan ordnes, før de gemmes som én note. */
+function skaermFiler() {
+  const liste = t.filListe ?? [];
+  if (!liste.length) {
+    t.visning = 'start';
+    return skaermStart();
+  }
+  const kendt = liste.every((f) => Number.isFinite(f.kontrol.varighedMs));
+  const ialt = liste.reduce((sum, f) => sum + (f.kontrol.varighedMs ?? 0), 0);
+  const lille = (ikonNavn, label, vedTryk, disabled = false) => h('button', { type: 'button', klasse: 'ikon-knap', 'aria-label': label, vedTryk, disabled }, ikon(ikonNavn));
+  const raekker = liste.map(({ noegle, kontrol }, i) => {
+    const navn = kontrol.filnavn || 'Lydfil';
+    const meta = [formaterVarighed(kontrol.varighedMs), `${formaterMB(kontrol.bytes)} MB`].filter(Boolean).join(' · ');
+    return h(
+      'li',
+      { klasse: 'fil-raekke', 'data-noegle': noegle },
+      h('span', { klasse: 'fil-nr', 'aria-hidden': 'true' }, String(i + 1)),
+      h('div', { klasse: 'fil-tekst' }, h('p', { klasse: 'fil-navn' }, navn), h('p', { klasse: 'fil-meta' }, meta)),
+      h(
+        'div',
+        { klasse: 'fil-knapper' },
+        lille('op', `Flyt ${navn} op`, () => flytFil(i, -1), i === 0),
+        lille('ned', `Flyt ${navn} ned`, () => flytFil(i, 1), i === liste.length - 1),
+        lille('fjern', `Fjern ${navn}`, () => fjernFil(i)),
+      ),
+    );
+  });
+  const samlet = `I alt ${kendt ? formaterVarighed(ialt) : 'ukendt længde'} · ${liste.length} filer`;
+  return [
+    topMedTilbage(filerTilForsiden),
+    h('h1', { klasse: 'titel' }, 'Lydfiler'),
+    h('p', { klasse: 'fil-hjaelp' }, 'Filerne bliver til ét referat i denne rækkefølge.'),
+    beskedElement(),
+    h('ol', { klasse: 'fil-liste', tabindex: '-1', 'aria-label': 'Valgte lydfiler i rækkefølge' }, ...raekker),
+    h('p', { klasse: 'fil-ialt' }, samlet),
+    t.gemmerFil
+      ? venter('Gemmer lydfilerne på telefonen …')
+      : h(
+        'div',
+        { klasse: 'knapper' },
+        knap('Tilføj fil', vaelgFil, { klasse: 'hvid', ikonNavn: 'tilfoej' }),
+        knap('Næste', gemValgteFiler, { ikonNavn: 'send' }),
+      ),
+  ];
 }
 
 /** Filnavn, varighed og størrelse på den valgte lydfil. */
@@ -1420,6 +1626,7 @@ function skaermTekst() {
       beskedElement(),
       fejl ? advarsel(fejl) : null,
       note.maaskeSendt ? advarsel(BESKEDER.maaskeSendt) : null,
+      note.huller ? advarsel('Et stykke af optagelsen kunne ikke transskriberes. Se bilaget i Word-dokumentet.') : null,
       referatVisning(note),
     ),
     h(
@@ -1446,6 +1653,7 @@ function vedTelefonTilbage() {
   }
   if (t.visning === 'tekst') tilbage();
   else if (t.visning === 'delt') delTilForsiden();
+  else if (t.visning === 'filer') filerTilForsiden();
   else if (t.visning !== 'start') tilForsiden();
 }
 
@@ -1468,6 +1676,7 @@ function tegn() {
   else if (t.visning === 'fremdrift') indhold = skaermFremdrift();
   else if (t.visning === 'information') indhold = skaermInformation();
   else if (t.visning === 'delt') indhold = skaermDelt();
+  else if (t.visning === 'filer') indhold = skaermFiler();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
   else if (!login.harVaeretLoggetInd() && t.noter.length === 0) indhold = skaermLogin();
   else indhold = skaermStart();

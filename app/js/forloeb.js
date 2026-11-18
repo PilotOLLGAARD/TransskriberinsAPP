@@ -341,7 +341,7 @@ export function lavForloeb({
           return;
         }
         const felter = { status: STATUS.TEKST_KLAR, tekst: svar.tekst };
-        for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'docx', 'docxFilnavn', 'emne', 'html']) if (svar[k] !== undefined) felter[k] = svar[k];
+        for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'docx', 'docxFilnavn', 'emne', 'html', 'huller']) if (svar[k] !== undefined) felter[k] = svar[k];
         await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: fejlTypeFor(e, 'tjeneste') });

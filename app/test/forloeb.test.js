@@ -1175,3 +1175,9 @@ test('slet under afsendelse af bidder stopper alle, og intet mailes', async () =
   assert.equal(s.t.referatKald.length, 0);
   assert.equal(s.t.lydKald, 3, 'ingen nye bidder efter Slet');
 });
+
+test('et svar med huller gemmes på noten, så Læs kan vise det', async () => {
+  const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD, sendReferat: async () => ({ ...REFERAT_SVAR, huller: 1 }) });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').huller, 1);
+});

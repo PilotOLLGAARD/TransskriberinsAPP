@@ -859,3 +859,33 @@ input[type="file"] { font: inherit; }
 
 /* På forsiden står Fortryd-bjælken over bundlinjen, så Optag, Tidligere og Upload stadig kan trykkes. */
 body:has(.bund) .toast { bottom: calc(var(--optag-str) + 32px + var(--kant-bund)); }
+
+/* Flere lydfiler: en liste, der kan ordnes, før filerne bliver til én note. Kun transform animeres (FLIP i app.js). */
+.fil-liste { display: flex; flex-direction: column; gap: 10px; margin: 0 0 14px; padding: 0; list-style: none; }
+.fil-liste:focus { outline: none; }
+/* Knapperne står under navnet, så et langt filnavn har hele bredden og ikke deles midt i et ord. */
+.fil-raekke {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px 10px 12px 14px;
+  border-radius: var(--radius);
+  background: var(--kort);
+  box-shadow: inset 0 0 0 1.5px var(--linje);
+}
+.fil-nr { align-self: start; padding-top: 2px; color: var(--tone-tekst); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; }
+.fil-tekst { min-width: 0; }
+.fil-knapper { grid-column: 2; display: flex; justify-content: flex-end; gap: 6px; }
+.ikon-knap {
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 12px;
+  color: var(--tone-tekst);
+  background: var(--tone);
+}
+.ikon-knap svg { width: 24px; height: 24px; }
+.fil-ialt { margin: 0 0 16px; color: var(--graa); font-size: 18px; }
+
+.fil-hjaelp { margin: -6px 0 14px; color: var(--graa); font-size: 18px; }

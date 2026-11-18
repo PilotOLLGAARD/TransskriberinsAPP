@@ -149,3 +149,10 @@ test('manifestet har del-menuen til lydfiler, som POST med multipart til ./del',
   assert.equal(filer.name, 'lyd');
   for (const t of ['audio/*', '.m4a', '.mp3', '.wav']) assert.ok(filer.accept.includes(t), t);
 });
+
+test('alle appens moduler ligger i den offline cache, også dem i undermapper', async () => {
+  const { readdirSync } = await import('node:fs');
+  const mappe = new URL('../js/', import.meta.url);
+  const moduler = readdirSync(mappe, { recursive: true }).map((f) => `js/${String(f).split('\\').join('/')}`).filter((f) => f.endsWith('.js'));
+  for (const fil of moduler) assert.ok(KILDE.includes(`'${fil}'`), `${fil} mangler i FILER i sw.js, så appen kan ikke starte uden net`);
+});
