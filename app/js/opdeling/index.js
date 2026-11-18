@@ -11,8 +11,9 @@ import * as mp4 from './mp4.js';
 import * as webm from './webm.js';
 
 const MODULER = { wav, mp3, mp4, mp4f: mp4, webm };
-// Sidste rest kortere end dette lægges til bidden før, så der ikke sendes en lille bid for sig.
-const MIN_REST_MS = 5 * 60 * 1000;
+// En sidste rest under en sjettedel af en bid (5 min. ved 30 min.) lægges til bidden før, så der ikke
+// sendes en lille bid for sig.
+const MIN_REST_ANDEL = 1 / 6;
 
 function formatFor(mime) {
   const m = String(mime || '').split(';')[0].trim().toLowerCase();
@@ -70,7 +71,7 @@ export function planlaegBidder(varighedMs, enheder, { bidMs, overlapMs, delFraMs
   const n = enheder.length;
   if (varighedMs <= delFraMs) return [{ nr: 0, startMs: 0, slutMs: varighedMs, overlapMs: 0, fraEnhed: 0, tilEnhed: n }];
   let antal = Math.floor(varighedMs / bidMs);
-  if (varighedMs - antal * bidMs >= MIN_REST_MS || antal === 0) antal++;
+  if (varighedMs - antal * bidMs >= bidMs * MIN_REST_ANDEL || antal === 0) antal++;
   const ud = [];
   for (let k = 0; k < antal; k++) {
     const sidste = k === antal - 1;

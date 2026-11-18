@@ -129,3 +129,60 @@ test('ødelagt eller ukendt lyd giver null', async () => {
   assert.equal(await lavIndeks(blobKilde(new Blob(['RIFF....WAVEjunk'])), 'audio/wav'), null);
   assert.equal(await lavIndeks(blobKilde(lyd('tone.mp3')), 'audio/ogg'), null);
 });
+
+// Appens egne optagelser (Chromium: fragmenteret MP4 og WebM med klynger af ukendt størrelse)
+
+const KORT = { bidMs: 4000, overlapMs: 1000, delFraMs: 5000 };
+
+async function tjekBidder(navn, mime, valg, format) {
+  const blob = lyd(navn);
+  const original = await bytes(blob);
+  const kilde = blobKilde(blob);
+  const i = await lavIndeks(kilde, mime);
+  assert.ok(i, 'kan indekseres');
+  assert.equal(i.format, format);
+  const plan = planlaegBidder(i.varighedMs, i.enheder, valg);
+  assert.ok(plan.length >= 3, `${plan.length} bidder`);
+  const bidder = [];
+  for (const p of plan) {
+    const b = await lavBid(kilde, i, p);
+    const igen = await lavIndeks(blobKilde(b), mime);
+    assert.ok(igen, `bid ${p.nr} kan læses igen`);
+    assert.equal(igen.enheder[0].tidMs, 0, `bid ${p.nr} starter ved 0`);
+    assert.ok(Math.abs(igen.varighedMs - (p.slutMs - p.startMs)) <= 1100, `bid ${p.nr}: ${igen.varighedMs} mod ${p.slutMs - p.startMs}`);
+    bidder.push({ p, b: await bytes(b), igen });
+  }
+  return { original, i, bidder };
+}
+
+test('mp4f: hver bid har filens hoved, starter ved 0 og har originalens lyddata', async () => {
+  const { original, i, bidder } = await tjekBidder('optagelse.mp4', 'audio/mp4;codecs=mp4a.40.2', KORT, 'mp4f');
+  assert.ok(Math.abs(i.varighedMs - 12000) < 1500, String(i.varighedMs));
+  const hovedLaengde = i.enheder[0].fra;
+  for (const { p, b } of bidder) {
+    assert.deepEqual(b.slice(0, hovedLaengde), original.slice(0, hovedLaengde), 'ftyp og moov er uændret');
+    for (let e = p.fraEnhed; e < p.tilEnhed; e++) {
+      const { moofTil, til } = i.enheder[e];
+      assert.ok(indeholder(b, original.slice(moofTil, til)) > 0, `mdat i enhed ${e} er uændret`);
+    }
+  }
+});
+
+test('webm: hver bid har hoved, Info og Tracks, starter ved 0 og har hele klynger', async () => {
+  const { original, i, bidder } = await tjekBidder('optagelse.webm', 'audio/webm;codecs=opus', { bidMs: 10000, overlapMs: 2000, delFraMs: 12000 }, 'webm');
+  assert.ok(Math.abs(i.varighedMs - 30000) < 1500, String(i.varighedMs));
+  assert.ok(i.enheder.length >= 3, 'klynger af ukendt størrelse findes på elementniveau');
+  for (const { p, b } of bidder) {
+    assert.deepEqual([...b.slice(0, 4)], [0x1a, 0x45, 0xdf, 0xa3]);
+    for (let e = p.fraEnhed; e < p.tilEnhed; e++) {
+      const { blokFra, til } = i.enheder[e];
+      assert.ok(indeholder(b, original.slice(blokFra, til)) > 0, `lyden i klynge ${e} er uændret`);
+    }
+  }
+});
+
+test('mp4 og webm: ødelagte filer giver null', async () => {
+  const halv = (await bytes(lyd('optagelse.mp4'))).slice(0, 300);
+  assert.equal(await lavIndeks(blobKilde(new Blob([halv])), 'audio/mp4'), null);
+  assert.equal(await lavIndeks(blobKilde(new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x80])])), 'audio/webm'), null);
+});

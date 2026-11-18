@@ -1,6 +1,8 @@
 // MP3: en række rammer, hver med sit eget hoved. En bid er et sammenhængende udsnit af rammerne.
 // ID3-mærker og Xing/Info-rammen (en tavs ramme med tal for hele filen) tages ikke med.
 
+import { lavLaeser } from './laeser.js';
+
 const BITRATE = {
   '1-1': [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
   '1-2': [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
@@ -10,7 +12,6 @@ const BITRATE = {
   '2-3': [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
 };
 const RATE = { 1: [44100, 48000, 32000], 2: [22050, 24000, 16000], 25: [11025, 12000, 8000] };
-const BLOK = 1024 * 1024;
 const MAKS_SPRING = 64 * 1024;
 
 /** Rammens hoved: { laengde, prover, rate } eller null. */
@@ -38,26 +39,13 @@ function hoved(b, i) {
   return { laengde, prover, rate };
 }
 
-/** Læser kilden i blokke, så en stor fil aldrig ligger i hukommelsen på én gang. */
-function laeser(kilde) {
-  let start = 0;
-  let buf = new Uint8Array(0);
-  return async (pos, antal) => {
-    if (pos < start || pos + antal > start + buf.length) {
-      start = pos;
-      buf = await kilde.laes(pos, pos + Math.max(BLOK, antal));
-    }
-    return { buf, i: pos - start, ok: pos + antal <= start + buf.length };
-  };
-}
-
 const erVbrHoved = (b, i, laengde) => {
   const s = String.fromCharCode(...b.subarray(i, Math.min(b.length, i + Math.min(laengde, 64))));
   return /Xing|Info|VBRI/.test(s);
 };
 
 export async function lavIndeks(kilde) {
-  const hent = laeser(kilde);
+  const hent = lavLaeser(kilde);
   let pos = 0;
   let slut = kilde.stoerrelse;
   const id3 = await kilde.laes(0, 10);
