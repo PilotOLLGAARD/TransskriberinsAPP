@@ -111,6 +111,61 @@ export async function hentDele(id) {
   });
 }
 
+const stoerrelseAf = (b) => (b instanceof Blob ? b.size : b.byteLength);
+
+/**
+ * En kilde til klipningen (app/js/opdeling/): { stoerrelse, laes(fra, til), udsnit(fra, til) } for én del af noten.
+ * Stykkernes størrelser læses ét ad gangen, og laes/udsnit henter kun de stykker, der skal bruges, så en lang
+ * optagelse aldrig ligger i hukommelsen på én gang.
+ */
+export async function lavKilde(id, del = 0) {
+  // [{ nr, fra, til }] for delens stykker i rækkefølge.
+  const stykker = await transaktion(STYKKER, 'readonly', (t, svar) => {
+    const ud = [];
+    let pos = 0;
+    const r = t.objectStore(STYKKER).openCursor(alleStykkerInterval(id));
+    r.onsuccess = () => {
+      const c = r.result;
+      if (!c) {
+        svar(ud);
+        return;
+      }
+      if ((c.value.del ?? 0) === del) {
+        const str = stoerrelseAf(c.value.bytes);
+        ud.push({ nr: c.value.nr, fra: pos, til: pos + str });
+        pos += str;
+      }
+      c.continue();
+    };
+  });
+  const stoerrelse = stykker.length ? stykker.at(-1).til : 0;
+
+  /** Delene af [fra, til) som Blob-udsnit eller ArrayBuffer-udsnit. */
+  async function dele(fra, til) {
+    fra = Math.max(0, fra);
+    til = Math.min(stoerrelse, til);
+    const valgte = stykker.filter((s) => s.til > fra && s.fra < til);
+    if (!valgte.length) return [];
+    const poster = await transaktion(STYKKER, 'readonly', (t, svar) => {
+      const r = t.objectStore(STYKKER).getAll(IDBKeyRange.bound([id, valgte[0].nr], [id, valgte.at(-1).nr]));
+      r.onsuccess = () => svar(r.result);
+    });
+    const efterNr = new Map(poster.map((p) => [p.nr, p.bytes]));
+    return valgte.map((s) => {
+      const bytes = efterNr.get(s.nr);
+      const a = Math.max(fra, s.fra) - s.fra;
+      const b = Math.min(til, s.til) - s.fra;
+      return bytes instanceof Blob ? bytes.slice(a, b) : new Uint8Array(bytes, a, b - a);
+    });
+  }
+
+  return {
+    stoerrelse,
+    laes: async (fra, til) => new Uint8Array(await new Blob(await dele(fra, til)).arrayBuffer()),
+    udsnit: async (fra, til) => new Blob(await dele(fra, til)),
+  };
+}
+
 /** Det højeste stykkenummer på noten, eller -1 uden stykker. */
 export async function hoejesteNr(id) {
   return transaktion(STYKKER, 'readonly', (t, svar) => {

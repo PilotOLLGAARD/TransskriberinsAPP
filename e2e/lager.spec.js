@@ -166,3 +166,36 @@ test('hentDele giver én Blob pr. del i rækkefølge, byte for byte, og gamle st
   assert.equal(svar.tom, -1);
   await kontekst.close();
 });
+
+test('lavKilde læser et udsnit på tværs af stykker og holder delene adskilt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const svar = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const id = await l.opretNote({ mime: 'audio/mp4' });
+    const fem = (start) => new Uint8Array([0, 1, 2, 3, 4].map((x) => start + x)).buffer;
+    await l.gemStykke(id, 0, fem(0), 0);
+    await l.gemStykke(id, 1, fem(10), 0);
+    await l.gemStykke(id, 2, fem(20), 0);
+    // Del 1 af en afbrudt optagelse, og et stykke fra en uploadet fil som Blob.
+    await l.gemStykke(id, 3, fem(100), 1);
+    await l.gemStykke(id, 4, new Blob([new Uint8Array([200, 201])]), 1);
+    const k0 = await l.lavKilde(id, 0);
+    const k1 = await l.lavKilde(id, 1);
+    const laest = [...await k0.laes(3, 12)];
+    const udsnit = [...new Uint8Array(await (await k0.udsnit(3, 12)).arrayBuffer())];
+    return {
+      stoerrelse: [k0.stoerrelse, k1.stoerrelse],
+      laest,
+      udsnit,
+      del1: [...await k1.laes(0, 7)],
+      kant: [...await k0.laes(13, 99)],
+    };
+  });
+  assert.deepEqual(svar.stoerrelse, [15, 7]);
+  assert.deepEqual(svar.laest, [3, 4, 10, 11, 12, 13, 14, 20, 21]);
+  assert.deepEqual(svar.udsnit, svar.laest);
+  assert.deepEqual(svar.del1, [100, 101, 102, 103, 104, 200, 201]);
+  assert.deepEqual(svar.kant, [23, 24]);
+  await kontekst.close();
+});
