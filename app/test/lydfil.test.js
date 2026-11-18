@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAKS_BYTES, MAKS_VARIGHED_MS, STYKKE_BYTES, genkendFormat, kontrollerFil, gemFil, navnUdenEndelse, formaterMB, hentDeltFil, fjernDeltKopi } from '../js/lydfil.js';
+import { MAKS_BYTES, MAKS_VARIGHED_MS, MAKS_UDELT_MS, MAKS_FILER, STYKKE_BYTES, genkendFormat, kontrollerFil, kontrollerFiler, gemFil, gemFiler, navnUdenEndelse, formaterMB, hentDeltFil, fjernDeltKopi } from '../js/lydfil.js';
 import { STATUS } from '../js/tilstand.js';
 
 const tekst = (s) => [...s].map((c) => c.charCodeAt(0));
@@ -101,8 +101,8 @@ test('varigheden får en tidsgrænse og må ikke stoppe kontrollen', async () =>
   assert.equal(k2.varighedMs, null);
 });
 
-test('en fil over 2½ time afvises med forLang, og præcis 2½ time godtages', async () => {
-  assert.equal(MAKS_VARIGHED_MS, 9000 * 1000);
+test('en fil over 4 timer afvises med forLang, og præcis 4 timer godtages', async () => {
+  assert.equal(MAKS_VARIGHED_MS, 4 * 3600 * 1000);
   assert.deepEqual(await kontrollerFil(fil(M4A), { laesVarighed: altid(MAKS_VARIGHED_MS + 1000) }), { ok: false, fejl: 'forLang' });
   assert.equal((await kontrollerFil(fil(M4A), { laesVarighed: altid(MAKS_VARIGHED_MS) })).ok, true);
 });
@@ -149,8 +149,8 @@ function falskLager({ fuldVed = null } = {}) {
   return {
     noter,
     stykker,
-    async opretNote({ id = 'n1', mime, titel = '', kilde, filnavn, oprettet = 1 }) {
-      noter.set(id, { id, mime, titel, kilde, filnavn, status: STATUS.OPTAGER, oprettet });
+    async opretNote({ id = 'n1', mime, titel = '', kilde, filnavn, filer, oprettet = 1 }) {
+      noter.set(id, { id, mime, titel, kilde, filnavn, ...(filer ? { filer } : {}), status: STATUS.OPTAGER, oprettet });
       return id;
     },
     async gemStykke(id, nr, bytes, del = 0) {
@@ -334,4 +334,77 @@ test('en dato i fremtiden eller uden værdi giver nu som optagedato', async () =
   const udenDato = { name: 'x.m4a', type: 'audio/mp4', size: M4A.length, lastModified: undefined, slice: (...a) => new Blob([M4A]).slice(...a) };
   const id = await gemFil({ lager, fil: udenDato, kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: M4A.length, filnavn: 'x.m4a' }, nu: () => NU_TID });
   assert.equal(lager.noter.get(id).oprettet, NU_TID);
+});
+
+// Lange filer og flere filer på én gang
+
+const OGG = start(tekst('OggS'), new Array(40).fill(2));
+const TIME = 3600 * 1000;
+
+test('en m4a på 3 timer godtages, men en ogg over 2½ time afvises med forLangFormat', async () => {
+  assert.equal(MAKS_UDELT_MS, 9000 * 1000);
+  assert.equal((await kontrollerFil(fil(M4A), { laesVarighed: altid(3 * TIME) })).ok, true);
+  assert.deepEqual(await kontrollerFil(fil(OGG, 'møde.ogg', 'audio/ogg'), { laesVarighed: altid(3 * TIME) }), { ok: false, fejl: 'forLangFormat' });
+  assert.equal((await kontrollerFil(fil(OGG, 'møde.ogg', 'audio/ogg'), { laesVarighed: altid(2 * TIME) })).ok, true);
+});
+
+test('kontrollerFiler: højst 10 filer', async () => {
+  assert.equal(MAKS_FILER, 10);
+  const filer = Array.from({ length: 11 }, (_, i) => fil(M4A, `f${i}.m4a`));
+  assert.deepEqual(await kontrollerFiler(filer, { laesVarighed: altid(60000) }), { ok: false, fejl: 'forMangeFiler' });
+});
+
+test('kontrollerFiler: tilsammen højst 4 timer', async () => {
+  const filer = [fil(M4A, 'a.m4a'), fil(M4A, 'b.m4a')];
+  assert.deepEqual(await kontrollerFiler(filer, { laesVarighed: altid(2.5 * TIME) }), { ok: false, fejl: 'samletForLang' });
+  const ok = await kontrollerFiler(filer, { laesVarighed: altid(TIME) });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.kontroller.map((k) => k.filnavn), ['a.m4a', 'b.m4a']);
+});
+
+test('kontrollerFiler: en fil, der ikke er lyd, giver fejlen og filens navn', async () => {
+  const r = await kontrollerFiler([fil(M4A, 'a.m4a'), fil(start(tekst('%PDF-1.7')), 'referat.pdf')], { laesVarighed: altid(60000) });
+  assert.deepEqual(r, { ok: false, fejl: 'ikkeLydfil', filnavn: 'referat.pdf' });
+});
+
+test('gemFiler gemmer hver fil som sin egen del med navn, type og længde, i den valgte rækkefølge', async () => {
+  const a = new File([M4A], 'Møde_del1.m4a', { type: 'audio/x-m4a', lastModified: 5000 });
+  const b = new File([MP3], 'Møde_del2.mp3', { type: 'audio/mpeg', lastModified: 9000 });
+  const lager = falskLager();
+  const kontroller = [
+    { ok: true, format: 'm4a', mime: 'audio/x-m4a', varighedMs: 60000, bytes: a.size, filnavn: a.name },
+    { ok: true, format: 'mp3', mime: 'audio/mpeg', varighedMs: 30000, bytes: b.size, filnavn: b.name },
+  ];
+  const id = await gemFiler({ lager, filer: [{ fil: a, kontrol: kontroller[0] }, { fil: b, kontrol: kontroller[1] }], titel: 'Møde', nu: () => 10000 });
+  const n = lager.noter.get(id);
+  assert.equal(n.status, STATUS.GEMT);
+  assert.equal(n.kilde, 'filer');
+  assert.deepEqual(n.filer, [
+    { navn: 'Møde_del1.m4a', mime: 'audio/x-m4a', varighedMs: 60000, bytes: a.size },
+    { navn: 'Møde_del2.mp3', mime: 'audio/mpeg', varighedMs: 30000, bytes: b.size },
+  ]);
+  assert.equal(n.varighedMs, 90000);
+  assert.equal(n.bytes, a.size + b.size);
+  assert.equal(n.oprettet, 5000, 'første fils dato');
+  assert.deepEqual(lager.stykker.map((s) => [s.nr, s.del]), [[0, 0], [1, 1]]);
+  assert.deepEqual(new Uint8Array(await lager.stykker[1].bytes.arrayBuffer()), MP3);
+});
+
+test('gemFiler: ukendt længde på én fil giver ingen samlet længde', async () => {
+  const lager = falskLager();
+  const id = await gemFiler({ lager, filer: [
+    { fil: fil(M4A, 'a.m4a'), kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: null, bytes: M4A.length, filnavn: 'a.m4a' } },
+    { fil: fil(M4A, 'b.m4a'), kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: 1000, bytes: M4A.length, filnavn: 'b.m4a' } },
+  ] });
+  assert.equal(lager.noter.get(id).varighedMs, undefined);
+});
+
+test('gemFiler: fuldt lager sletter det halvt gemte og giver pladsTom', async () => {
+  const lager = falskLager({ fuldVed: 1 });
+  await assert.rejects(gemFiler({ lager, filer: [
+    { fil: fil(M4A, 'a.m4a'), kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: 1, bytes: M4A.length, filnavn: 'a.m4a' } },
+    { fil: fil(M4A, 'b.m4a'), kontrol: { ok: true, format: 'm4a', mime: 'audio/mp4', varighedMs: 1, bytes: M4A.length, filnavn: 'b.m4a' } },
+  ] }), (e) => e.type === 'pladsTom');
+  assert.equal(lager.noter.size, 0);
+  assert.equal(lager.stykker.length, 0);
 });

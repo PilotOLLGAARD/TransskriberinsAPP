@@ -19,15 +19,26 @@ export const BESKEDER = {
   plads: 'Telefonen er løbet tør for plads. Optagelsen er gemt. Slet gamle optagelser eller frigør plads på telefonen, og prøv igen.',
   lager: 'Telefonen kunne ikke gemme ændringen. Optagelsen er gemt. Prøv igen.',
   loginKraeverNet: 'Du skal have net for at logge ind. Optagelsen er gemt.',
-  snartSlut: 'Optagelsen stopper om 4 minutter.',
-  maksNaaet: 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.',
+  snartSlut: 'Optagelsen stopper om 5 minutter.',
+  lang: 'Optagelsen har kørt i 2 timer. Sæt gerne telefonen til opladning.',
+  maksNaaet: 'Optagelsen stoppede efter 4 timer. Det indtalte er gemt.',
+  // Optagelser, der ikke kan klippes i bidder (fx et ukendt format fra en ny telefon), stopper som før.
+  maksNaaetKort: 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.',
   mailFejl: 'Mailen blev ikke sendt. Referatet er gemt. Prøv igen.',
   ikkeLydfil: 'Filen er ikke en lydfil, appen kan bruge. Brug m4a, mp3, wav, ogg eller webm.',
   forStorFil: 'Filen er for stor. Den må højst fylde 500 MB. Gem optagelsen som m4a eller mp3, og prøv igen.',
-  forLang: 'Lydfilen er længere end 2½ time. Del den op i en anden app, og upload delene hver for sig.',
+  forLang: 'Lydfilen er længere end 4 timer. Del den op i en anden app, og upload delene sammen.',
+  forLangFormat: 'Lydfiler i dette format kan højst være 2½ time. Gem optagelsen som m4a eller mp3, og prøv igen.',
+  forMangeFiler: 'Du kan højst vælge 10 lydfiler ad gangen.',
+  samletForLang: 'Lydfilerne er tilsammen længere end 4 timer.',
   filKanIkkeLaeses: 'Filen kunne ikke læses, så intet blev gemt. Prøv igen, eller gem filen i Filer først.',
   maaskeSendt: 'Mailen er måske allerede sendt. Tjek din indbakke, før du sender igen.',
 };
+
+/** Beskeden før en optagelse, når telefonen har lidt plads. minutter er, hvad pladsen rækker til. */
+export function lidtPlads(minutter) {
+  return `Telefonen har kun plads til ca. ${minutter} minutters optagelse. Slet gamle filer, hvis mødet bliver langt.`;
+}
 
 // Fejl, der vises med en anden tekst end deres eget navn.
 const VISES_SOM = { mailUkendt: 'maaskeSendt' };

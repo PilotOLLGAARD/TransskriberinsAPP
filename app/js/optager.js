@@ -8,8 +8,14 @@ const BITRATE = 128000;
 const STYKKE_MS = 5000;
 const MAKS_HUL_MS = 15000;
 const VAGT_MS = 5000;
-const ADVARSEL_MS = 55 * 60 * 1000;
-const MAKS_MS = 59 * 60 * 1000;
+// Lange optagelser klippes i bidder, når de sendes (app/js/opdeling/). Kan en optagelse ikke klippes
+// (fx et ukendt format fra en ny telefon), gælder det gamle loft på 59 min. for den note.
+const MAKS_MS = 4 * 60 * 60 * 1000;
+const MAKS_UKLIPPELIG_MS = 59 * 60 * 1000;
+const ADVARSEL_FOER_MS = 5 * 60 * 1000;
+const LANG_MS = 2 * 60 * 60 * 1000;
+// Så længe efter starten tjekkes det, om det optagede kan klippes.
+const KONTROL_MS = 60 * 1000;
 // Højst så mange dele på én note. Alle dele tilsammen højst MAKS_MS.
 const MAKS_DELE = 20;
 const STOP_VENTETID_MS = 3000;
@@ -86,7 +92,7 @@ function stopSpor(stream) {
  * Lyden gemmes, mens der optages. Ved en afbrydelse afsluttes delen, så der ikke opstår et hul,
  * som brugeren ikke opdager. En afbrudt optagelse kan fortsættes som en ny del på samme note.
  */
-export function lavOptager({ lager, medier, ur = standardUr }) {
+export function lavOptager({ lager, medier, ur = standardUr, kanDeles = async () => true }) {
   let aktiv = null;
   let vedAfsluttet = () => {};
   let vedAdvaret = () => {};
@@ -182,9 +188,39 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
     });
   }
 
+  /** Advarsel 5 min. før loftet og stop ved loftet, regnet fra alle dele tilsammen. */
+  function saetLoft(o, maksMs) {
+    ur.ryd(o.advarselTimer);
+    ur.ryd(o.maksTimer);
+    o.maksMs = maksMs;
+    const grund = maksMs < MAKS_MS ? 'maksKort' : 'maks';
+    const nu = o.tidligereMs + (ur.nu() - o.startet);
+    o.advarselTimer = ur.saetTimeout(() => vedAdvaret('snartSlut'), Math.max(0, maksMs - ADVARSEL_FOER_MS - nu));
+    o.maksTimer = ur.saetTimeout(() => afslut(o, grund), Math.max(0, maksMs - nu));
+  }
+
+  /**
+   * Kan det optagede ikke klippes i bidder, kan det heller ikke sendes, hvis det bliver langt. Så gælder 59 min.
+   * Tjekket må aldrig stoppe optagelsen: alle fejl giver blot det gamle loft.
+   */
+  async function kontroller(o) {
+    let ok = false;
+    try {
+      await o.kaede;
+      ok = (await kanDeles(o.id)) === true;
+    } catch { /* som uklippelig */ }
+    if (ok || o.afslutter || aktiv !== o) return;
+    try {
+      await lager.opdaterNote(o.id, { maksMs: MAKS_UKLIPPELIG_MS });
+    } catch { /* Loftet gælder stadig for denne del. */ }
+    if (!o.afslutter && aktiv === o) saetLoft(o, MAKS_UKLIPPELIG_MS);
+  }
+
   async function fuldfoer(o) {
     ur.ryd(o.advarselTimer);
     ur.ryd(o.maksTimer);
+    ur.ryd(o.langTimer);
+    ur.ryd(o.kontrolTimer);
     ur.ryd(o.vagtTimer);
     medier.dokument.removeEventListener('visibilitychange', o.vedSynlighed);
 
@@ -254,7 +290,7 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         id, ny: true,
         klargoer: async (mime) => {
           await lager.opretNote({ id, mime, titel });
-          return { del: 0, foersteNr: 0, tidligereMs: 0 };
+          return { del: 0, foersteNr: 0, tidligereMs: 0, maksMs: MAKS_MS };
         },
         fortryd: () => lager.sletNote(id),
       });
@@ -271,8 +307,9 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         if (!note || note.status !== STATUS.GEMT) throw new OptageFejl('kanIkkeOptage');
         const del = note.dele ?? 1;
         const tidligereMs = note.varighedMs ?? 0;
-        if (del >= MAKS_DELE || tidligereMs >= MAKS_MS) throw new OptageFejl('ingenFlereDele');
-        return { del, tidligereMs };
+        const maksMs = note.maksMs ?? MAKS_MS;
+        if (del >= MAKS_DELE || tidligereMs >= maksMs) throw new OptageFejl('ingenFlereDele');
+        return { del, tidligereMs, maksMs };
       };
       await kanFortsaettes();
       let del;
@@ -321,11 +358,12 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
       let del;
       let foersteNr;
       let tidligereMs;
+      let maksMs;
       try {
         recorder = medier.lavRecorder(stream, { mimeType: mime, audioBitsPerSecond: BITRATE });
         // Låsen tages, før noten findes, så en anden fane aldrig ser optagelsen uden lås.
         frigivLaas = (await medier.laas?.(LAAS_PRAEFIKS + id)) ?? null;
-        ({ del, foersteNr, tidligereMs } = await klargoer(recorder.mimeType || mime));
+        ({ del, foersteNr, tidligereMs, maksMs } = await klargoer(recorder.mimeType || mime));
       } catch (e) {
         frigivLaas?.();
         stopSpor(stream);
@@ -369,8 +407,9 @@ export function lavOptager({ lager, medier, ur = standardUr }) {
         afslut(o, 'afbrudt');
       };
       medier.dokument.addEventListener('visibilitychange', o.vedSynlighed);
-      o.advarselTimer = ur.saetTimeout(() => vedAdvaret('snartSlut'), Math.max(0, ADVARSEL_MS - tidligereMs));
-      o.maksTimer = ur.saetTimeout(() => afslut(o, 'maks'), Math.max(0, MAKS_MS - tidligereMs));
+      saetLoft(o, maksMs);
+      if (tidligereMs < LANG_MS && maksMs > LANG_MS) o.langTimer = ur.saetTimeout(() => vedAdvaret('lang'), LANG_MS - tidligereMs);
+      if (ny) o.kontrolTimer = ur.saetTimeout(() => kontroller(o), KONTROL_MS);
       o.vagtTimer = ur.saetTimeout(() => vagt(o), VAGT_MS);
 
       // Ventes der på skærmlåsen, kan en langsom telefon nå at afslutte optagelsen, før skærmen skifter.

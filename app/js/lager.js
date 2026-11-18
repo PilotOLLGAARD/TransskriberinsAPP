@@ -58,11 +58,13 @@ function alleStykkerInterval(id) {
 }
 
 /** oprettet er optagedatoen. En uploadet lydfil giver sin egen. Ellers er det nu. */
-export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', kilde, filnavn, oprettet }) {
+export async function opretNote({ id = crypto.randomUUID(), mime, titel = '', kilde, filnavn, filer, oprettet }) {
   // Ingen type: AI'en vælger den, og svaret gemmer den på noten.
   const note = { id, mime, titel, status: STATUS.OPTAGER, oprettet: Number.isSafeInteger(oprettet) ? oprettet : Date.now() };
   // En lydfil, brugeren har valgt, i stedet for en optagelse.
   if (kilde === 'fil') Object.assign(note, { kilde, filnavn: String(filnavn ?? '') });
+  // Flere lydfiler som én note: hver fil er en del med sit eget navn, format og længde.
+  if (kilde === 'filer' && Array.isArray(filer)) Object.assign(note, { kilde, filer });
   await transaktion(NOTER, 'readwrite', (t) => t.objectStore(NOTER).add(note));
   return id;
 }

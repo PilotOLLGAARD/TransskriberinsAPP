@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { BESKEDER, besked } from '../js/beskeder.js';
+import { BESKEDER, besked, lidtPlads } from '../js/beskeder.js';
 import { FEJLTYPER } from '../js/transskribering.js';
 
 const MAPPE = new URL('../js/', import.meta.url);
@@ -76,8 +76,8 @@ test('dagsgrænsen hos Google har en dansk besked, der siger, at optagelsen er g
   assert.match(BESKEDER.kvote, /i morgen/);
 });
 
-test('en lydfil over 2½ time får en dansk besked om at dele den op', () => {
-  assert.equal(BESKEDER.forLang, 'Lydfilen er længere end 2½ time. Del den op i en anden app, og upload delene hver for sig.');
+test('en lydfil over 4 timer får en dansk besked om at dele den op', () => {
+  assert.equal(BESKEDER.forLang, 'Lydfilen er længere end 4 timer. Del den op i en anden app, og upload delene sammen.');
   assert.ok(alleFejltyper().has('forLang'));
 });
 
@@ -85,4 +85,17 @@ test('teksterne siger, hvad der skete, i korte sætninger uden tankestreg', () =
   assert.equal(BESKEDER.tjeneste, 'Det lykkedes ikke at lave referatet. Optagelsen er gemt. Prøv igen.');
   assert.equal(BESKEDER.afbrudt, 'Optagelsen blev afbrudt. Det optagede er gemt. Vil du fortsætte?');
   for (const [noegle, tekst] of Object.entries(BESKEDER)) assert.ok(!tekst.includes('—'), `${noegle}: ${tekst}`);
+});
+
+test('beskederne om lange optagelser og flere filer', () => {
+  assert.equal(BESKEDER.snartSlut, 'Optagelsen stopper om 5 minutter.');
+  assert.equal(BESKEDER.lang, 'Optagelsen har kørt i 2 timer. Sæt gerne telefonen til opladning.');
+  assert.equal(BESKEDER.maksNaaet, 'Optagelsen stoppede efter 4 timer. Det indtalte er gemt.');
+  assert.equal(BESKEDER.maksNaaetKort, 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.');
+  assert.equal(BESKEDER.forLang, 'Lydfilen er længere end 4 timer. Del den op i en anden app, og upload delene sammen.');
+  assert.equal(BESKEDER.forLangFormat, 'Lydfiler i dette format kan højst være 2½ time. Gem optagelsen som m4a eller mp3, og prøv igen.');
+  assert.equal(BESKEDER.forMangeFiler, 'Du kan højst vælge 10 lydfiler ad gangen.');
+  assert.equal(BESKEDER.samletForLang, 'Lydfilerne er tilsammen længere end 4 timer.');
+  assert.equal(BESKEDER.blokeret, BESKEDER.kanIkkeBehandles);
+  assert.equal(lidtPlads(42), 'Telefonen har kun plads til ca. 42 minutters optagelse. Slet gamle filer, hvis mødet bliver langt.');
 });

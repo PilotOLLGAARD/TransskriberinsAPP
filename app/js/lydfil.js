@@ -1,13 +1,19 @@
 // En lydfil, brugeren allerede har (fx fra Memoer på iPhone): kontrol i appen og gemning på telefonen, før noget sendes.
-// Filen gemmes byte for byte. Den omkodes, nedsamples og deles aldrig, så lyden er den samme hos Google.
+// Filen gemmes byte for byte og omkodes og nedsamples aldrig. En lang fil klippes først ved afsendelsen, mellem
+// hele lydrammer (app/js/opdeling/), så lyden er den samme hos Google.
 
 import { LAAS_PRAEFIKS } from './optager.js';
 import { STATUS } from './tilstand.js';
+import { kanKlippes } from './opdeling/index.js';
 
 /** Største fil, serveren tager imod. */
 export const MAKS_BYTES = 500 * 1024 * 1024;
-/** Længste lydfil: 2½ time. Samme grænse som på serveren (MAX_UPLOAD_SEK i server/src/handler.js). */
-export const MAKS_VARIGHED_MS = 9000 * 1000;
+/** Længste lydfil (og flere filer tilsammen): 4 timer. Den sendes i bidder på 30 min. */
+export const MAKS_VARIGHED_MS = 4 * 3600 * 1000;
+/** Længste fil i et format, der ikke kan klippes (ogg, flac, aac): 2½ time, serverens grænse for ét kald. */
+export const MAKS_UDELT_MS = 9000 * 1000;
+/** Højst så mange filer ad gangen. */
+export const MAKS_FILER = 10;
 /** Filen læses og gemmes i stykker af denne størrelse, så hele filen aldrig skal ligge i hukommelsen på én gang. */
 export const STYKKE_BYTES = 8 * 1024 * 1024;
 const VARIGHED_TIDSGRAENSE_MS = 5000;
@@ -110,8 +116,27 @@ export async function kontrollerFil(fil, { laesVarighed = laesVarighedIBrowser, 
   const format = genkendFormat(start);
   if (!format) return { ok: false, fejl: 'ikkeLydfil' };
   const varighedMs = await varighedMedGraense(laesVarighed, fil, tidsgraenseMs);
-  if (varighedMs !== null && varighedMs > MAKS_VARIGHED_MS) return { ok: false, fejl: 'forLang' };
-  return { ok: true, format, mime: mimeFor(fil, format), varighedMs, bytes: fil.size, filnavn: fil.name || '' };
+  const mime = mimeFor(fil, format);
+  const klippes = kanKlippes(mime);
+  if (varighedMs !== null && varighedMs > (klippes ? MAKS_VARIGHED_MS : MAKS_UDELT_MS)) return { ok: false, fejl: klippes ? 'forLang' : 'forLangFormat' };
+  return { ok: true, format, mime, varighedMs, bytes: fil.size, filnavn: fil.name || '' };
+}
+
+/**
+ * Kontrollerer flere filer, der skal blive til én note: højst MAKS_FILER, hver for sig som kontrollerFil, og
+ * tilsammen højst MAKS_VARIGHED_MS af de kendte længder. Giver { ok: true, kontroller } eller { ok: false, fejl, filnavn? }.
+ */
+export async function kontrollerFiler(filer, valg) {
+  if (filer.length > MAKS_FILER) return { ok: false, fejl: 'forMangeFiler' };
+  const kontroller = [];
+  for (const fil of filer) {
+    const k = await kontrollerFil(fil, valg);
+    if (!k.ok) return { ok: false, fejl: k.fejl, filnavn: fil.name || '' };
+    kontroller.push(k);
+  }
+  const samlet = kontroller.reduce((sum, k) => sum + (k.varighedMs ?? 0), 0);
+  if (samlet > MAKS_VARIGHED_MS) return { ok: false, fejl: 'samletForLang' };
+  return { ok: true, kontroller };
 }
 
 /** Filnavnet uden endelse, som forslag til navnet. */
@@ -188,6 +213,43 @@ export async function gemFil({ lager, fil, kontrol, titel = '', id = crypto.rand
   }
 }
 
+/**
+ * Gemmer flere filer som én note med kilde 'filer': hver fil er sin egen del, i den valgte rækkefølge.
+ * Datoen er den første fils. Går det galt, slettes det halvt gemte. Kaster LydfilFejl som gemFil.
+ */
+export async function gemFiler({ lager, filer, titel = '', id = crypto.randomUUID(), laas, nu = Date.now }) {
+  const frigiv = (await laas?.(LAAS_PRAEFIKS + id).catch(() => null)) ?? null;
+  let oprettet = false;
+  try {
+    const liste = filer.map(({ kontrol }) => ({ navn: kontrol.filnavn, mime: kontrol.mime, varighedMs: kontrol.varighedMs, bytes: kontrol.bytes }));
+    await lager.opretNote({ id, mime: liste[0].mime, titel, kilde: 'filer', filer: liste, oprettet: optagetTid(filer[0].fil, nu()) });
+    oprettet = true;
+    let nr = 0;
+    let ialt = 0;
+    for (let del = 0; del < filer.length; del++) {
+      const { fil, kontrol } = filer[del];
+      let gemt = 0;
+      for (let fra = 0; fra < fil.size; fra += STYKKE_BYTES) {
+        const stykke = fil.slice(fra, Math.min(fra + STYKKE_BYTES, fil.size));
+        await lager.gemStykke(id, nr++, stykke, del);
+        gemt += stykke.size;
+      }
+      if (gemt !== fil.size || gemt !== kontrol.bytes) throw new LydfilFejl('filKanIkkeLaeses');
+      ialt += gemt;
+    }
+    const felter = { status: STATUS.GEMT, bytes: ialt };
+    if (liste.every((f) => Number.isFinite(f.varighedMs))) felter.varighedMs = liste.reduce((s, f) => s + f.varighedMs, 0);
+    await lager.opdaterNote(id, felter);
+    return id;
+  } catch (e) {
+    if (oprettet) await lager.sletNote(id).catch(() => {});
+    if (e instanceof LydfilFejl) throw e;
+    throw new LydfilFejl(e?.name === 'QuotaExceededError' ? 'pladsTom' : 'filKanIkkeLaeses');
+  } finally {
+    frigiv?.();
+  }
+}
+
 /** Optagedatoen: filens ændringsdato, når den er gyldig og ikke i fremtiden, ellers nu. */
 function optagetTid(fil, nu) {
   const t = fil.lastModified;
@@ -196,7 +258,7 @@ function optagetTid(fil, nu) {
 
 // Udfald, hvor kopien fra del-menuen ikke skal bruges igen: gemt, Annullér, eller en fejl, der ikke
 // forsvinder ved at prøve igen. Ved fuldt lager og læsefejl bevares den, så brugeren kan prøve igen.
-const FJERN_KOPI_EFTER = new Set(['gemt', 'annulleret', 'ikkeLydfil', 'forStorFil', 'forLang']);
+const FJERN_KOPI_EFTER = new Set(['gemt', 'annulleret', 'ikkeLydfil', 'forStorFil', 'forLang', 'forLangFormat']);
 
 /** Om den midlertidige kopi fra del-menuen skal fjernes efter dette udfald. */
 export function fjernDeltKopi(udfald) {

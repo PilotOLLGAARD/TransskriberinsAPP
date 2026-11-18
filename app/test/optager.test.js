@@ -71,7 +71,7 @@ class FalskSpor extends EventTarget {
   stop() { this.stoppet = true; }
 }
 
-function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas } = {}) {
+function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas, kanDeles } = {}) {
   const spor = new FalskSpor();
   const tilstand = {
     tid: 0,
@@ -116,7 +116,7 @@ function opsaet({ lager = falskLager(), understoettet = () => true, skaermlaas }
       t.fn();
     }
   };
-  const optager = lavOptager({ lager, medier, ur });
+  const optager = lavOptager({ lager, medier, ur, ...(kanDeles ? { kanDeles } : {}) });
   const afsluttet = [];
   const advarsler = [];
   optager.naarAfsluttet((a) => afsluttet.push(a));
@@ -362,20 +362,49 @@ test('en skrivning, der aldrig bliver færdig, holder højst låsen i 30 s', asy
   assert.deepEqual(s.tilstand.haendelser.at(-1), ['frigiv', `optag-${id}`]);
 });
 
-test('advarer ved 55 minutter', async () => {
+test('melder efter 2 timer, at optagelsen er lang, og advarer 5 min. før 4 timer', async () => {
   const s = opsaet();
   await s.optager.start();
-  s.skridMedLyd(55 * MINUT - 5000);
+  s.skridMedLyd(120 * MINUT - 5000);
   assert.deepEqual(s.advarsler, []);
   s.skridMedLyd(5000);
-  assert.deepEqual(s.advarsler, ['snartSlut']);
+  assert.deepEqual(s.advarsler, ['lang']);
+  s.skridMedLyd(115 * MINUT - 5000);
+  assert.deepEqual(s.advarsler, ['lang']);
+  s.skridMedLyd(5000);
+  assert.deepEqual(s.advarsler, ['lang', 'snartSlut']);
 });
 
-test('stopper efter 59 minutter', async () => {
+test('stopper efter 4 timer', async () => {
   const s = opsaet();
   const id = await s.optager.start();
-  s.skridMedLyd(59 * MINUT);
+  s.skridMedLyd(240 * MINUT - 5000);
+  assert.deepEqual(s.afsluttet, []);
+  s.skridMedLyd(5000);
   assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'maks' });
+});
+
+test('kan optagelsen ikke klippes, gælder 59 min. som før', async () => {
+  const kald = [];
+  const s = opsaet({ kanDeles: async (id) => { kald.push(id); return false; } });
+  const id = await s.optager.start();
+  s.skridMedLyd(60 * 1000);
+  await new Promise((ok) => setTimeout(ok, 5));
+  assert.deepEqual(kald, [id]);
+  assert.equal(s.lager.noter.get(id).maksMs, 59 * MINUT);
+  s.skridMedLyd(54 * MINUT - 60 * 1000);
+  assert.deepEqual(s.advarsler, ['snartSlut']);
+  s.skridMedLyd(5 * MINUT);
+  assert.deepEqual(await s.venTilAfsluttet(), { id, grund: 'maksKort' });
+});
+
+test('en fejl, når det tjekkes, om optagelsen kan klippes, giver 59 min. og stopper ikke optagelsen', async () => {
+  const s = opsaet({ kanDeles: async () => { throw new Error('x'); } });
+  const id = await s.optager.start();
+  s.skridMedLyd(2 * MINUT);
+  await new Promise((ok) => setTimeout(ok, 5));
+  assert.equal(s.optager.erAktiv(), true);
+  assert.equal(s.lager.noter.get(id).maksMs, 59 * MINUT);
 });
 
 test('sen lyd efter stop-timeout slettes ikke', async () => {
@@ -604,7 +633,7 @@ test('fortsaet gemmer stykker i del 1 på samme note og lægger varigheden til',
 
 test('maks og advarsel gælder for alle dele tilsammen', async () => {
   const s = opsaet();
-  const id = await foersteDel(s, 58 * MINUT);
+  const id = await foersteDel(s, 239 * MINUT);
   await s.optager.fortsaet(id);
   s.skrid(0);
   assert.ok(s.advarsler.length >= 1);
@@ -657,13 +686,20 @@ test('fortsaet kan kun bruges på en gemt note', async () => {
   await assert.rejects(s.optager.fortsaet('findes-ikke'), (e) => e.type === 'kanIkkeOptage');
 });
 
-test('efter 20 dele eller 59 minutter kan der ikke fortsættes', async () => {
+test('efter 20 dele eller 4 timer kan der ikke fortsættes', async () => {
   const s = opsaet();
   const id = await foersteDel(s);
   s.lager.noter.get(id).dele = 20;
   await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
   s.lager.noter.get(id).dele = 1;
-  s.lager.noter.get(id).varighedMs = 59 * MINUT;
+  s.lager.noter.get(id).varighedMs = 240 * MINUT;
+  await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
+});
+
+test('Fortsæt respekterer en notes loft på 59 min.', async () => {
+  const s = opsaet();
+  const id = await foersteDel(s);
+  Object.assign(s.lager.noter.get(id), { varighedMs: 59 * MINUT, maksMs: 59 * MINUT });
   await assert.rejects(s.optager.fortsaet(id), (e) => e.type === 'ingenFlereDele');
 });
 
