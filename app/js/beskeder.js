@@ -7,6 +7,8 @@ export const BESKEDER = {
   tjeneste: 'Det lykkedes ikke at lave referatet. Optagelsen er gemt. Prøv igen.',
   kvote: 'Grænsen for i dag hos Google er nået. Optagelsen er gemt på telefonen. Prøv igen i morgen.',
   kanIkkeBehandles: 'Optagelsen kunne ikke behandles. Den er gemt på telefonen. Kontakt IT, hvis det sker igen.',
+  // Googles filter afviste hele optagelsen (også i mindre stykker).
+  blokeret: 'Optagelsen kunne ikke behandles. Den er gemt på telefonen. Kontakt IT, hvis det sker igen.',
   ingenTale: 'Der blev ikke fundet tale i optagelsen. Den er gemt på telefonen.',
   afbrudt: 'Optagelsen blev afbrudt. Det optagede er gemt. Vil du fortsætte?',
   ingenFlereDele: 'Optagelsen kan ikke fortsættes mere. Send den, og start en ny.',

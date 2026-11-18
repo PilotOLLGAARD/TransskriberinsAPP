@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { lavForloeb } from '../js/forloeb.js';
 import { LoginKraevet } from '../js/login.js';
 import { STATUS } from '../js/tilstand.js';
+import { planlaegBidder } from '../js/opdeling/index.js';
 
 function falskLager(noter = []) {
   const kort = new Map(noter.map((n) => [n.id, { ...n }]));
@@ -16,10 +17,18 @@ function falskLager(noter = []) {
     async sletNote(id) { kort.delete(id); },
     async alleNoter() { return [...kort.values()].map((n) => ({ ...n })); },
     async hentDele(id) { return Array.from({ length: kort.get(id)?.dele ?? 1 }, (_, i) => new Blob([`del${i}`])); },
+    // Én del som kilde til klipningen. Lyden er teksten "del0", "del1" … så testene kan se, hvad der sendes.
+    async lavKilde(id, del = 0) {
+      const blob = new Blob([`del${del}`]);
+      return {
+        del, stoerrelse: blob.size, varighedMs: kort.get(id)?.delVarigheder?.[del],
+        laes: async (a, b) => new Uint8Array(await blob.slice(a, b).arrayBuffer()), udsnit: async (a, b) => blob.slice(a, b),
+      };
+    },
   };
 }
 
-function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat, vedAendring, vedUpload } = {}) {
+function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 1 }], sendLyd, sendMail, hentBevis, nu, aktivAndetSted, sendReferat, vedAendring, vedUpload, opdeling, bidder, vedBidder } = {}) {
   const lager = falskLager(noter);
   const t = { lydKald: 0, mailKald: [], lydListe: [], referatKald: [] };
   const forloeb = lavForloeb({
@@ -28,6 +37,9 @@ function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', op
     aktivAndetSted,
     vedAendring,
     vedUpload,
+    vedBidder,
+    ...(opdeling ? { opdeling } : {}),
+    ...(bidder ? { bidder } : {}),
     login: {
       hentBevis: hentBevis || (async (o) => `bevis-${o}`),
       brugerMail: () => 'a@ollgaard.dk',
@@ -44,7 +56,7 @@ function opsaet({ noter = [{ id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', op
     },
     sendReferat: async (...a) => {
       t.referatKald.push(a);
-      return sendReferat ? sendReferat(...a) : { ...REFERAT_SVAR, tekst: a[0].tekster.join(' | ') };
+      return sendReferat ? sendReferat(...a) : { ...REFERAT_SVAR, tekst: (a[0].tekster ?? a[0].dele.flatMap((d) => d.bidder.map((b) => b.tekst))).join(' | ') };
     },
   });
   return { lager, t, forloeb };
@@ -597,10 +609,14 @@ test('tre dele giver tre lydkald med kunTekst og ét referatkald', async () => {
     assert.equal(mime, 'audio/mp4');
     assert.equal(bevis, 'bevis-api');
     assert.equal(meta.kunTekst, true);
+    assert.equal(meta.afsnit, true);
   }
   assert.equal(s.t.referatKald.length, 1);
   const [krop, bevis] = s.t.referatKald[0];
-  assert.deepEqual(krop, { tekster: ['Tekst del0', 'Tekst del1', 'Tekst del2'], titel: 'Møde', type: 'moede', varighedMs: 90000, oprettet: 7 });
+  const { dele, ...resten } = krop;
+  assert.deepEqual(resten, { titel: 'Møde', type: 'moede', varighedMs: 90000, oprettet: 7 });
+  assert.deepEqual(dele.map((d) => d.bidder.map((b) => b.tekst)), [['Tekst del0'], ['Tekst del1'], ['Tekst del2']]);
+  assert.deepEqual(dele.map((d) => d.afbrudt), [false, true, true]);
   assert.equal(bevis, 'bevis-api');
   assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
   assert.equal(s.t.mailKald.length, 1);
@@ -621,17 +637,17 @@ test('genforsøg sender ikke dele, der allerede er transskriberet', async () => 
   const s = opsaet({ noter: [DELT], sendLyd: async (del) => { kald++; if (kald === 2) throw Object.assign(new Error(), { type: 'net' }); return delTekst(del); } });
   await s.forloeb.behandl('a');
   assert.equal(s.lager.kort.get('a').status, STATUS.FEJL);
-  assert.deepEqual(s.lager.kort.get('a').deltekster, ['Tekst del0']);
+  assert.equal(s.lager.kort.get('a').bidder[0].tekster[0].tekst, 'Tekst del0');
   await s.forloeb.behandl('a');
   assert.equal(kald, 4);
-  assert.deepEqual(s.lager.kort.get('a').deltekster, ['Tekst del0', 'Tekst del1', 'Tekst del2']);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Tekst del0', 'Tekst del1', 'Tekst del2']);
   assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
 });
 
 test('en tavs del springes over, og alle tavse giver ingenTale', async () => {
   const s = opsaet({ noter: [DELT], sendLyd: async (del) => ((await del.text()) === 'del1' ? { tekst: '' } : delTekst(del)) });
   await s.forloeb.behandl('a');
-  assert.deepEqual(s.t.referatKald[0][0].tekster, ['Tekst del0', 'Tekst del2']);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Tekst del0', '', 'Tekst del2']);
   const tavs = opsaet({ noter: [DELT], sendLyd: async () => ({ tekst: '' }) });
   await tavs.forloeb.behandl('a');
   assert.equal(tavs.lager.kort.get('a').status, STATUS.FEJL);
@@ -645,7 +661,7 @@ test('fejl i referatkaldet beholder delteksterne og lyden', async () => {
   const n = s.lager.kort.get('a');
   assert.equal(n.status, STATUS.FEJL);
   assert.equal(n.fejlType, 'tjeneste');
-  assert.equal(n.deltekster.length, 3);
+  assert.equal(Object.keys(n.bidder).length, 3);
   assert.ok((await s.lager.hentLyd('a')).size > 0);
   await s.forloeb.behandl('a');
   assert.equal(s.t.lydKald, 3);
@@ -943,9 +959,11 @@ test('referatMangler: teksten gemmes som deltekst, og referatet laves via /refer
   await s.forloeb.behandlOgSend('f');
   assert.equal(s.t.lydKald, 1);
   assert.equal(s.t.referatKald.length, 1);
-  assert.deepEqual(s.t.referatKald[0][0], { tekster: ['Hej fra pladsen'], titel: 'Møde', type: 'moede', varighedMs: 95 * 60 * 1000, oprettet: 1234 });
+  const { dele, ...resten } = s.t.referatKald[0][0];
+  assert.deepEqual(resten, { titel: 'Møde', type: 'moede', varighedMs: 95 * 60 * 1000, oprettet: 1234 });
+  assert.equal(dele[0].bidder[0].tekst, 'Hej fra pladsen');
   const n = s.lager.kort.get('f');
-  assert.deepEqual(n.deltekster, ['Hej fra pladsen']);
+  assert.equal(n.bidder[0].tekster[0].tekst, 'Hej fra pladsen');
   assert.equal(n.status, STATUS.SENDT);
   assert.equal(s.t.mailKald.length, 1);
 });
@@ -955,14 +973,14 @@ test('referatMangler og /referat fejler: Fejlet med teksten gemt, og Prøv igen 
   const s = opsaet({
     noter: [LANG_FIL],
     sendLyd: async (lyd, mime, bevis, meta, hent, valg) => { valg.vedSendt(); return UDEN_REFERAT(); },
-    sendReferat: async (krop) => { if (referatGang++ === 0) throw Object.assign(new Error('tjeneste'), { type: 'tjeneste' }); return { ...REFERAT_SVAR, tekst: krop.tekster[0] }; },
+    sendReferat: async (krop) => { if (referatGang++ === 0) throw Object.assign(new Error('tjeneste'), { type: 'tjeneste' }); return { ...REFERAT_SVAR, tekst: krop.dele[0].bidder[0].tekst }; },
   });
   await s.forloeb.behandlOgSend('f');
   let n = s.lager.kort.get('f');
   assert.equal(n.status, STATUS.FEJL);
   assert.equal(n.fejlType, 'tjeneste');
   assert.equal(n.fremdrift, 'laver');
-  assert.deepEqual(n.deltekster, ['Hej fra pladsen']);
+  assert.equal(n.bidder[0].tekster[0].tekst, 'Hej fra pladsen');
   assert.equal(s.lager.lydSlettet.has('f'), false);
 
   const set = [];
@@ -982,6 +1000,178 @@ test('en note med én del og gemt deltekst sender aldrig lyden igen', async () =
   const s = opsaet({ noter: [{ ...FIL, status: STATUS.FEJL, fejlType: 'tjeneste', deltekster: ['Gemt tekst'] }] });
   await s.forloeb.behandl('f');
   assert.equal(s.t.lydKald, 0);
-  assert.deepEqual(s.t.referatKald[0][0].tekster, ['Gemt tekst']);
+  assert.equal(s.t.referatKald[0][0].dele[0].bidder[0].tekst, 'Gemt tekst');
   assert.equal(s.lager.kort.get('f').status, STATUS.TEKST_KLAR);
+});
+
+// Lange optagelser i bidder
+
+const MIN = 60000;
+const LANG = { id: 'a', status: STATUS.GEMT, mime: 'audio/mp4', oprettet: 7, titel: 'Langt møde', varighedMs: 180 * MIN, delVarigheder: [180 * MIN] };
+
+/** Falsk klipning: enheder på et minut, og en bid er teksten "d<del>:<fra>-<til>" i minutter. */
+function falskOpdeling({ kanIkke = [] } = {}) {
+  const o = {
+    async lavIndeks(kilde) {
+      if (kanIkke.includes(kilde.del) || !kilde.varighedMs) return null;
+      const n = Math.ceil(kilde.varighedMs / MIN);
+      return { format: 'falsk', del: kilde.del, varighedMs: kilde.varighedMs, enheder: Array.from({ length: n }, (_, i) => ({ tidMs: i * MIN, fra: i, til: i + 1 })) };
+    },
+    planlaegBidder,
+    async lavBid(kilde, indeks, bid) { return new Blob([`d${indeks.del}:${bid.startMs / MIN}-${bid.slutMs / MIN}`]); },
+  };
+  return o;
+}
+const BIDDER_STD = { bidMs: 30 * MIN, overlapMs: 30000, delFraMs: 35 * MIN, smaaBidMs: 10 * MIN };
+const bidTekst = async (lyd) => {
+  const t = await lyd.text();
+  return { tekst: `Tekst ${t}`, afsnit: [{ sek: 0, tekst: `Tekst ${t}` }] };
+};
+const blokeret = () => Object.assign(new Error(), { type: 'blokeret' });
+
+test('3 timer giver 6 bidder med kunTekst, afsnit og bidens længde, og ét referat', async () => {
+  const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 6);
+  const sendt = await Promise.all(s.t.lydListe.map(([lyd]) => lyd.text()));
+  assert.deepEqual(sendt.sort(), ['d0:0-30', 'd0:29-60', 'd0:59-90', 'd0:89-120', 'd0:119-150', 'd0:149-180'].sort());
+  for (const [, , , meta] of s.t.lydListe) {
+    assert.equal(meta.kunTekst, true);
+    assert.equal(meta.afsnit, true);
+    assert.ok(meta.varighedMs === 30 * MIN || meta.varighedMs === 31 * MIN, String(meta.varighedMs));
+  }
+  const { dele, varighedMs, titel } = s.t.referatKald[0][0];
+  assert.equal(varighedMs, 180 * MIN);
+  assert.equal(titel, 'Langt møde');
+  assert.equal(dele.length, 1);
+  assert.equal(dele[0].varighedSek, 10800);
+  assert.deepEqual(dele[0].bidder.map((b) => [b.startSek, b.overlapSek, b.varighedSek]), [[0, 0, 1800], [1740, 60, 1860], [3540, 60, 1860], [5340, 60, 1860], [7140, 60, 1860], [8940, 60, 1860]]);
+  assert.deepEqual(dele[0].bidder[1].afsnit, [{ sek: 0, tekst: 'Tekst d0:29-60' }]);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
+});
+
+test('højst tre bidder sendes ad gangen', async () => {
+  let nu = 0;
+  let hoejest = 0;
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => { nu++; hoejest = Math.max(hoejest, nu); await new Promise((ok) => setTimeout(ok, 5)); nu--; return bidTekst(lyd); },
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(hoejest, 3);
+  assert.equal(s.t.lydKald, 6);
+});
+
+test('en netfejl på én bid giver Fejlet med net, gemmer de andre, og Prøv igen sender kun de manglende', async () => {
+  let fejlet = false;
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => {
+      if ((await lyd.text()) === 'd0:59-90' && !fejlet) { fejlet = true; throw Object.assign(new Error(), { type: 'net' }); }
+      return bidTekst(lyd);
+    },
+  });
+  await s.forloeb.behandl('a');
+  const n = s.lager.kort.get('a');
+  assert.equal(n.status, STATUS.FEJL);
+  assert.equal(n.fejlType, 'net');
+  const gemt = Object.keys(n.bidder[0].tekster).length;
+  assert.ok(gemt >= 2 && gemt < 6, `de bidder, der lykkedes, er gemt (${gemt})`);
+  const foer = s.t.lydKald;
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+  assert.equal(s.t.lydKald - foer, 6 - gemt, 'kun de manglende sendes igen');
+  assert.equal(s.t.referatKald.length, 1);
+});
+
+test('en note fra før opdateringen med deltekster som strenge sender dem aldrig igen', async () => {
+  const s = opsaet({ noter: [{ ...DELT, deltekster: ['Gammel del0', 'Gammel del1'] }], sendLyd: delTekst });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 1);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Gammel del0', 'Gammel del1', 'Tekst del2']);
+});
+
+test('en bid, som Googles filter blokerer, prøves igen i småbidder på 10 min.', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => { if ((await lyd.text()) === 'd0:29-60') throw blokeret(); return bidTekst(lyd); },
+  });
+  await s.forloeb.behandl('a');
+  const sendt = await Promise.all(s.t.lydListe.map(([lyd]) => lyd.text()));
+  for (const smaa of ['d0:29-39', 'd0:38-49', 'd0:48-60']) assert.ok(sendt.includes(smaa), `${smaa} i ${sendt}`);
+  const bidder = s.t.referatKald[0][0].dele[0].bidder;
+  assert.equal(bidder.length, 8);
+  assert.deepEqual(bidder.slice(1, 4).map((b) => [b.startSek, b.overlapSek]), [[1740, 60], [2280, 60], [2880, 60]]);
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+});
+
+test('en småbid, der også blokeres, mangler, og referatet laves af resten', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => { if (['d0:29-60', 'd0:38-49'].includes(await lyd.text())) throw blokeret(); return bidTekst(lyd); },
+  });
+  await s.forloeb.behandl('a');
+  const bidder = s.t.referatKald[0][0].dele[0].bidder;
+  const mangler = bidder.filter((b) => b.mangler);
+  assert.equal(mangler.length, 1);
+  assert.deepEqual([mangler[0].startSek, mangler[0].tekst], [2280, '']);
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+});
+
+test('er alle bidder blokeret, fejler noten med blokeret, og intet referat bestilles', async () => {
+  const s = opsaet({ noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD, sendLyd: async () => { throw blokeret(); } });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.FEJL);
+  assert.equal(s.lager.kort.get('a').fejlType, 'blokeret');
+  assert.equal(s.t.referatKald.length, 0);
+});
+
+test('en afbrudt optagelse med to lange dele sender afbrudt på del 2 og hver dels længde', async () => {
+  const note = { ...LANG, dele: 2, varighedMs: 100 * MIN, delVarigheder: [60 * MIN, 40 * MIN] };
+  const s = opsaet({ noter: [note], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD });
+  await s.forloeb.behandl('a');
+  const { dele } = s.t.referatKald[0][0];
+  assert.deepEqual(dele.map((d) => [d.afbrudt, d.varighedSek, d.bidder.length]), [[false, 3600, 2], [true, 2400, 2]]);
+});
+
+test('flere filer: hver fil sendes med sin egen type og får sit filnavn', async () => {
+  const note = {
+    id: 'a', status: STATUS.GEMT, kilde: 'filer', oprettet: 7, mime: 'audio/mp4', varighedMs: 20 * MIN, delVarigheder: [10 * MIN, 10 * MIN],
+    filer: [{ navn: 'Møde_del1.m4a', mime: 'audio/mp4', varighedMs: 10 * MIN }, { navn: 'Møde_del2.mp3', mime: 'audio/mpeg', varighedMs: 10 * MIN }],
+  };
+  const s = opsaet({ noter: [note], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD });
+  await s.forloeb.behandl('a');
+  assert.deepEqual(s.t.lydListe.map((a) => a[1]).sort(), ['audio/mp4', 'audio/mpeg']);
+  const { dele } = s.t.referatKald[0][0];
+  assert.deepEqual(dele.map((d) => [d.filnavn, d.afbrudt]), [['Møde_del1.m4a', false], ['Møde_del2.mp3', false]]);
+  // En kort del sendes hel, ikke som en ny indpakning.
+  assert.deepEqual((await Promise.all(s.t.lydListe.map(([l]) => l.text()))).sort(), ['del0', 'del1']);
+});
+
+test('en lydfil, der ikke kan klippes og er over 2½ time, giver forLang', async () => {
+  const s = opsaet({ noter: [{ ...LANG, mime: 'audio/ogg' }], sendLyd: bidTekst, opdeling: falskOpdeling({ kanIkke: [0] }), bidder: BIDDER_STD });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').fejlType, 'forLang');
+  assert.equal(s.t.lydKald, 0);
+});
+
+test('fremdriften i bidder meldes til skærmen', async () => {
+  const meldt = [];
+  const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD, vedBidder: (id, f) => meldt.push(f) });
+  await s.forloeb.behandl('a');
+  assert.deepEqual(meldt[0], { ialt: 6, faerdige: 0 });
+  assert.deepEqual(meldt.at(-1), { ialt: 6, faerdige: 6 });
+});
+
+test('slet under afsendelse af bidder stopper alle, og intet mailes', async () => {
+  const t = {};
+  const s = opsaet({ noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD, sendLyd: venterPaaAfbrydelse(t) });
+  const kaeden = s.forloeb.behandlOgSend('a');
+  await new Promise((ok) => setTimeout(ok, 30));
+  assert.equal(s.t.lydKald, 3);
+  await s.forloeb.slet('a');
+  await kaeden;
+  assert.equal(s.t.mailKald.length, 0);
+  assert.equal(s.t.referatKald.length, 0);
+  assert.equal(s.t.lydKald, 3, 'ingen nye bidder efter Slet');
 });

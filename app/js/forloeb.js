@@ -1,9 +1,17 @@
 import { FORTRYD_MS, OPBEVARING_MS, STATUS, efterGenstart } from './tilstand.js';
+import * as standardOpdeling from './opdeling/index.js';
+import { BIDDER } from './konfig.js';
 
 // Optager og sender kan stå tilbage, hvis lageret svigtede. Dobbeltkald forhindres af eneAdgang.
 const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.SENDER]);
 // En optagelse, der har gemt lyd for nylig, kan stadig køre i en anden fane.
 const FRISK_MS = 30 * 1000;
+// Højst så mange bidder af en lang optagelse sendes ad gangen.
+const SAMTIDIGE_BIDDER = 3;
+// En del, der ikke kan klippes, sendes hel, men kun op til 2½ time (serverens grænse for ét kald).
+const MAKS_UDELT_MS = 9000 * 1000;
+// En lydfil, hvis længde ikke kunne læses, er måske lang: over ca. 35 min. ved 128 kbit/s går den i bidder.
+const UKENDT_LANG_BYTES = 30 * 1000 * 1000;
 
 /** En valgt lydfil, der stadig gemmes, eller som ikke blev gemt færdig. */
 function erHalvFil(note) {
@@ -19,7 +27,11 @@ function fejlTypeFor(e, reserve) {
  * Binder lager, login og afsendelse sammen. Lyd slettes kun, når mailen er accepteret,
  * eller brugeren selv vælger Slet. Alle fejl ender i en tilstand, hvor man kan prøve igen.
  */
-export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {}, vedUpload = () => {} }) {
+export function lavForloeb({
+  lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {}, vedUpload = () => {},
+  vedBidder = () => {}, opdeling = standardOpdeling, bidder = BIDDER,
+}) {
+  const lavKilde = (...a) => lager.lavKilde(...a);
   const igang = new Set();
   // Afsendelser, der kan stoppes, når brugeren sletter noten.
   const afbrydere = new Map();
@@ -72,28 +84,183 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
     await lager.sletLyd(id);
   }
 
+  /** Delene på noten: filer (hver med sin type) eller dele af en afbrudt optagelse. */
+  function delePaa(note) {
+    if (note.kilde === 'filer' && Array.isArray(note.filer)) return note.filer.map((f) => ({ mime: f.mime, filnavn: f.navn, varighedMs: f.varighedMs }));
+    const antal = note.dele ?? 1;
+    // Med én del er notens længde delens længde. Afbrudte deles længde findes ved klipningen.
+    return Array.from({ length: antal }, () => ({ mime: note.mime, ...(antal === 1 ? { varighedMs: note.varighedMs } : {}) }));
+  }
+
   /**
-   * Transskriberer hver del for sig og laver ét referat. Delteksterne gemmes én ad gangen,
-   * så et genforsøg aldrig sender en del, der allerede er transskriberet.
+   * Bidderne for én del. Kan lyden klippes, planlægges bidder på 30 min.; ellers er hele delen én bid.
+   * Kun til denne afsendelse: indekset gemmes ikke, planen gør (så tekster altid hører til samme bid).
    */
-  async function behandlDele(id, note, bevis, signal) {
-    const dele = await lager.hentDele(id);
-    const tekster = [...(note.deltekster || [])];
-    let sendtLyd = false;
-    for (let i = 0; i < dele.length; i++) {
-      if (typeof tekster[i] === 'string') continue;
-      sendtLyd = true;
-      const sidste = i === dele.length - 1;
-      const svar = await sendLyd(dele[i], note.mime, bevis, { kunTekst: true, oprettet: note.oprettet }, undefined, {
-        vedSendt: sidste ? () => fremdrift(id, 'laver') : undefined,
-        signal,
-      });
-      tekster[i] = svar.tekst || '';
-      await lager.opdaterNote(id, { deltekster: [...tekster] });
+  async function planForDel(id, d, del, gemtPlan) {
+    const kilde = await lavKilde(id, d);
+    const indeks = await opdeling.lavIndeks(kilde, del.mime).catch(() => null);
+    if (gemtPlan) return { kilde, indeks, plan: gemtPlan };
+    if (!indeks) {
+      // Ukendt eller ødelagt indpakning: delen sendes hel, som før, hvis den ikke er for lang til ét kald.
+      if (Number.isFinite(del.varighedMs) && del.varighedMs > MAKS_UDELT_MS) throw Object.assign(new Error('forLang'), { type: 'forLang' });
+      return { kilde, indeks, plan: [{ nr: 0, startMs: 0, slutMs: del.varighedMs ?? null, overlapMs: 0, hel: true }] };
     }
-    // Al lyd er transskriberet før: kun referatet mangler, og det er det, skærmen skal vise.
-    if (!sendtLyd) await fremdrift(id, 'laver');
-    return lavReferat(note, tekster, bevis, signal);
+    const plan = opdeling.planlaegBidder(indeks.varighedMs, indeks.enheder, bidder);
+    // Én bid: delen sendes, som den er gemt, uden ny indpakning.
+    if (plan.length === 1) plan[0].hel = true;
+    return { kilde, indeks, plan, varighedMs: indeks.varighedMs };
+  }
+
+  /** Småbidder på 10 min. af en bid, som Googles filter afviste. Tider i forhold til delen. */
+  function smaaPlan(indeks, bid) {
+    if (!indeks || bid.hel && bid.slutMs === null) return [];
+    const enheder = indeks.enheder.slice(bid.fraEnhed, bid.tilEnhed).map((e) => ({ ...e, tidMs: e.tidMs - bid.startMs }));
+    const varighed = bid.slutMs - bid.startMs;
+    if (varighed <= bidder.smaaBidMs || enheder.length < 2) return [];
+    return opdeling.planlaegBidder(varighed, enheder, { bidMs: bidder.smaaBidMs, overlapMs: bidder.overlapMs, delFraMs: bidder.smaaBidMs })
+      .map((s, k) => ({
+        nr: k, startMs: bid.startMs + s.startMs, slutMs: bid.startMs + s.slutMs,
+        overlapMs: k === 0 ? bid.overlapMs : s.overlapMs, fraEnhed: bid.fraEnhed + s.fraEnhed, tilEnhed: bid.fraEnhed + s.tilEnhed,
+      }));
+  }
+
+  /**
+   * Transskriberer hver bid af hver del, højst SAMTIDIGE ad gangen, og laver ét referat via /referat.
+   * Hver bids tekst gemmes, så snart den kommer, så et genforsøg aldrig sender noget, der er betalt.
+   * Blokerer Googles filter en bid, prøves den i småbidder; en småbid, der også blokeres, mangler i referatet.
+   */
+  async function behandlBidder(id, note, bevis, signal) {
+    const dele = delePaa(note);
+    // Tilstanden: { [del]: { plan, varighedMs, tekster: { [nr]: { tekst, afsnit } | { mangler } | { smaa: { plan, tekster } } } } }.
+    const tilstand = JSON.parse(JSON.stringify(note.bidder ?? {}));
+    // En note fra før bidderne: en gemt deltekst er en færdig del uden tider.
+    (note.deltekster ?? []).forEach((tekst, d) => {
+      if (typeof tekst === 'string' && !tilstand[d]) tilstand[d] = { plan: [{ nr: 0, startMs: 0, slutMs: null, overlapMs: 0, hel: true }], tekster: { 0: { tekst } } };
+    });
+    let skriv = Promise.resolve();
+    const gem = () => {
+      const kopi = JSON.parse(JSON.stringify(tilstand));
+      skriv = skriv.then(() => lager.opdaterNote(id, { bidder: kopi }));
+      return skriv;
+    };
+
+    const kilder = [];
+    for (let d = 0; d < dele.length; d++) {
+      const faerdig = tilstand[d] && tilstand[d].plan.every((b) => tilstand[d].tekster[b.nr] && !tilstand[d].tekster[b.nr].smaa?.plan.some((s) => !tilstand[d].tekster[b.nr].smaa.tekster[s.nr]));
+      if (faerdig) continue;
+      const p = await planForDel(id, d, dele[d], tilstand[d]?.plan);
+      kilder[d] = p;
+      tilstand[d] ??= { plan: p.plan, tekster: {} };
+      if (p.varighedMs) tilstand[d].varighedMs = p.varighedMs;
+    }
+    await gem();
+
+    // Opgaverne: hver bid (eller småbid), der mangler sin tekst.
+    const ventende = [];
+    const opgave = (d, bid, smaa) => ventende.push({ d, bid, smaa });
+    for (const [d, t] of Object.entries(tilstand)) {
+      for (const bid of t.plan) {
+        const svar = t.tekster[bid.nr];
+        if (!svar) opgave(Number(d), bid, null);
+        else if (svar.smaa) for (const s of svar.smaa.plan) if (!svar.smaa.tekster[s.nr]) opgave(Number(d), s, bid);
+      }
+    }
+    const taelBidder = () => Object.values(tilstand).reduce((sum, t) => sum + t.plan.reduce((n, b) => n + (t.tekster[b.nr]?.smaa ? t.tekster[b.nr].smaa.plan.length : 1), 0), 0);
+    const taelFaerdige = () => Object.values(tilstand).reduce((sum, t) => sum + t.plan.reduce((n, b) => {
+      const svar = t.tekster[b.nr];
+      if (!svar) return n;
+      return n + (svar.smaa ? svar.smaa.plan.filter((s) => svar.smaa.tekster[s.nr]).length : 1);
+    }, 0), 0);
+    const meld = () => vedBidder(id, { ialt: taelBidder(), faerdige: taelFaerdige() });
+    meld();
+
+    let fejl = null;
+    // Bytes sendt af de bidder, der er i gang, kun til skærmen.
+    const upload = new Map();
+    const meldUpload = () => {
+      let sendt = 0;
+      let ialt = 0;
+      for (const u of upload.values()) { sendt += u.sendt; ialt += u.ialt; }
+      vedUpload(id, sendt, ialt);
+    };
+    async function send({ d, bid, smaa }) {
+      const del = dele[d];
+      const { kilde, indeks } = kilder[d];
+      const lyd = bid.hel ? await kilde.udsnit(0, kilde.stoerrelse) : await opdeling.lavBid(kilde, indeks, bid);
+      if (signal.aborted || fejl) return;
+      const varighedMs = Number.isFinite(bid.slutMs) ? bid.slutMs - bid.startMs : undefined;
+      let resultat;
+      try {
+        const noegle = {};
+        const svar = await sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, varighedMs, oprettet: note.oprettet }, undefined, {
+          signal,
+          // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
+          vedSendt: () => {},
+          vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
+        }).finally(() => upload.delete(noegle));
+        resultat = { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };
+      } catch (e) {
+        if (e?.type !== 'blokeret') throw e;
+        // Googles filter: en hel bid prøves i småbidder, en småbid (eller en bid, der ikke kan deles) mangler.
+        const plan = smaa ? [] : smaaPlan(indeks, bid);
+        if (plan.length) {
+          tilstand[d].tekster[bid.nr] = { smaa: { plan, tekster: {} } };
+          for (const s of plan) ventende.push({ d, bid: s, smaa: bid });
+          await gem();
+          meld();
+          return;
+        }
+        resultat = { mangler: true, tekst: '' };
+      }
+      if (smaa) tilstand[d].tekster[smaa.nr].smaa.tekster[bid.nr] = resultat;
+      else tilstand[d].tekster[bid.nr] = resultat;
+      await gem();
+      meld();
+    }
+
+    async function arbejder() {
+      while (ventende.length && !fejl && !signal.aborted) {
+        const naeste = ventende.shift();
+        try {
+          await send(naeste);
+        } catch (e) {
+          fejl ??= e;
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: SAMTIDIGE_BIDDER }, arbejder));
+    await skriv;
+    if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
+    if (fejl) throw fejl;
+
+    await fremdrift(id, 'laver');
+    const tilServer = dele.map((del, d) => {
+      const t = tilstand[d];
+      const bidListe = t.plan.flatMap((bid) => {
+        const svar = t.tekster[bid.nr];
+        const enkelt = (b, s) => ({
+          startSek: b.startMs / 1000, overlapSek: b.overlapMs / 1000,
+          varighedSek: Number.isFinite(b.slutMs) ? (b.slutMs - b.startMs) / 1000 : 0,
+          tekst: s.tekst || '', ...(s.afsnit ? { afsnit: s.afsnit } : {}), ...(s.mangler ? { mangler: true } : {}),
+        });
+        return svar.smaa ? svar.smaa.plan.map((s) => enkelt(s, svar.smaa.tekster[s.nr])) : [enkelt(bid, svar)];
+      });
+      return {
+        ...(del.filnavn ? { filnavn: del.filnavn } : {}),
+        afbrudt: d > 0 && note.kilde !== 'filer',
+        ...(Number.isFinite(t.varighedMs) ? { varighedSek: t.varighedMs / 1000 } : {}),
+        bidder: bidListe,
+      };
+    });
+    const alle = tilServer.flatMap((d) => d.bidder);
+    if (alle.every((b) => b.mangler)) throw Object.assign(new Error('blokeret'), { type: 'blokeret' });
+    if (!alle.some((b) => b.tekst.trim())) return { tekst: '' };
+    return sendReferat(
+      { dele: tilServer, titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet },
+      bevis,
+      undefined,
+      { signal },
+    );
   }
 
   /** Ét referat af teksterne via /referat. Intet lyd sendes. */
@@ -149,11 +316,12 @@ export function lavForloeb({ lager, login, sendLyd, sendMail, sendReferat, aktiv
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
         const bevis = await login.hentBevis('api');
         if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
-        // En note med gemte deltekster er (delvis) transskriberet. Den går altid via delene, også med én del,
-        // så lyd, der allerede er betalt for, aldrig sendes igen.
-        const viaDele = (note.dele ?? 1) > 1 || note.deltekster?.length > 0;
+        // Flere dele, flere filer, en lang optagelse eller ukendt længde går i bidder. En note med gemte tekster
+        // er (delvis) transskriberet og går altid den vej, så lyd, der allerede er betalt for, aldrig sendes igen.
+        const viaDele = (note.dele ?? 1) > 1 || note.deltekster?.length > 0 || note.kilde === 'filer' || note.bidder !== undefined
+          || note.varighedMs > bidder.delFraMs || (!Number.isFinite(note.varighedMs) && (note.bytes ?? 0) > UKENDT_LANG_BYTES);
         let svar = viaDele
-          ? await behandlDele(id, note, bevis, signal)
+          ? await behandlBidder(id, note, bevis, signal)
           : await sendLyd(await lager.hentLyd(id), note.mime, bevis, {
             titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet,
           }, undefined, {
