@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { kanonisk, wer, talNoejagtighed, nyeEgennavne, pris } = require('../testbaenk/maal.js');
+const { kanonisk, wer, talNoejagtighed, nyeEgennavne, pris, overgang } = require('../testbaenk/maal.js');
 
 test('kanonisk: små bogstaver, ingen tegnsætning, og tal skrevet ens', () => {
   assert.deepEqual(kanonisk('Revnen er 60 cm, ikke tres!'), ['revnen', 'er', '60', 'cm', 'ikke', '60']);
@@ -43,4 +43,35 @@ test('pris: transskription pr. minut og referat pr. token', () => {
   assert.equal(pris({ sek: 60, tekstTokens: 175 }).toFixed(4), '0.0051');
   // Referat: 1000 ind (0,75) og 500 ud (3,75) = 0,00075 + 0,001875.
   assert.equal(pris({ sek: 0, tekstTokens: 0, referat: { ind: 1000, ud: 500 } }).toFixed(6), '0.002625');
+});
+
+// Overgange mellem bidder: ord tabt eller gentaget, hvor to bidder er sat sammen
+
+const ord = (n, fra = 0) => Array.from({ length: n }, (_, i) => `ord${fra + i}`).join(' ');
+
+test('overgang: en ren overgang har intet tabt og intet gentaget', () => {
+  const facit = ord(300);
+  assert.deepEqual(overgang(facit, facit, 150), { fundet: true, tabt: 0, gentaget: 0 });
+});
+
+test('overgang: fem ord gentaget ved grænsen tælles', () => {
+  const facit = ord(300);
+  const hyp = `${ord(150)} ${ord(5, 145)} ${ord(150, 150)}`;
+  assert.deepEqual(overgang(facit, hyp, 150), { fundet: true, tabt: 0, gentaget: 5 });
+});
+
+test('overgang: fire ord tabt ved grænsen tælles', () => {
+  const facit = ord(300);
+  const hyp = `${ord(150)} ${ord(146, 154)}`;
+  assert.deepEqual(overgang(facit, hyp, 150), { fundet: true, tabt: 4, gentaget: 0 });
+});
+
+test('overgang: fejl langt fra grænsen tælles ikke med', () => {
+  const facit = ord(300);
+  const hyp = `${ord(20)} ekstra ${ord(280, 20)}`;
+  assert.deepEqual(overgang(facit, hyp, 150), { fundet: true, tabt: 0, gentaget: 0 });
+});
+
+test('overgang: findes stedet ikke i facit, siges det', () => {
+  assert.equal(overgang(ord(300), ord(300, 1000), 150).fundet, false);
 });

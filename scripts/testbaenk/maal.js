@@ -95,4 +95,66 @@ function pris({ sek = 0, tekstTokens = 0, referat = null }) {
   return transskription + ref;
 }
 
-module.exports = { kanonisk, wer, talNoejagtighed, nyeEgennavne, pris, tekster };
+/**
+ * En overgang mellem to bidder: hvor mange ord der er tabt eller gentaget tæt ved grænsen (ordIndeks i den
+ * samlede tekst, som kanonisk() deler den). Stedet i facit findes ved fælles rækker af 4 ord, og vinduet
+ * omkring grænsen sammenlignes ord for ord med facit (frie ender i facit). Kun ændringer inden for kerne ord
+ * fra grænsen tælles, så almindelige fejl i transskriptionen længere væk ikke tæller med.
+ */
+function overgang(facit, hyp, ordIndeks, { vindue = 40, kerne = 15 } = {}) {
+  const F = kanonisk(facit);
+  const H = kanonisk(hyp);
+  const fra = Math.max(0, ordIndeks - vindue);
+  const w = H.slice(fra, Math.min(H.length, ordIndeks + vindue));
+  const indeks = new Map();
+  for (let i = 0; i + 4 <= F.length; i++) {
+    const n = F.slice(i, i + 4).join(' ');
+    if (!indeks.has(n)) indeks.set(n, []);
+    indeks.get(n).push(i);
+  }
+  const starter = new Set();
+  for (let k = 0; k + 4 <= w.length; k++) for (const p of indeks.get(w.slice(k, k + 4).join(' ')) ?? []) starter.add(p - k);
+  if (!starter.size) return { fundet: false, tabt: 0, gentaget: 0 };
+
+  /** Justering af w mod et udsnit af facit med frie ender i facit. Giver omkostning og tabellen. */
+  function juster(fv) {
+    const D = [Array(fv.length + 1).fill(0)];
+    for (let r = 1; r <= w.length; r++) {
+      const raekke = [r];
+      for (let c = 1; c <= fv.length; c++) {
+        raekke[c] = Math.min(D[r - 1][c] + 1, raekke[c - 1] + 1, D[r - 1][c - 1] + (w[r - 1] === fv[c - 1] ? 0 : 1));
+      }
+      D.push(raekke);
+    }
+    const slut = D[w.length].reduce((b, v, c) => (v < D[w.length][b] ? c : b), 0);
+    return { D, slut, pris: D[w.length][slut], fv };
+  }
+  let bedst = null;
+  for (const s of starter) {
+    const j = juster(F.slice(Math.max(0, s - 10), s + w.length + 10));
+    if (!bedst || j.pris < bedst.pris) bedst = j;
+  }
+  const { D, fv } = bedst;
+  let r = w.length;
+  let c = bedst.slut;
+  let tabt = 0;
+  let gentaget = 0;
+  const naer = (pos) => Math.abs(fra + pos - ordIndeks) <= kerne;
+  while (r > 0 && c > 0) {
+    if (D[r][c] === D[r - 1][c - 1] + (w[r - 1] === fv[c - 1] ? 0 : 1)) { r--; c--; continue; }
+    if (D[r][c] === D[r - 1][c] + 1) {
+      if (naer(r - 1)) gentaget++;
+      r--;
+      continue;
+    }
+    if (naer(r)) tabt++;
+    c--;
+  }
+  while (r > 0) {
+    if (naer(r - 1)) gentaget++;
+    r--;
+  }
+  return { fundet: true, tabt, gentaget };
+}
+
+module.exports = { kanonisk, wer, talNoejagtighed, nyeEgennavne, pris, tekster, overgang };
