@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sendLyd, sendReferat, hentMedFremdrift } from '../js/transskribering.js';
+import { sendLyd, sendReferat, hentMedFremdrift, REFERAT_TIDSGRAENSE_MS } from '../js/transskribering.js';
 
 const LYD = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mp4' });
 
@@ -314,4 +314,33 @@ test('sendLyd melder, at appen forstår referatMangler', async () => {
   const hent = async (url, valg) => { headers = valg.headers; return new Response(JSON.stringify({ tekst: 'Hej' }), { status: 200 }); };
   await sendLyd(LYD, 'audio/mp4', 'b', {}, hent);
   assert.equal(headers['x-referat-mangler'], '1');
+});
+
+// Lange optagelser i bidder
+
+test('x-afsnit sendes kun sammen med kunTekst og afsnit', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'Del', afsnit: [{ sek: 0, tekst: 'Del' }] }), { status: 200 }); };
+  const svar = await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true, varighedMs: 1800000 }, hent);
+  assert.deepEqual(svar.afsnit, [{ sek: 0, tekst: 'Del' }]);
+  assert.equal(kald.headers['x-afsnit'], '1');
+  assert.equal(kald.headers['x-varighed'], '1800');
+  await sendLyd(LYD, 'audio/mp4', 'b', { afsnit: true }, hent);
+  assert.equal(kald.headers['x-afsnit'], undefined);
+});
+
+test('lyd, som Googles filter blokerer (422 blokeret), giver blokeret', async () => {
+  await assert.rejects(sendLyd(LYD, 'audio/mp4', 'b', {}, svarMed(422, { fejl: 'blokeret' })), (e) => e.type === 'blokeret');
+});
+
+test('sendReferat sender dele i stedet for tekster', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'A' }), { status: 200 }); };
+  const dele = [{ filnavn: 'a.m4a', bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 10, tekst: 'A' }] }];
+  await sendReferat({ dele, titel: 'T', varighedMs: 10000 }, 'b', hent);
+  assert.deepEqual(JSON.parse(kald.body), { dele, titel: 'T', varighedSek: 10 });
+});
+
+test('referatet af en lang optagelse må tage op til 4 minutter', () => {
+  assert.equal(REFERAT_TIDSGRAENSE_MS, 4 * 60 * 1000);
 });

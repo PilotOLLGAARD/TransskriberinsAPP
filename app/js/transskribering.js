@@ -3,8 +3,8 @@ import { TYPER } from './typer.js';
 
 // Lidt over serverens egen grænse på 900 s, så serverens svar når frem først.
 const TIDSGRAENSE_MS = 16 * 60 * 1000;
-// Referat og PDF af færdige tekster tager under et minut på serveren.
-const REFERAT_TIDSGRAENSE_MS = 2 * 60 * 1000;
+// Referat, Word og PDF af færdige tekster. Serveren giver et langt møde op til 150 s.
+export const REFERAT_TIDSGRAENSE_MS = 4 * 60 * 1000;
 
 // Står uploaden helt stille så længe, er forbindelsen død (fx uden dækning). Så kan noten prøves igen
 // med det samme i stedet for at vente på TIDSGRAENSE_MS. Kun når telefonen selv melder fremdrift.
@@ -34,7 +34,7 @@ export class SendFejl extends Error {
   }
 }
 
-function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
+function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst, afsnit } = {}) {
   // Appen forstår { tekst, referatMangler }: fejler referatet, laves kun det igen. Ældre apps får den gamle fejl.
   const h = { 'x-referat-mangler': '1' };
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
@@ -49,6 +49,8 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst } = {}) {
   if (Number.isFinite(oprettet)) h['x-optaget'] = String(oprettet);
   // En del af en afbrudt optagelse: kun teksten. Referatet laves af alle dele via /referat.
   if (kunTekst) h['x-kun-tekst'] = '1';
+  // En bid af en lang optagelse: serveren giver også afsnittene med tider, så /referat kan samle dem.
+  if (kunTekst && afsnit) h['x-afsnit'] = '1';
   return h;
 }
 
@@ -137,7 +139,9 @@ async function laesSvar(svar) {
     // Googles grænse for i dag er nået (fx 100 kald om dagen). Serveren siger det med fejlkoden kvote.
     // En lydfil over 2½ time afvises med for-lang.
     const fejl = await svar.json().then((k) => k?.fejl, () => null);
-    throw new SendFejl(fejl === 'kvote' ? 'kvote' : fejl === 'for-lang' ? 'forLang' : FEJLTYPER[svar.status] || 'tjeneste');
+    // Googles filter afviste lyden: en lang optagelse prøver bidden i mindre stykker.
+    const kendte = { kvote: 'kvote', 'for-lang': 'forLang', blokeret: 'blokeret' };
+    throw new SendFejl(kendte[fejl] || FEJLTYPER[svar.status] || 'tjeneste');
   }
   try {
     const krop = await svar.json();
@@ -150,8 +154,9 @@ async function laesSvar(svar) {
  * Ét referat af delteksterne fra en afbrudt optagelse. Intet lyd sendes.
  * Svaret er som fra sendLyd: tekst, titel, referat, pdf, filnavn, emne og html.
  */
-export async function sendReferat({ tekster, titel, type, varighedMs, oprettet }, bevis, hent = (...a) => fetch(...a), { signal } = {}) {
-  const krop = { tekster };
+export async function sendReferat({ tekster, dele, titel, type, varighedMs, oprettet }, bevis, hent = (...a) => fetch(...a), { signal } = {}) {
+  // dele: bidder med tider fra en lang optagelse eller flere filer. tekster: dele af en afbrudt optagelse (før).
+  const krop = dele ? { dele } : { tekster };
   if (typeof titel === 'string') krop.titel = titel;
   if (typeof type === 'string') krop.type = type;
   if (Number.isFinite(varighedMs)) krop.varighedSek = Math.round(varighedMs / 1000);
