@@ -1,0 +1,134 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { fjernOverlap, samlDele, HUL_TEKST, AFBRUDT_TEKST } = require('../src/samling.js');
+const { samletTekst } = require('../src/afsnit.js');
+
+const tael = (tekst, s) => tekst.split(s).length - 1;
+const alt = (r) => samletTekst([...r.forrige, ...r.naeste]);
+
+// Overlap mellem to bidder (globale tider)
+
+test('fjernOverlap: en fælles ordrække står kun én gang', () => {
+  const forrige = [
+    { sek: 1740, tekst: 'Så kigger vi på tidsplanen.' },
+    { sek: 1775, tekst: 'Vi støber dækket på onsdag, og så tager vi' },
+  ];
+  const naeste = [
+    { sek: 1771, tekst: 'dækket på onsdag, og så tager vi resten af stilladset ned.' },
+    { sek: 1790, tekst: 'Er der spørgsmål?' },
+  ];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  const tekst = alt(r);
+  assert.equal(tael(tekst, 'dækket på onsdag, og så tager vi'), 1);
+  assert.match(tekst, /Vi støber dækket på onsdag, og så tager vi resten af stilladset ned\./);
+  assert.match(tekst, /Så kigger vi på tidsplanen\./);
+  assert.match(tekst, /Er der spørgsmål\?/);
+});
+
+test('fjernOverlap: uden fælles ord klippes ved overlappets midte efter tid', () => {
+  const forrige = [{ sek: 1760, tekst: 'Første.' }, { sek: 1785, tekst: 'Før midten.' }, { sek: 1795, tekst: 'Efter midten A.' }];
+  const naeste = [{ sek: 1780, tekst: 'Før midten B.' }, { sek: 1790, tekst: 'Efter midten.' }, { sek: 1810, tekst: 'Sidste.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  assert.deepEqual(r.forrige.map((a) => a.tekst), ['Første.', 'Før midten.']);
+  assert.deepEqual(r.naeste.map((a) => a.tekst), ['Efter midten.', 'Sidste.']);
+});
+
+test('fjernOverlap: ved en gentaget sætning vælges rækken nær overlappets midte', () => {
+  const s = 'vi tager den op på næste møde';
+  const forrige = [
+    { sek: 1741, tekst: `Det er aftalt, ${s}.` },
+    { sek: 1784, tekst: `Og prisen, ${s}. Godt.` },
+  ];
+  const naeste = [
+    { sek: 1782, tekst: `prisen, ${s}. Godt.` },
+    { sek: 1795, tekst: 'Så er vi færdige.' },
+  ];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  const tekst = alt(r);
+  assert.equal(tael(tekst, s), 2, 'den tidlige forekomst bevares, overlappet står én gang');
+  assert.match(tekst, /Det er aftalt/);
+  assert.match(tekst, /Så er vi færdige/);
+});
+
+test('fjernOverlap: uden tider og uden fælles ord beholdes alt', () => {
+  const forrige = [{ sek: null, tekst: 'Alt fra den første bid.' }];
+  const naeste = [{ sek: null, tekst: 'Helt andre ord her.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  assert.deepEqual(r, { forrige, naeste });
+});
+
+test('fjernOverlap: uden tider bruges en fælles ordrække', () => {
+  const forrige = [{ sek: null, tekst: 'Start. Nu måler vi højden på væggen til to meter og ti' }];
+  const naeste = [{ sek: null, tekst: 'højden på væggen til to meter og ti centimeter. Slut.' }];
+  const tekst = alt(fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 }));
+  assert.equal(tekst, 'Start. Nu måler vi højden på væggen til to meter og ti centimeter. Slut.');
+});
+
+test('fjernOverlap: et ord delt over grænsen står én gang', () => {
+  const forrige = [{ sek: 1780, tekst: 'Og så hælder vi betonen i formen nu og venter til i morgen be' }];
+  const naeste = [{ sek: 1771, tekst: 'tonen i formen nu og venter til i morgen tidlig.' }, { sek: 1800, tekst: 'Næste punkt.' }];
+  const tekst = alt(fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 }));
+  assert.equal(tael(tekst, 'formen nu og venter til i morgen'), 1);
+  assert.match(tekst, /tidlig\./);
+  assert.match(tekst, /Og så hælder vi/);
+});
+
+// Samling af dele og bidder
+
+const bid = (startSek, afsnit, ekstra = {}) => ({ startSek, overlapSek: startSek ? 30 : 0, varighedSek: 1800, afsnit, tekst: samletTekst(afsnit), ...ekstra });
+
+test('samlDele: bidernes tider lægges til deres start', () => {
+  const r = samlDele([{ bidder: [
+    bid(0, [{ sek: 0, tekst: 'A.' }, { sek: 100, tekst: 'B.' }]),
+    bid(1770, [{ sek: 40, tekst: 'C.' }]),
+  ] }]);
+  assert.deepEqual(r.afsnit, [{ sek: 0, tekst: 'A.' }, { sek: 100, tekst: 'B.' }, { sek: 1810, tekst: 'C.' }]);
+  assert.equal(r.tekst, 'A.\nB.\nC.');
+  assert.deepEqual(r.dele, [{ fra: 0, startSek: 0, overskrift: null }]);
+  assert.equal(r.huller, 0);
+});
+
+test('samlDele: dele efter hinanden får forskydning, og en afbrudt del starter med markøren', () => {
+  const r = samlDele([
+    { varighedSek: 600, bidder: [bid(0, [{ sek: 5, tekst: 'Første del.' }], { varighedSek: 600 })] },
+    { afbrudt: true, varighedSek: 300, bidder: [bid(0, [{ sek: 10, tekst: 'Anden del.' }], { varighedSek: 300 })] },
+  ]);
+  assert.deepEqual(r.afsnit, [{ sek: 5, tekst: 'Første del.' }, { sek: 600, tekst: AFBRUDT_TEKST }, { sek: 610, tekst: 'Anden del.' }]);
+  assert.deepEqual(r.dele.map((d) => d.startSek), [0, 600]);
+  assert.equal(r.varighedSek, 900);
+});
+
+test('samlDele: filer får overskriften Del n: filnavn', () => {
+  const r = samlDele([
+    { filnavn: 'Møde_del1.m4a', varighedSek: 60, bidder: [bid(0, [{ sek: 0, tekst: 'En.' }], { varighedSek: 60 })] },
+    { filnavn: 'Møde_del2.m4a', varighedSek: 60, bidder: [bid(0, [{ sek: 1, tekst: 'To.' }], { varighedSek: 60 })] },
+  ]);
+  assert.deepEqual(r.dele, [
+    { fra: 0, startSek: 0, overskrift: 'Del 1: Møde_del1.m4a' },
+    { fra: 1, startSek: 60, overskrift: 'Del 2: Møde_del2.m4a' },
+  ]);
+});
+
+test('samlDele: en bid, der mangler, bliver til hul-teksten', () => {
+  const r = samlDele([{ bidder: [
+    bid(0, [{ sek: 0, tekst: 'Før.' }]),
+    { startSek: 1770, overlapSek: 30, varighedSek: 1800, tekst: '', mangler: true },
+    bid(3570, [{ sek: 60, tekst: 'Efter.' }]),
+  ] }]);
+  assert.deepEqual(r.afsnit.map((a) => a.tekst), ['Før.', HUL_TEKST, 'Efter.']);
+  assert.equal(r.afsnit[1].sek, 1770);
+  assert.equal(r.huller, 1);
+});
+
+test('samlDele: en bid uden tider (Transcribe) placeres ved sin start', () => {
+  const r = samlDele([{ bidder: [
+    bid(0, [{ sek: 0, tekst: 'Med tid.' }]),
+    { startSek: 1770, overlapSek: 30, varighedSek: 1800, tekst: 'Uden tid.' },
+  ] }]);
+  assert.deepEqual(r.afsnit.at(-1), { sek: 1770, tekst: 'Uden tid.' });
+});
+
+test('HUL_TEKST og AFBRUDT_TEKST har ingen cifre', () => {
+  assert.doesNotMatch(HUL_TEKST + AFBRUDT_TEKST, /\d/);
+});
