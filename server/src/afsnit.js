@@ -198,8 +198,9 @@ function saml(afsnit) {
  * Bilaget til PDF og Word, eller null uden tidspunkter (så vises teksten som før).
  * Med emner: [{ sek, undertitel, afsnit: [tekst, …] }]. Uden: [{ sek, afsnit: [tekst] }] pr. afsnit.
  */
-function lavBilag(afsnit, emner = []) {
+function lavBilag(afsnit, emner = [], dele = []) {
   if (!afsnit.length || !harTider(afsnit)) return null;
+  if (dele.length > 1 || dele.some((d) => d.overskrift)) return bilagMedDele(afsnit, emner, dele);
   if (emner.length) {
     return emner.map((e, i) => ({
       sek: afsnit[e.fra].sek,
@@ -215,6 +216,34 @@ function lavBilag(afsnit, emner = []) {
     if (plads && fortsaetter(forrige.afsnit[0])) forrige.afsnit[0] += ` ${a.tekst}`;
     else ud.push({ sek: a.sek, afsnit: [a.tekst] });
   }
+  return ud;
+}
+
+/**
+ * Bilaget, når optagelsen består af flere dele (filer eller en afbrudt optagelse). En del starter altid en ny
+ * gruppe; falder den midt i et emne, fortsætter gruppen med emnets undertitel. Dele med filnavn får overskriften
+ * og viser tiden inden for filen (visSek). En afbrudt optagelse beholder tiden fra optagelsens start.
+ */
+function bilagMedDele(afsnit, emner, dele) {
+  const delVed = new Map(dele.filter((d) => d.fra < afsnit.length).map((d) => [d.fra, d]));
+  const emneVed = new Map(emner.map((e) => [e.fra, e.undertitel]));
+  const starter = [...new Set([...delVed.keys(), ...emneVed.keys(), 0])].sort((a, b) => a - b);
+  let del = dele[0];
+  let undertitel;
+  const ud = [];
+  starter.forEach((fra, i) => {
+    if (delVed.has(fra)) del = delVed.get(fra);
+    if (emneVed.has(fra)) undertitel = emneVed.get(fra);
+    const slut = starter[i + 1] ?? afsnit.length;
+    const lokal = (sek) => (del?.overskrift ? { visSek: sek - del.startSek } : {});
+    const forste = delVed.has(fra) && del.overskrift ? { overskrift: del.overskrift } : {};
+    if (emner.length) {
+      ud.push({ sek: afsnit[fra].sek, ...lokal(afsnit[fra].sek), ...forste, undertitel, afsnit: saml(afsnit.slice(fra, slut)) });
+      return;
+    }
+    // Uden emner: hvert afsnit sin tid, som i lavBilag, men aldrig sammen hen over en del.
+    lavBilag(afsnit.slice(fra, slut)).forEach((g, j) => ud.push({ sek: g.sek, ...lokal(g.sek), ...(j ? {} : forste), afsnit: g.afsnit }));
+  });
   return ud;
 }
 

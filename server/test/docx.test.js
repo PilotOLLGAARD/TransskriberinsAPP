@@ -325,3 +325,14 @@ test('logoet er 150 pt bredt som i PDF\'en og holder sit forhold', () => {
   assert.match(xml, /<w:document [^>]*xmlns:r="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/relationships"/);
   assert.match(xml, /<w:document [^>]*xmlns:wp="http:\/\/schemas.openxmlformats.org\/drawingml\/2006\/wordprocessingDrawing"/);
 });
+
+test('bilag med dele: overskrift som eget afsnit, og tiden er inden for filen', () => {
+  const bilag = [
+    { sek: 0, visSek: 0, overskrift: 'Del 1: Møde_del1.m4a', afsnit: ['Første fil.'] },
+    { sek: 2760, visSek: 60, overskrift: 'Del 2: Møde & del2.m4a', afsnit: ['Anden fil.'] },
+  ];
+  const xml = dokument({ tekst: 'Første fil.\nAnden fil.', bilag });
+  tjekVelformet(xml, 'document.xml');
+  assert.deepEqual(bilagDel(xml), ['Del 1: Møde_del1.m4a', '00:00\tFørste fil.', 'Del 2: Møde & del2.m4a', '01:00\tAnden fil.']);
+  assert.match(bilagXml(xml), /<w:pStyle w:val="Deloverskrift"\/><\/w:pPr><w:r><w:t xml:space="preserve">Del 2: Møde &amp; del2.m4a/);
+});

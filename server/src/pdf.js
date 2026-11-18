@@ -108,6 +108,10 @@ const LUFT_EMNER = 16;
 const LUFT_TIDER = 8;
 const LUFT_AFSNIT = 5;
 const LUFT_UNDER_UNDERTITEL = 3;
+// Overskriften "Del 2: filnavn", når optagelsen består af flere filer.
+const DEL_STR = 13;
+const LUFT_DEL = 22;
+const LUFT_UNDER_DEL = 6;
 
 /**
  * Den fulde transskription delt i emner (med undertitel) eller afsnit (kun tid). Tid og undertitel holdes
@@ -121,7 +125,18 @@ function tegnBilag(doc, bilag) {
   const top = (str) => (doc.font('normal')._font.ascender / 1000) * str;
 
   bilag.forEach((emne, i) => {
-    const luft = i === 0 ? 0 : emne.undertitel ? LUFT_EMNER : LUFT_TIDER;
+    if (emne.overskrift) {
+      // Hvor en ny fil starter. Holdes sammen med emnet og to linjer tekst.
+      const hoejde = doc.font('fed').fontSize(DEL_STR).heightOfString(emne.overskrift, { width: doc.page.width - 2 * MARGEN });
+      let y = doc.y + (i === 0 ? 0 : LUFT_DEL);
+      if (y + hoejde + toLinjer + UNDERTITEL_STR > doc.page.maxY()) {
+        doc.addPage();
+        ({ y } = doc);
+      }
+      doc.font('fed').fontSize(DEL_STR).fillColor(BLAA_DYB).text(emne.overskrift, MARGEN, y, { width: doc.page.width - 2 * MARGEN });
+      doc.y += LUFT_UNDER_DEL;
+    }
+    const luft = i === 0 || emne.overskrift ? 0 : emne.undertitel ? LUFT_EMNER : LUFT_TIDER;
     const titelHoejde = emne.undertitel
       ? doc.font('fed').fontSize(UNDERTITEL_STR).heightOfString(emne.undertitel, { width: bredde }) + LUFT_UNDER_UNDERTITEL
       : 0;
@@ -131,7 +146,7 @@ function tegnBilag(doc, bilag) {
       ({ y } = doc);
     }
     const linjeStr = emne.undertitel ? UNDERTITEL_STR : TEKST_STR;
-    doc.font('normal').fontSize(TID_STR).fillColor(GRAA).text(formaterTid(emne.sek), MARGEN, y + top(linjeStr) - top(TID_STR), {
+    doc.font('normal').fontSize(TID_STR).fillColor(GRAA).text(formaterTid(emne.visSek ?? emne.sek), MARGEN, y + top(linjeStr) - top(TID_STR), {
       width: TID_KOLONNE - 8, lineBreak: false, features: ['tnum'],
     });
     if (emne.undertitel) {
