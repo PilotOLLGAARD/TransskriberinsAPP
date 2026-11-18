@@ -8,6 +8,7 @@ const wordDel = require('./docx.js');
 const {
   laesAfsnit, skalerTider, delLangeAfsnit, harTider, samletTekst, lavBilag,
 } = require('./afsnit.js');
+const { samlDele } = require('./samling.js');
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -15,13 +16,19 @@ const FORMATER = new Set([
   'audio/aac', 'audio/flac', 'audio/x-flac', 'audio/x-m4a', 'audio/m4a',
 ]);
 const MAX_TITEL = 120;
-const MAX_VARIGHED_SEK = 3600;
+// Længste optagelse i referat, PDF og Word: 4 timer (lange optagelser sendes i bidder).
+const MAX_VARIGHED_SEK = 14400;
 // Længste lydfil, der tages imod: 2½ time. Samme grænse som i appen (app/js/lydfil.js).
 const MAX_UPLOAD_SEK = 9000;
 const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
 const DAG_MS = 24 * 60 * 60 * 1000;
 const MAX_REFERAT_BYTES = 2 * 1024 * 1024;
 const MAX_DELE = 20;
+// Bidder i alt i /referat: 4 timer i bidder på 30 min. plus småbidder og afbrudte dele.
+const MAX_BIDDER = 40;
+// Referatet af en lang optagelse har sin egen kørsel og må tage længere tid end efter en transskription.
+const REFERAT_DELE_TIMEOUT_MS = 150000;
+const tidsfelt = (v) => Number.isFinite(v) && v >= 0;
 const MARKOER = '\n\n[Optagelsen blev afbrudt her]\n\n';
 
 /** Fjerner kontroltegn og afkorter i hele tegn, så en emoji aldrig deles. */
@@ -88,6 +95,36 @@ function laesTekster(krop) {
   return tekster.map((x) => x.trim()).filter(Boolean);
 }
 
+/** Dele med bidder fra en lang optagelse eller flere filer. null, hvis kroppen ikke er gyldig. */
+function laesDele(krop) {
+  const dele = krop?.dele;
+  if (!Array.isArray(dele) || dele.length < 1 || dele.length > MAX_BIDDER) return null;
+  let antal = 0;
+  for (const d of dele) {
+    if (!d || typeof d !== 'object' || !Array.isArray(d.bidder) || !d.bidder.length) return null;
+    if (d.filnavn !== undefined && typeof d.filnavn !== 'string') return null;
+    if (d.varighedSek !== undefined && !tidsfelt(d.varighedSek)) return null;
+    antal += d.bidder.length;
+    for (const b of d.bidder) {
+      if (!b || typeof b !== 'object' || typeof b.tekst !== 'string') return null;
+      if (![b.startSek, b.overlapSek, b.varighedSek].every(tidsfelt)) return null;
+      if (b.afsnit !== undefined && !(Array.isArray(b.afsnit)
+        && b.afsnit.every((a) => a && typeof a.tekst === 'string' && (a.sek === null || tidsfelt(a.sek))))) return null;
+    }
+  }
+  if (antal > MAX_BIDDER) return null;
+  return dele.map((d) => ({
+    ...(d.filnavn ? { filnavn: renTitel(d.filnavn) } : {}),
+    afbrudt: d.afbrudt === true,
+    ...(d.varighedSek !== undefined ? { varighedSek: d.varighedSek } : {}),
+    bidder: d.bidder.map((b) => ({
+      startSek: b.startSek, overlapSek: b.overlapSek, varighedSek: b.varighedSek, tekst: b.tekst.trim(),
+      ...(b.mangler === true ? { mangler: true } : {}),
+      ...(b.afsnit ? { afsnit: b.afsnit.map((a) => ({ sek: a.sek, tekst: a.tekst.trim() })).filter((a) => a.tekst) } : {}),
+    })),
+  }));
+}
+
 /**
  * POST /transskriber og POST /referat. Virker med både node:http og node:http2 compat.
  * Adgangstjekket er det første, der sker, før kroppen læses.
@@ -109,17 +146,17 @@ function lavHandler({
 
   /** Referat, PDF og mail af en tekst. Fælles for én optagelse og flere dele. */
   async function lavResultat({
-    tekst, afsnit, titel, type, varighedSek, tidspunkt, signal,
+    tekst, afsnit, titel, type, varighedSek, tidspunkt, signal, dele = [], huller = 0, timeoutMs,
   }, spor) {
     log({ haendelse: 'referat-kald' });
     spor.trin = 'referat';
     // Emnerne bruges kun til bilaget i PDF og Word. Appen får dem ikke.
     const { emner = [], ...r } = await referat.lav({
-      tekst, titel, type, varighedSek, signal, ...(afsnit ? { afsnit } : {}),
+      tekst, titel, type, varighedSek, signal, ...(afsnit ? { afsnit } : {}), ...(timeoutMs ? { timeoutMs } : {}),
     });
     spor.trin = 'pdf';
     const indhold = {
-      titel: r.titel, tidspunkt, varighedSek, referat: r, tekst, bilag: lavBilag(afsnit || [], emner),
+      titel: r.titel, tidspunkt, varighedSek, referat: r, tekst, bilag: lavBilag(afsnit || [], emner, dele),
     };
     const fil = await pdf.lavPdf(indhold);
     const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
@@ -134,7 +171,7 @@ function lavHandler({
       filnavn,
       ...word,
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
-      html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx) }),
+      html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx), huller }),
     };
   }
 
@@ -169,6 +206,8 @@ function lavHandler({
 
   function sendFejl(res, cors, e, trin) {
     const kode = logFejl(e, trin);
+    // Googles filter: appen deler bidden i mindre stykker. Ældre apps læser 422 som før.
+    if (kode === 'format' && e?.googleKode === 'content_blocked') return sendJson(res, cors, 422, { fejl: 'blokeret' });
     if (kode === 'format') return sendJson(res, cors, 422, { fejl: 'kan-ikke-behandles' });
     if (kode === 'noegle') return sendJson(res, cors, 500, { fejl: 'server-ikke-klar' });
     if (kode === 'kvote') return sendJson(res, cors, 503, { fejl: 'kvote' });
@@ -205,19 +244,43 @@ function lavHandler({
     } catch {
       return afvis(res, cors, 400, 'ugyldig-json');
     }
+    const spor = { trin: 'referat' };
+    const faelles = {
+      titel: typeof krop?.titel === 'string' ? renTitel(krop.titel) : '',
+      type: laesType(krop?.type),
+      varighedSek: laesVarighed(krop?.varighedSek),
+      tidspunkt: laesTidspunkt(krop?.optaget),
+      signal: afbryd.signal,
+      timeoutMs: REFERAT_DELE_TIMEOUT_MS,
+    };
+    if (krop && 'dele' in krop) {
+      const dele = laesDele(krop);
+      if (!dele) return afvis(res, cors, 400, 'ugyldige-dele');
+      const samlet = samlDele(dele);
+      // Kun huller eller ingen tale: intet referat, appen viser "ingen tale" som før.
+      if (!samlet.tekst.trim() || samlet.huller === dele.reduce((n, d) => n + d.bidder.length, 0)) return sendJson(res, cors, 200, { tekst: '' });
+      const varighed = faelles.varighedSek ?? (samlet.varighedSek !== null ? laesVarighed(samlet.varighedSek) : null);
+      let afsnit = samlet.afsnit;
+      try {
+        afsnit = delLangeAfsnit(samlet.afsnit, varighed);
+      } catch { /* bilaget får afsnittene, som de er */ }
+      try {
+        return sendJson(res, cors, 200, await lavResultat({
+          ...faelles, varighedSek: varighed, tekst: samlet.tekst, afsnit, dele: samlet.dele, huller: samlet.huller,
+        }, spor));
+      } catch (e) {
+        return sendFejl(res, cors, e, spor.trin);
+      }
+    }
+
     const tekster = laesTekster(krop);
     if (!tekster) return afvis(res, cors, 400, 'ugyldige-tekster');
     if (!tekster.length) return sendJson(res, cors, 200, { tekst: '' });
 
-    const spor = { trin: 'referat' };
     try {
       sendJson(res, cors, 200, await lavResultat({
+        ...faelles,
         tekst: tekster.join(MARKOER),
-        titel: typeof krop.titel === 'string' ? renTitel(krop.titel) : '',
-        type: laesType(krop.type),
-        varighedSek: laesVarighed(krop.varighedSek),
-        tidspunkt: laesTidspunkt(krop.optaget),
-        signal: afbryd.signal,
       }, spor));
     } catch (e) {
       sendFejl(res, cors, e, spor.trin);
@@ -239,7 +302,7 @@ function lavHandler({
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler, x-afsnit',
         'access-control-max-age': '600',
       });
       res.end();
@@ -286,7 +349,11 @@ function lavHandler({
       // Appens tekst følger Flashs afsnit. Lange afsnit deles kun til referatets emner og bilaget.
       const tekst = samletTekst(fraFlash);
       // En del af en afbrudt optagelse: referatet laves først af alle dele via /referat.
-      if (!tekst || req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst });
+      if (!tekst || req.headers['x-kun-tekst'] === '1') {
+        // En bid af en lang optagelse: tiderne (rettet med bidens længde) samles i /referat.
+        if (req.headers['x-afsnit'] === '1' && req.headers['x-kun-tekst'] === '1') return sendJson(res, cors, 200, { tekst, afsnit: fraFlash });
+        return sendJson(res, cors, 200, { tekst });
+      }
       // Transskriptionen er betalt: fejler delingen, bruges Flashs afsnit som de er.
       let afsnit = fraFlash;
       try {

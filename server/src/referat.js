@@ -71,14 +71,19 @@ const REGLER = [
   'Fjern fyldord, gentagelser, small talk og afbrydelser.',
 ];
 
-const EMNE_REGLER = [
-  'Del også transskriptionen i emner i feltet emner, ca. ét emne pr. 3-5 minutter, mindst 2 og højst 20:',
+// Højst 20 emner, men ved lange optagelser ca. ét pr. 5 min. (3 timer: 36), aldrig over 40.
+function maksEmner(varighedSek) {
+  return Number.isFinite(varighedSek) ? Math.min(40, Math.max(20, Math.ceil(varighedSek / 300))) : 20;
+}
+
+const emneRegler = (maks) => [
+  `Del også transskriptionen i emner i feltet emner, ca. ét emne pr. 3-5 minutter, mindst 2 og højst ${maks}:`,
   '- tid: tidspunktet for det afsnit, hvor emnet begynder, præcis som det står i transskriptionen (fx "04:26").',
   '- undertitel: 2-6 ord, der KUN beskriver, hvad der faktisk bliver sagt i emnet. Intet opfundet og ingen vurdering.',
   'Tidspunkterne i [mm:ss] viser kun, hvor i lyden afsnittene begynder. Skriv ikke tidspunkterne i referatet.',
 ];
 
-function opgaveDel({ kort, type, emner }) {
+function opgaveDel({ kort, type, emner, varighedSek }) {
   const automatisk = type === 'automatisk';
   const huskeliste = `skriv også i feltet huskeliste: ${FELTER.huskeliste.vejledning}`;
   if (kort) {
@@ -100,11 +105,11 @@ function opgaveDel({ kort, type, emner }) {
     del.push(...VALGBARE.map((t) => `- ${t}: ${AFSNIT[t].map((a) => a.felt).join(', ')}`));
   }
   del.push('Lad en liste være tom, hvis der ikke er noget til den.');
-  if (emner) del.push('', ...EMNE_REGLER);
+  if (emner) del.push('', ...emneRegler(maksEmner(varighedSek)));
   return del;
 }
 
-function lavPrompt({ tekst, titel, kort, type = 'automatisk', emner = false }) {
+function lavPrompt({ tekst, titel, kort, type = 'automatisk', emner = false, varighedSek }) {
   const titelDel = titel
     ? `Brugerens titel på optagelsen: "${titel}". Brug den som titel.`
     : 'Brugeren har ikke givet optagelsen en titel. Lav selv en kort, sigende titel på 3-8 ord ud fra indholdet.';
@@ -119,7 +124,7 @@ function lavPrompt({ tekst, titel, kort, type = 'automatisk', emner = false }) {
     '',
     ...typeDel,
     '',
-    ...opgaveDel({ kort, type, emner }),
+    ...opgaveDel({ kort, type, emner, varighedSek }),
     '',
     titelDel,
     '',
@@ -198,15 +203,17 @@ function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense, log = ()
      * tekst er transskriptionen uden tidspunkter. afsnit ([{ sek, tekst }], kan mangle) har de rettede
      * tidspunkter, som kun bruges til emnerne. Kontrollen af tal ser aldrig tidspunkterne.
      */
-    async lav({ tekst, titel, type, varighedSek, signal, afsnit }) {
+    async lav({ tekst, titel, type, varighedSek, signal, afsnit, timeoutMs: egenTimeoutMs }) {
+      // /referat af en lang optagelse må tage længere tid end referatet efter en transskription.
+      const graense = Number.isFinite(egenTimeoutMs) && egenTimeoutMs > 0 ? egenTimeoutMs : timeoutMs;
       const renTitel = streng(titel);
       const valgtType = laesType(type);
       const kort = Number.isFinite(varighedSek) && varighedSek < KORT_SEKUNDER;
       const emner = vilEmner({ afsnit, kort, varighedSek, tekst });
       const kilde = emner ? medTider(afsnit) : tekst;
-      const samlet = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+      const samlet = AbortSignal.any([signal, AbortSignal.timeout(graense)]);
       // Genforsøg skal kunne vente færdig inden for referatets egen grænse.
-      const frist = nu() + timeoutMs;
+      const frist = nu() + graense;
       try {
         // Kroppen er en færdig tekst, så referatet kan sikkert bestilles igen.
         const svar = await medGenforsoeg(() => hent(`${BASE}/v1beta/interactions`, {
@@ -215,7 +222,7 @@ function lavReferat({ noegle, model, timeoutMs, hent = hentUdenGraense, log = ()
           headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
-            input: [{ type: 'text', text: lavPrompt({ tekst: kilde, titel: renTitel, kort, type: valgtType, emner }) }],
+            input: [{ type: 'text', text: lavPrompt({ tekst: kilde, titel: renTitel, kort, type: valgtType, emner, varighedSek }) }],
             response_format: { type: 'text', mime_type: 'application/json', schema: lavSkema({ type: valgtType, kort, emner }) },
             generation_config: { thinking_level: 'low' },
             // Ellers gemmes referatet i 55 dage hos Google.

@@ -387,7 +387,8 @@ test('varigheden gives til Gemini, så lang lyd kan gå direkte til Flash', asyn
   // En uploadet fil kan være længere end en time. Til modelvalget tæller den stadig som lang.
   await post(s.adresse, { headers: { 'x-varighed': '5400' } });
   assert.equal(s.gemini.valg.varighedSek, 5400);
-  assert.equal(s.referat.valg.varighedSek, null);
+  // Op til 4 timer kommer varigheden også med i referat, PDF og Word.
+  assert.equal(s.referat.valg.varighedSek, 5400);
   for (const v of [undefined, '', 'abc', '-5']) {
     await post(s.adresse, { headers: { 'x-varighed': v } });
     assert.equal(s.gemini.valg.varighedSek, null, String(v));
@@ -417,13 +418,19 @@ for (const format of ['video/mp4', 'audio/x-ms-wma', 'application/octet-stream',
   });
 }
 
-for (const v of ['abc', '-5', '5000', '']) {
+for (const v of ['abc', '-5', '']) {
   test(`ugyldig varighed ignoreres: "${v}"`, async () => {
     const s = await start();
     await post(s.adresse, { headers: { 'x-varighed': v } });
     assert.equal(s.referat.valg.varighedSek, null);
   });
 }
+
+test('en varighed over 4 timer ignoreres i referatet', async () => {
+  const s = await start();
+  await postReferat(s.adresse, { tekster: ['a'], varighedSek: 15000 });
+  assert.equal(s.referat.valg.varighedSek, null);
+});
 
 test('ugyldigt tidspunkt giver nu', async () => {
   const s = await start();
@@ -734,4 +741,99 @@ test('dele af en afbrudt optagelse (x-kun-tekst) logger ingen deling', async () 
   const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-varighed': '600' } })).json();
   assert.deepEqual(j, { tekst: SAMTALE });
   assert.ok(!s.logs.some((l) => JSON.parse(l).haendelse === 'afsnit'));
+});
+
+// Lange optagelser: bidder med tider og ét referat af alle dele
+
+test('x-afsnit sammen med x-kun-tekst giver afsnittene med tider rettet efter bidens længde', async () => {
+  const s = await start({ gemini: medTiderGemini('[00:00] a b c d\n[04:00] e f g h') });
+  const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-afsnit': '1', 'x-varighed': '600' } })).json();
+  assert.deepEqual(j, { tekst: 'a b c d\ne f g h', afsnit: [{ sek: 0, tekst: 'a b c d' }, { sek: 300, tekst: 'e f g h' }] });
+  assert.equal(s.referat.kald, 0);
+});
+
+test('x-afsnit uden tider giver ét afsnit uden tid', async () => {
+  const s = await start();
+  const j = await (await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-afsnit': '1' } })).json();
+  assert.deepEqual(j, { tekst: 'Hej', afsnit: [{ sek: null, tekst: 'Hej' }] });
+});
+
+test('CORS tillader x-afsnit', async () => {
+  const s = await start();
+  const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.ok(svar.headers.get('access-control-allow-headers').includes('x-afsnit'));
+});
+
+test('lyd, som Googles filter blokerer, giver 422 blokeret', async () => {
+  const blokeret = new GeminiFejl('format', 'blokeret', { status: 400, googleKode: 'content_blocked', hvor: 'interactions' });
+  const s = await start({ gemini: falskGemini(async () => { throw blokeret; }) });
+  const svar = await post(s.adresse, { headers: { 'x-kun-tekst': '1' } });
+  assert.equal(svar.status, 422);
+  assert.deepEqual(await svar.json(), { fejl: 'blokeret' });
+});
+
+test('andre formatfejl giver stadig 422 kan-ikke-behandles', async () => {
+  const s = await start({ gemini: falskGemini(async () => { throw new GeminiFejl('format', 'x', { status: 400 }); }) });
+  assert.deepEqual(await (await post(s.adresse)).json(), { fejl: 'kan-ikke-behandles' });
+});
+
+const BIDDELE = [
+  { filnavn: 'Møde_del1.m4a', varighedSek: 3600, bidder: [
+    { startSek: 0, overlapSek: 0, varighedSek: 1800, tekst: 'Første bid.', afsnit: [{ sek: 0, tekst: 'Første bid.' }] },
+    { startSek: 1770, overlapSek: 30, varighedSek: 1830, tekst: 'Anden bid.', afsnit: [{ sek: 60, tekst: 'Anden bid.' }] },
+  ] },
+  { filnavn: 'Møde_del2.m4a', varighedSek: 600, bidder: [
+    { startSek: 0, overlapSek: 0, varighedSek: 600, tekst: 'Anden fil.', afsnit: [{ sek: 10, tekst: 'Anden fil.' }] },
+  ] },
+];
+
+test('/referat med dele laver ét referat med én tidslinje og bilag med overskrifter', async () => {
+  const s = await start();
+  const svar = await postReferat(s.adresse, { dele: BIDDELE, titel: 'Langt møde', varighedSek: 4200, optaget: TID });
+  const j = await svar.json();
+  assert.equal(svar.status, 200);
+  assert.equal(j.tekst, 'Første bid.\nAnden bid.\nAnden fil.');
+  assert.equal(s.referat.kald, 1);
+  assert.deepEqual(s.referat.valg.afsnit.map((a) => a.sek), [0, 1830, 3610]);
+  assert.equal(s.referat.valg.varighedSek, 4200);
+  assert.equal(s.referat.valg.timeoutMs, 150000);
+  assert.deepEqual(s.pdf.valg.bilag.map((g) => g.overskrift ?? null), ['Del 1: Møde_del1.m4a', null, 'Del 2: Møde_del2.m4a']);
+  assert.equal(s.pdf.valg.varighedSek, 4200);
+});
+
+test('/referat med en bid, der mangler, laver referatet af resten og nævner det i mailen', async () => {
+  const s = await start();
+  const dele = [{ bidder: [
+    { startSek: 0, overlapSek: 0, varighedSek: 1800, tekst: 'Før.', afsnit: [{ sek: 0, tekst: 'Før.' }] },
+    { startSek: 1770, overlapSek: 30, varighedSek: 600, tekst: '', mangler: true },
+  ] }];
+  const j = await (await postReferat(s.adresse, { dele })).json();
+  assert.equal(j.tekst, 'Før.\n[Dette stykke kunne ikke transskriberes]');
+  assert.match(j.html, /Et stykke af optagelsen kunne ikke transskriberes/);
+});
+
+test('/referat med kun manglende bidder giver tom tekst og intet referat', async () => {
+  const s = await start();
+  const dele = [{ bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 600, tekst: '', mangler: true }] }];
+  assert.deepEqual(await (await postReferat(s.adresse, { dele })).json(), { tekst: '' });
+  assert.equal(s.referat.kald, 0);
+});
+
+test('/referat afviser mere end 40 bidder og ugyldige dele', async () => {
+  const s = await start();
+  const b = { startSek: 0, overlapSek: 0, varighedSek: 60, tekst: 'a' };
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: Array(41).fill(b) }] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, startSek: -1 }] }] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, tekst: 7 }] }] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, afsnit: [{ sek: 'x', tekst: 'a' }] }] }] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { dele: [] })).status, 400);
+  assert.equal(s.referat.kald, 0);
+});
+
+test('en varighed på 3 timer kommer med i referat, PDF og Word', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-varighed': '5400' } });
+  assert.equal(s.referat.valg.varighedSek, 5400);
+  await postReferat(s.adresse, { tekster: ['a'], varighedSek: 10800 });
+  assert.equal(s.pdf.valg.varighedSek, 10800);
 });

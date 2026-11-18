@@ -498,3 +498,31 @@ test('modellen svarer uden emner: tom liste', async () => {
   const r = await lav(hent).lav({ ...LANG, signal: signal() });
   assert.deepEqual(r.emner, []);
 });
+
+// Lange optagelser
+
+test('højst 20 emner, men ca. ét pr. 5 min. ved lange optagelser (højst 40)', () => {
+  const p = (varighedSek) => lavPrompt({ tekst: '[00:00] Hej', titel: '', kort: false, emner: true, varighedSek });
+  assert.ok(p(3600).includes('højst 20'));
+  assert.ok(p(10800).includes('højst 36'));
+  assert.ok(p(14400 * 2).includes('højst 40'));
+  assert.ok(p(undefined).includes('højst 20'));
+});
+
+test('emnetallet følger optagelsens længde i kaldet til Flash', async () => {
+  const { hent, kald } = falskHent(() => modelSvar({ ...FULDT, emner: EMNER }));
+  await lav(hent).lav({ ...LANG, varighedSek: 10800, signal: signal() });
+  assert.ok(kald[0].krop.input[0].text.includes('højst 36'));
+});
+
+test('tidsgrænsen kan sættes for det enkelte referat', async () => {
+  const hentEfter = (ms) => async (url, valg) => {
+    await new Promise((ok) => setTimeout(ok, ms));
+    if (valg.signal.aborted) throw new DOMException('afbrudt', 'AbortError');
+    return modelSvar(FULDT);
+  };
+  const r = lav(hentEfter(40), { timeoutMs: 5 });
+  await assert.rejects(r.lav({ ...INPUT, signal: signal() }));
+  const ok = await lav(hentEfter(40), { timeoutMs: 5 }).lav({ ...INPUT, signal: signal(), timeoutMs: 60000 });
+  assert.equal(ok.titel, 'Møde om tag');
+});

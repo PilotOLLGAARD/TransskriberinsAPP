@@ -34,7 +34,7 @@ function punktliste(overskrift, punkter) {
 }
 
 /** medWord: false, når Word-dokumentet fejlede. Så sender appen PDF'en i stedet. */
-function lavHtml({ titel, referat: r, medWord = true }) {
+function lavHtml({ titel, referat: r, medWord = true, huller = 0 }) {
   const dele = [`<div style="${STIL}">`, `<h2 style="margin:0 0 8px">${escape(titel)}</h2>`];
   // En påmindelse handler om huskelisten. De andre typer viser hovedpunkterne.
   const liste = r.type === 'paamindelse' ? 'huskeliste' : 'hovedpunkter';
@@ -45,6 +45,8 @@ function lavHtml({ titel, referat: r, medWord = true }) {
     if (r.opsummering) dele.push(`<p>${escape(r.opsummering)}</p>`);
     dele.push(...punktliste(FELTER[liste].overskrift, r[liste]));
   }
+  // Et stykke, som Googles filter afviste: brugeren skal vide, at referatet ikke dækker det.
+  if (huller > 0) dele.push('<p><strong>Et stykke af optagelsen kunne ikke transskriberes. Se bilaget.</strong></p>');
   dele.push(`<p style="color:#5b6470;font-size:14px">Hele referatet og den fulde transskription ligger i ${medWord ? 'det vedhæftede Word-dokument' : 'den vedhæftede PDF'}.</p>`);
   dele.push('</div>');
   return dele.join('\n');
