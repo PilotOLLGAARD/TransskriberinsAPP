@@ -244,6 +244,8 @@ async function koer(miljoe, navn, opsaetning) {
     Object.assign(r, { status, referatMs: Date.now() - t0, fejl: svar?.fejl, tekst: svar?.tekst, referat: svar?.referat, huller: svar?.huller ?? 0 });
     // Overgangene: hvor hver bid (efter den første) begynder i den samlede tekst.
     r.overgange = maalOvergange(facit, r.tekst ?? '', delListe);
+    // Bidernes tekster gemmes (kun lokalt i testlyd/), så samlingen kan prøves igen uden ny transskription.
+    r.dele = delListe;
     if (svar?.docx) fs.writeFileSync(path.join(UD, `${navn}.docx`), Buffer.from(svar.docx, 'base64'));
   }
   r.ms = Date.now() - start;
