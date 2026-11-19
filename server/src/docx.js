@@ -59,9 +59,13 @@ const medTid = (sek, tekst, stil) => `<w:p><w:pPr><w:pStyle w:val="${stil}"/></w
  * Uden undertitel (korte optagelser) står tiden foran hvert afsnit.
  */
 function bilagAfsnit(bilag) {
-  return bilag.flatMap((emne) => (emne.undertitel
-    ? [medTid(emne.sek, emne.undertitel, 'Emne'), ...emne.afsnit.map((a) => afsnit(a, 'Bilagtekst'))]
-    : emne.afsnit.map((a, i) => (i ? afsnit(a, 'Bilagtekst') : medTid(emne.sek, a, 'Tidsafsnit')))));
+  return bilag.flatMap((emne) => {
+    const tid = emne.visSek ?? emne.sek;
+    const del = emne.overskrift ? [afsnit(emne.overskrift, 'Deloverskrift')] : [];
+    return [...del, ...(emne.undertitel
+      ? [medTid(tid, emne.undertitel, 'Emne'), ...emne.afsnit.map((a) => afsnit(a, 'Bilagtekst'))]
+      : emne.afsnit.map((a, i) => (i ? afsnit(a, 'Bilagtekst') : medTid(tid, a, 'Tidsafsnit'))))];
+  });
 }
 
 /** ØLLGAARD-logoet som billede i sit eget afsnit, låst til sit forhold. */
@@ -130,6 +134,10 @@ const TYPOGRAFIER = `${XML}<w:styles xmlns:w="${W}">`
   + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Emne"><w:name w:val="Emne"/><w:basedOn w:val="Normal"/><w:next w:val="Bilagtekst"/>'
   + '<w:pPr><w:keepNext/><w:tabs><w:tab w:val="left" w:pos="960"/></w:tabs><w:spacing w:before="320" w:after="60"/><w:ind w:left="960" w:hanging="960"/></w:pPr>'
   + '<w:rPr><w:b/><w:bCs/><w:color w:val="0E5AA3"/><w:sz w:val="23"/><w:szCs w:val="23"/></w:rPr></w:style>'
+  // "Del 2: filnavn", hvor en ny fil starter i bilaget.
+  + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Deloverskrift"><w:name w:val="Deloverskrift"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>'
+  + '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="400" w:after="80"/></w:pPr>'
+  + '<w:rPr><w:b/><w:bCs/><w:color w:val="0E5AA3"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>'
   + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Bilagtekst"><w:name w:val="Bilagtekst"/><w:basedOn w:val="Normal"/>'
   + '<w:pPr><w:widowControl/><w:spacing w:after="100"/><w:ind w:left="960"/></w:pPr></w:style>'
   + '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Tidsafsnit"><w:name w:val="Tidsafsnit"/><w:basedOn w:val="Normal"/>'

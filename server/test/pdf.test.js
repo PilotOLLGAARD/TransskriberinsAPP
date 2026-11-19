@@ -261,3 +261,19 @@ test('lang optagelse med emner giver en gyldig PDF over flere sider', async () =
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
   assert.ok(sider(pdf) >= 4, `kun ${sider(pdf)} sider`);
 });
+
+test('bilag med dele: overskriften står over filens tekst, og tiden er inden for filen', async () => {
+  const bilag = [
+    { sek: 0, visSek: 0, overskrift: 'Del 1: Møde_del1.m4a', afsnit: ['Første fil.'] },
+    { sek: 2760, visSek: 60, overskrift: 'Del 2: Møde_del2.m4a', afsnit: ['Anden fil.'] },
+  ];
+  const p = await tegnet({ tekst: 'Første fil.\nAnden fil.', bilag });
+  const overskrift = p.find((x) => x.s === 'Del 2: Møde_del2.m4a');
+  const tekst = p.find((x) => x.s === 'Anden fil.');
+  assert.ok(overskrift && tekst);
+  assert.equal(overskrift.font, 'Lato-Bold');
+  assert.equal(overskrift.farve, BLAA_DYB);
+  assert.ok(overskrift.y < tekst.y);
+  assert.ok(p.some((x) => x.s === '01:00'), 'tiden inden for filen');
+  assert.ok(!p.some((x) => x.s === '46:00'), 'ikke tiden fra første fils start');
+});

@@ -1003,3 +1003,31 @@ test('fejler Transcribe efter en blokering hos Flash, gives Flashs fejl videre (
   const { hent } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe: raekke(429) }) });
   await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), langLyd()), (e) => e.status === 400 && e.googleKode === 'content_blocked' && e.kode === 'format');
 });
+
+// En app, der kan dele bidder (x-afsnit), prøver en lang blokeret bid som småbidder på 10 min. med Flash, før
+// Transcribe bruges (testbænken 19. nov. 2026: alle 3 småbidder af en blokeret 30-min.-bid gik gennem Flash med tider;
+// Transcribe koster ca. 6 gange så meget, giver ingen tider og svarede 429 på 30 min.).
+
+test('kan appen dele bidden, og er den over 12 min., gives Flashs blokering straks videre uden Transcribe', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  const logs = [];
+  await assert.rejects(
+    lav(hent, { foerst: 'flash', log: (o) => logs.push(o) }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 1830, smaabidder: true })),
+    (e) => e.status === 400 && e.googleKode === 'content_blocked' && e.kode === 'format',
+  );
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+  assert.ok(logs.some((l) => l.haendelse === 'blokeret-til-smaabidder'));
+});
+
+test('en småbid på op til 12 min., som Flash blokerer, får stadig Transcribe som reserve', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 636, smaabidder: true }));
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
+});
+
+test('uden kendt længde får en blokeret bid stadig Transcribe, også når appen kan dele', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { smaabidder: true }));
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
+});

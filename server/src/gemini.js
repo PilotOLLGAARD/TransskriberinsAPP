@@ -25,6 +25,8 @@ const TRANSCRIBE = 'transcribe';
 const FLASH = 'flash';
 // Flash tager kun over efter 5xx fra Transcribe, hvis der er mindst så meget tid tilbage.
 const FLASH_MIN_MS = 60 * 1000;
+// En blokeret bid over så mange sekunder prøves af appen som småbidder på 10 min. med Flash, før Transcribe bruges.
+const SMAABID_MAKS_SEK = 720;
 // Tidspunkterne bruges kun til at dele bilaget i PDF'en op og fjernes fra teksten bagefter (afsnit.js).
 const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter '
   + 'eller talernavne. Start en ny linje, hver gang en ny person taler, og mindst hvert 30. sekund, også midt i '
@@ -296,7 +298,7 @@ function lavGemini({
      * varighedSek fra telefonen (kan mangle). Lyd over transcribeMaksSek går direkte til Flash,
      * da Transcribe på Tier 1 kun tager 10.000 tokens i minuttet (ca. 6 min. 40 s lyd).
      */
-    async transskriber(strom, { bytes, mime, signal, varighedSek }) {
+    async transskriber(strom, { bytes, mime, signal, varighedSek, smaabidder = false }) {
       planlaegOprydning();
       const lang = Number.isFinite(varighedSek) && varighedSek > transcribeMaksSek;
       const flashFoerst = foerst === 'flash' || lang;
@@ -321,6 +323,11 @@ function lavGemini({
             return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
           } catch (e) {
             const grund = flashSkiftGrund(e, startetFlash, frist, samlet);
+            // Appen kan dele bidden: Flash prøver småbidder, som filteret oftere lader gå (testbænken 19. nov. 2026).
+            if (grund === 'blokeret' && smaabidder && Number.isFinite(varighedSek) && varighedSek > SMAABID_MAKS_SEK) {
+              log({ haendelse: 'blokeret-til-smaabidder' });
+              throw e;
+            }
             // Blokeret indhold kan ikke slås fra hos Flash: Transcribe prøver uanset længde.
             // Overbelastning: kun korte optagelser, da længere er over Transcribes grænse pr. minut.
             if (lang && grund !== 'blokeret') throw e;

@@ -324,3 +324,46 @@ test('lavBilag: med emner lægges linjer uden punktum højst sammen til ca. 150 
   for (const a of bilag[0].afsnit) assert.ok(ord(a).length <= 160);
   assert.deepEqual(ord(bilag[0].afsnit.join(' ')), ord(samletTekst(linjer)));
 });
+
+// Bilaget med dele (flere filer eller en afbrudt optagelse)
+
+const DELAFSNIT = [
+  { sek: 0, tekst: 'Første fil starter.' }, { sek: 40, tekst: 'Første fil slutter.' },
+  { sek: 2700, tekst: 'Anden fil starter.' }, { sek: 2760, tekst: 'Et minut inde i anden fil.' },
+];
+const FILDELE = [
+  { fra: 0, startSek: 0, overskrift: 'Del 1: Møde_del1.m4a' },
+  { fra: 2, startSek: 2700, overskrift: 'Del 2: Møde_del2.m4a' },
+];
+
+test('lavBilag: hver del starter en ny gruppe med sin overskrift', () => {
+  const b = lavBilag(DELAFSNIT, [], FILDELE);
+  assert.deepEqual(b.map((g) => g.overskrift ?? null), ['Del 1: Møde_del1.m4a', null, 'Del 2: Møde_del2.m4a', null]);
+});
+
+test('lavBilag: tiden vises inden for filen', () => {
+  const b = lavBilag(DELAFSNIT, [], FILDELE);
+  assert.deepEqual(b.map((g) => g.visSek), [0, 40, 0, 60]);
+  assert.deepEqual(b.map((g) => g.sek), [0, 40, 2700, 2760]);
+});
+
+test('lavBilag: et emne, der går over i næste fil, fortsætter med samme undertitel', () => {
+  const b = lavBilag(DELAFSNIT, [{ fra: 0, undertitel: 'Tag' }, { fra: 3, undertitel: 'Facade' }], FILDELE);
+  assert.deepEqual(b.map((g) => [g.overskrift ?? null, g.undertitel, g.afsnit.length]), [
+    ['Del 1: Møde_del1.m4a', 'Tag', 2],
+    ['Del 2: Møde_del2.m4a', 'Tag', 1],
+    [null, 'Facade', 1],
+  ]);
+});
+
+test('lavBilag: en afbrudt optagelse uden filnavne beholder tiden fra optagelsens start', () => {
+  const b = lavBilag(DELAFSNIT, [], [{ fra: 0, startSek: 0, overskrift: null }, { fra: 2, startSek: 2700, overskrift: null }]);
+  assert.equal(b[2].sek, 2700);
+  assert.equal(b[2].visSek, undefined);
+  assert.equal(b[2].overskrift, undefined);
+  assert.equal(b.length, 4, 'ny gruppe ved delens start');
+});
+
+test('lavBilag: med kun én del uden navn er bilaget som før', () => {
+  assert.deepEqual(lavBilag(AFSNIT, [], [{ fra: 0, startSek: 0, overskrift: null }]), lavBilag(AFSNIT, []));
+});
