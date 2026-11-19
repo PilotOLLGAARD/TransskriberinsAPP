@@ -58,15 +58,20 @@ export async function lavIndeks(kilde) {
     if (tag[0] === 0x54 && tag[1] === 0x41 && tag[2] === 0x47) slut -= 128;
   }
 
-  // Første ramme: dens hoved og det næste skal begge være gyldige, så støj ikke tages for en ramme.
-  for (let spring = 0; ; pos++, spring++) {
-    if (spring > MAKS_SPRING || pos + 4 > slut) return null;
-    const { buf, i } = await hent(pos, 4);
-    const h = hoved(buf, i);
-    if (!h) continue;
-    const naeste = await hent(pos + h.laengde, 4);
-    if (pos + h.laengde === slut || (naeste.ok && hoved(naeste.buf, naeste.i))) break;
+  /** Næste ramme fra fra: dens hoved og det næste skal begge være gyldige, så støj ikke tages for en ramme. -1 uden. */
+  async function synk(fra) {
+    for (let p = fra; p <= fra + MAKS_SPRING && p + 4 <= slut; p++) {
+      const { buf, i } = await hent(p, 4);
+      const h = hoved(buf, i);
+      if (!h) continue;
+      const naeste = await hent(p + h.laengde, 4);
+      if (p + h.laengde === slut || (naeste.ok && hoved(naeste.buf, naeste.i))) return p;
+    }
+    return -1;
   }
+
+  pos = await synk(pos);
+  if (pos < 0) return null;
 
   const enheder = [];
   let tidUs = 0;
@@ -74,7 +79,17 @@ export async function lavIndeks(kilde) {
   while (pos + 4 <= slut) {
     const { buf, i } = await hent(pos, 4);
     const h = hoved(buf, i);
-    if (!h) break;
+    if (!h) {
+      // Et ødelagt stykke (eller et ID3-mærke) midt i filen springes over. Findes der ingen ramme bagefter, er det
+      // kun støj til sidst. Er der meget mere fil, kan den ikke læses sikkert: så sendes den hel (null).
+      const videre = await synk(pos);
+      if (videre >= 0) {
+        pos = videre;
+        continue;
+      }
+      if (slut - pos > MAKS_SPRING) return null;
+      break;
+    }
     const helt = await hent(pos, Math.min(h.laengde, 64));
     if (foerste && erVbrHoved(helt.buf, helt.i, h.laengde)) {
       foerste = false;

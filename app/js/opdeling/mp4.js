@@ -43,11 +43,17 @@ function find(b, kasse, sti) {
 const alle = (b, kasse, type) => kasser(b, kasse.data, kasse.slut).filter((k) => k.type === type);
 
 /** Kasserne på øverste niveau, kun deres hoveder: [{ type, start, data, slut }]. */
-async function topKasser(kilde) {
+/** Bytes [fra, fra + antal) som en kopi, læst gennem blok-læseren. */
+async function laesKopi(hent, fra, antal) {
+  const { buf, i } = await hent(fra, antal);
+  return buf.slice(i, i + antal);
+}
+
+async function topKasser(kilde, hent) {
   const ud = [];
   let p = 0;
   while (p + 8 <= kilde.stoerrelse) {
-    const h = await kilde.laes(p, p + 16);
+    const h = await laesKopi(hent, p, Math.min(16, kilde.stoerrelse - p));
     let str = u32(h, 0);
     let hoved = 8;
     if (str === 1) {
@@ -68,10 +74,12 @@ function tidsskala(moov, mdhd) {
 }
 
 export async function lavIndeks(kilde) {
-  const top = await topKasser(kilde);
+  // Lageret på telefonen er langsomt pr. kald: kasserne læses gennem blokke på 1 MB.
+  const hent = lavLaeser(kilde);
+  const top = await topKasser(kilde, hent);
   const moovKasse = top.find((k) => k.type === 'moov' && k.hel);
   if (!moovKasse || top[0]?.type !== 'ftyp') return null;
-  const moov = await kilde.laes(moovKasse.start, moovKasse.slut);
+  const moov = await laesKopi(hent, moovKasse.start, moovKasse.slut - moovKasse.start);
   // moov's egne børn: bufferen starter med moov's hoved.
   const rod = { data: moovKasse.data - moovKasse.start, slut: moov.length };
   const spor = alle(moov, rod, 'trak');
@@ -81,13 +89,13 @@ export async function lavIndeks(kilde) {
   const skala = tidsskala(moov, mdhd);
   if (!skala) return null;
   return find(moov, rod, ['mvex'])
-    ? fragmenteret(kilde, top, moov, rod, skala)
+    ? fragmenteret(hent, top, moov, rod, skala)
     : almindelig(kilde, top, moov, rod, spor[0], skala);
 }
 
 // Fragmenteret MP4
 
-async function fragmenteret(kilde, top, moov, rod, skala) {
+async function fragmenteret(hent, top, moov, rod, skala) {
   const trex = find(moov, rod, ['mvex', 'trex']);
   const standardVarighed = trex ? u32(moov, trex.data + 12) : 0;
   const enheder = [];
@@ -98,7 +106,7 @@ async function fragmenteret(kilde, top, moov, rod, skala) {
     if (k.type !== 'moof' || !k.hel) continue;
     const mdat = top[n + 1];
     if (!mdat || mdat.type !== 'mdat' || !mdat.hel) break;
-    const moof = await kilde.laes(k.start, k.slut);
+    const moof = await laesKopi(hent, k.start, k.slut - k.start);
     const traf = find(moof, { data: 8, slut: moof.length }, ['traf']);
     const tfhd = traf && find(moof, traf, ['tfhd']);
     if (!tfhd) return null;
@@ -147,22 +155,26 @@ function mehdPos(moov, rod, top) {
 
 async function bidFragmenteret(kilde, indeks, { fraEnhed, tilEnhed }) {
   const { enheder, hoved } = indeks;
-  const start = await kilde.laes(0, hoved.slut);
+  const hent = lavLaeser(kilde);
+  const start = await laesKopi(hent, 0, hoved.slut);
   if (hoved.mehd >= 0) {
     const pos = hoved.mehd;
     start.fill(0, pos + 4, pos + 4 + (start[pos] === 1 ? 8 : 4));
   }
   const base = enheder[fraEnhed].tid;
+  // Hele bidden hentes i ét udsnit (én læsning i lageret); fragmenterne er udsnit af det.
+  const fra0 = enheder[fraEnhed].fra;
+  const helt = await kilde.udsnit(fra0, enheder[tilEnhed - 1].til);
   const dele = [start];
   for (let e = fraEnhed; e < tilEnhed; e++) {
     const u = enheder[e];
-    const moof = await kilde.laes(u.fra, u.moofTil);
+    const moof = new Uint8Array(await helt.slice(u.fra - fra0, u.moofTil - fra0).arrayBuffer());
     if (u.tfdtPos >= 0) {
       const v = new DataView(moof.buffer, moof.byteOffset, moof.byteLength);
       if (u.tfdtV === 1) v.setBigUint64(u.tfdtPos, BigInt(u.tid - base));
       else v.setUint32(u.tfdtPos, u.tid - base);
     }
-    dele.push(moof, await kilde.udsnit(u.moofTil, u.til));
+    dele.push(moof, helt.slice(u.moofTil - fra0, u.til - fra0));
   }
   return new Blob(dele, { type: 'audio/mp4' });
 }
@@ -294,7 +306,7 @@ async function bidAlmindelig(kilde, indeks, { fraEnhed, tilEnhed }) {
       if (t.type === 'tkhd') return medVarighed(moov, t, [20, 28], filmVarighed);
       if (t.type !== 'mdia') return kopi(t);
       return byg('mdia', ...kasser(moov, t.data, t.slut).map((m) => {
-        if (m.type === 'mdhd') return medVarighed(moov, m, [16, 28], ticks);
+        if (m.type === 'mdhd') return medVarighed(moov, m, [16, 24], ticks);
         if (m.type !== 'minf') return kopi(m);
         return byg('minf', ...kasser(moov, m.data, m.slut).map((x) => (x.type === 'stbl' ? nyStbl(offsets) : kopi(x))));
       }));

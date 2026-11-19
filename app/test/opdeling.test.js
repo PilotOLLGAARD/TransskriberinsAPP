@@ -306,3 +306,90 @@ test('mp4: to spor giver null', async () => {
   const ud = new Uint8Array([...b.subarray(0, moov.start), ...nyMoov]);
   assert.equal(await lavIndeks(blobKilde(new Blob([ud])), 'audio/mp4'), null);
 });
+
+test('mp4: mdhd version 1 får bidens varighed og beholder sproget', async () => {
+  const b = await bytes(lyd('tone-moov-sidst.m4a'));
+  const moov = kasser(b).find((k) => k.type === 'moov');
+  const mdhd = find(b, moov, ['trak', 'mdia', 'mdhd']);
+  const d = new DataView(b.buffer, b.byteOffset);
+  const skala = d.getUint32(mdhd.data + 12);
+  const sprog = [...b.subarray(mdhd.data + 20, mdhd.data + 24)];
+  // Samme mdhd som version 1: 64-bit tider. Kassen vokser 12 bytes, og det gør dens forfædre også.
+  const ny = new Uint8Array(44);
+  const v = new DataView(ny.buffer);
+  v.setUint32(0, 44); ny.set(new TextEncoder().encode('mdhd'), 4); ny[8] = 1;
+  v.setUint32(28, skala); v.setBigUint64(32, BigInt(d.getUint32(mdhd.data + 16))); ny.set(sprog, 40);
+  const ud = new Uint8Array(b.length + 12);
+  ud.set(b.subarray(0, mdhd.start));
+  ud.set(ny, mdhd.start);
+  ud.set(b.subarray(mdhd.slut), mdhd.start + 44);
+  const uv = new DataView(ud.buffer);
+  for (const k of [moov, find(b, moov, ['trak']), find(b, moov, ['trak', 'mdia'])]) uv.setUint32(k.start, uv.getUint32(k.start) + 12);
+
+  const kilde = blobKilde(new Blob([ud]));
+  const i = await lavIndeks(kilde, 'audio/mp4');
+  const plan = planlaegBidder(i.varighedMs, i.enheder, LILLE);
+  const bid = await bytes(await lavBid(kilde, i, plan[1]));
+  const bm = find(bid, kasser(bid).find((k) => k.type === 'moov'), ['trak', 'mdia', 'mdhd']);
+  const bv = new DataView(bid.buffer, bid.byteOffset);
+  assert.equal(bid[bm.data], 1);
+  const varighed = Number(bv.getBigUint64(bm.data + 24));
+  assert.ok(Math.abs((varighed / skala) * 1000 - (plan[1].slutMs - plan[1].startMs)) < 1100, `varighed ${varighed}`);
+  assert.deepEqual([...bid.subarray(bm.data + 32, bm.data + 36)], sprog);
+});
+
+// Ødelagte steder midt i filen: hellere null (sendes hel) end en fil, der stille bliver kortere
+
+const indsaet = (b, pos, stykke) => new Uint8Array([...b.subarray(0, pos), ...stykke, ...b.subarray(pos)]);
+
+test('mp3: lidt støj midt i filen springes over, og resten af filen kommer med', async () => {
+  const b = await bytes(lyd('tone.mp3'));
+  const foer = await lavIndeks(blobKilde(new Blob([b])), 'audio/mpeg');
+  const ud = indsaet(b, foer.enheder[10].fra, new Uint8Array(500));
+  const efter = await lavIndeks(blobKilde(new Blob([ud])), 'audio/mpeg');
+  assert.ok(efter, 'kan stadig indekseres');
+  assert.ok(Math.abs(efter.varighedMs - foer.varighedMs) < 100, `${efter.varighedMs} mod ${foer.varighedMs}`);
+});
+
+test('mp3: et langt ødelagt stykke midt i filen giver null i stedet for en kortere fil', async () => {
+  const b = await bytes(lyd('tone.mp3'));
+  const foer = await lavIndeks(blobKilde(new Blob([b])), 'audio/mpeg');
+  const ud = indsaet(b, foer.enheder[10].fra, new Uint8Array(200 * 1024));
+  assert.equal(await lavIndeks(blobKilde(new Blob([ud])), 'audio/mpeg'), null);
+});
+
+test('webm: et ødelagt stykke mellem to klynger giver null i stedet for en kortere fil', async () => {
+  const b = await bytes(lyd('optagelse.webm'));
+  const foer = await lavIndeks(blobKilde(new Blob([b])), 'audio/webm');
+  const ud = indsaet(b, foer.enheder[1].fra, new Uint8Array(1000));
+  assert.equal(await lavIndeks(blobKilde(new Blob([ud])), 'audio/webm'), null);
+});
+
+test('en optagelse, der blev afbrudt midt i det sidste stykke, kan stadig klippes', async () => {
+  for (const [navn, mime] of [['optagelse.webm', 'audio/webm'], ['optagelse.mp4', 'audio/mp4']]) {
+    const b = await bytes(lyd(navn));
+    const i = await lavIndeks(blobKilde(new Blob([b.subarray(0, b.length - 300)])), mime);
+    assert.ok(i && i.varighedMs > 0, `${navn} kan læses`);
+  }
+});
+
+test('mp4f: indekset læses i store blokke, ikke én læsning pr. kasse (lageret på telefonen er langsomt)', async () => {
+  const kilde = blobKilde(lyd('optagelse.mp4'));
+  let kald = 0;
+  const taeller = { ...kilde, laes: (...a) => { kald++; return kilde.laes(...a); } };
+  assert.ok(await lavIndeks(taeller, 'audio/mp4'));
+  assert.ok(kald <= 4, `${kald} læsninger`);
+});
+
+test('mp4f og webm: en bid hentes fra lageret i ét udsnit, ikke ét pr. fragment eller klynge', async () => {
+  for (const [navn, mime, valg] of [['optagelse.mp4', 'audio/mp4', KORT], ['optagelse.webm', 'audio/webm', { bidMs: 10000, overlapMs: 2000, delFraMs: 12000 }]]) {
+    const kilde = blobKilde(lyd(navn));
+    let udsnit = 0;
+    const taeller = { ...kilde, udsnit: (...a) => { udsnit++; return kilde.udsnit(...a); } };
+    const i = await lavIndeks(taeller, mime);
+    const p = planlaegBidder(i.varighedMs, i.enheder, valg)[1];
+    assert.ok(p.tilEnhed - p.fraEnhed >= 2, 'bidden har flere enheder');
+    await lavBid(taeller, i, p);
+    assert.equal(udsnit, 1, `${navn}: ${udsnit} udsnit`);
+  }
+});

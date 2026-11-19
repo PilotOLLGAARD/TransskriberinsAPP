@@ -11,6 +11,8 @@ const ID = {
 };
 // Elementer på Segment-niveau. Mødes de inde i en klynge af ukendt størrelse, er klyngen slut.
 const SEGMENT_NIVEAU = new Set([0x114d9b74, ID.INFO, ID.TRACKS, 0x1c53bb6b, ID.CLUSTER, 0x1254c367, 0x1043a770, 0x1941a469]);
+// Højst så meget må mangle til sidst: en halvt skrevet blok eller et halvt elementhoved.
+const SLUT_TOLERANCE = 8 * 1024;
 const UKENDT_SEGMENT = new Uint8Array([0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
 
 /** Et element på pos: { id, data, slut } (slut null ved ukendt størrelse), eller null. */
@@ -83,19 +85,31 @@ export async function lavIndeks(kilde) {
   const enheder = [];
   let sidsteTid = 0;
   let pos = segment.data;
+  // Kun det sidste, halvt skrevne element må mangle (appen blev lukket midt i et stykke).
+  const naerSlut = (p) => segSlut - p <= SLUT_TOLERANCE;
   while (pos < segSlut) {
     const el = await element(hent, pos, segSlut);
-    if (!el) break;
+    // Et ødelagt stykke midt i filen: klyngerne bagefter kan ikke findes sikkert. Så sendes filen hel (null).
+    if (!el) {
+      if (!naerSlut(pos)) return null;
+      break;
+    }
     if (el.id === ID.CLUSTER) {
       const k = await laesKlynge(hent, el, segSlut);
-      if (!k.tidskode) break;
+      if (!k.tidskode) {
+        if (!naerSlut(pos)) return null;
+        break;
+      }
       const tidMs = Math.round((k.tidskode.vaerdi * skala) / 1e6);
       enheder.push({ tidMs, fra: el.start, til: k.slut, blokFra: k.tidskode.pos + k.tidskode.laengde, tidskode: k.tidskode });
       sidsteTid = Math.round(((k.tidskode.vaerdi + k.sidsteBlok) * skala) / 1e6);
       pos = k.slut;
       continue;
     }
-    if (el.slut === null || !el.helt) break;
+    if (el.slut === null || !el.helt) {
+      if (el.slut === null) return null;
+      break;
+    }
     if (el.id === ID.INFO) {
       info = el;
       for (let p = el.data; p < el.slut;) {
@@ -126,12 +140,15 @@ export async function lavBid(kilde, indeks, { fraEnhed, tilEnhed }) {
   }
   const dele = [await kilde.laes(0, ebml.slut), UKENDT_SEGMENT, infoBytes, await kilde.laes(spor.start, spor.slut)];
   const base = indeks.enheder[fraEnhed].tidskode.vaerdi;
+  // Hele bidden hentes i ét udsnit (én læsning i lageret); klyngerne er udsnit af det.
+  const fra0 = indeks.enheder[fraEnhed].fra;
+  const helt = await kilde.udsnit(fra0, indeks.enheder[tilEnhed - 1].til);
   for (let e = fraEnhed; e < tilEnhed; e++) {
     const u = indeks.enheder[e];
-    const hoved = await kilde.laes(u.fra, u.blokFra);
+    const hoved = new Uint8Array(await helt.slice(u.fra - fra0, u.blokFra - fra0).arrayBuffer());
     let v = u.tidskode.vaerdi - base;
     for (let k = u.tidskode.laengde - 1; k >= 0; k--, v = Math.floor(v / 256)) hoved[u.tidskode.pos - u.fra + k] = v % 256;
-    dele.push(hoved, await kilde.udsnit(u.blokFra, u.til));
+    dele.push(hoved, helt.slice(u.blokFra - fra0, u.til - fra0));
   }
   return new Blob(dele, { type: 'audio/webm' });
 }
