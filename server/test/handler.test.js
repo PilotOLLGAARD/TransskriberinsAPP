@@ -838,3 +838,15 @@ test('en varighed på 3 timer kommer med i referat, PDF og Word', async () => {
   await postReferat(s.adresse, { tekster: ['a'], varighedSek: 10800 });
   assert.equal(s.pdf.valg.varighedSek, 10800);
 });
+
+test('x-smaabidder fortæller Gemini-delen, at appen kan dele en blokeret bid', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-afsnit': '1', 'x-smaabidder': '1', 'x-varighed': '1800' } });
+  assert.equal(s.gemini.valg.smaabidder, true);
+  await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-afsnit': '1', 'x-varighed': '1800' } });
+  assert.equal(s.gemini.valg.smaabidder, false);
+  const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.ok(svar.headers.get('access-control-allow-headers').includes('x-smaabidder'));
+  await post(s.adresse, { headers: { 'x-varighed': '1800' } });
+  assert.equal(s.gemini.valg.smaabidder, false);
+});

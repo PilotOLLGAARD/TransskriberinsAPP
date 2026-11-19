@@ -304,7 +304,7 @@ function lavHandler({
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler, x-afsnit',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler, x-afsnit, x-smaabidder',
         'access-control-max-age': '600',
       });
       res.end();
@@ -343,8 +343,10 @@ function lavHandler({
     // gemini-kald logges af Gemini-delen, som kender modellen.
     const spor = { trin: 'transskription' };
     try {
+      // Appen kan selv dele denne bid i småbidder, hvis Googles filter blokerer den.
+      const smaabidder = req.headers['x-smaabidder'] === '1';
       const { tekst: raa } = await gemini.transskriber(vagt, {
-        bytes, mime, signal: afbryd.signal, varighedSek: varighed,
+        bytes, mime, signal: afbryd.signal, varighedSek: varighed, smaabidder,
       });
       // Flashs tidspunkter deler kun bilaget op. Alt andet bruger teksten uden dem.
       const fraFlash = skalerTider(laesAfsnit(raa), varighed);
