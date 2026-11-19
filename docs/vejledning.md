@@ -154,7 +154,9 @@ gcloud secrets versions add gemini-api-key --data-file=-
 
 Serveren transskriberer med Gemini 3.8 Flash. Gemini 3.5 Transcribe tager over, hvis Flash rammer en grænse (kun op til 400 s lyd) eller Googles indholdsfilter (alle længder). Derefter laver serveren et referat med Gemini 3.8 Flash, et Word-dokument med ØLLGAARD-logo og en PDF med logo og skriften Lato. Hele transskriptionen ligger som bilag i begge, delt i emner med tidspunkt og undertitel. Mailen har kun Word-dokumentet. PDF'en sendes kun som reserve, hvis Word-dokumentet mangler, og bruges af ældre app-udgaver. Intet gemmes på serveren eller hos Google (`store: false`). Hele kæden koster ca. 0,01 USD for 5 minutter og 0,11 USD for en time.
 
-Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes aldrig.
+Grænser: højst 4 timer pr. optagelse og højst 500 MB pr. lydfil (ogg, flac og aac højst 2½ time). Op til 10 lydfiler kan vælges på én gang og bliver til ét referat. Lyden omkodes aldrig.
+
+**Lange optagelser:** En del over 35 min. klippes på telefonen i bidder på 30 min. med 30 s overlap (`app/js/opdeling/`). Der klippes kun mellem hele lydrammer, så lyden er den samme. Hver bid sendes til `POST /transskriber` med `x-kun-tekst: 1` og `x-afsnit: 1`, højst 3 ad gangen, og teksten gemmes på telefonen, så snart den kommer. `POST /referat` får alle bidder som `dele`, fjerner overlappet (`server/src/samling.js`) og laver ét referat med én tidslinje. Blokerer Googles filter en bid, prøves den i bidder på 10 min.; en bid, der stadig blokeres, står som "[Dette stykke kunne ikke transskriberes]", og mailen nævner det. Et møde på 3 timer koster ca. 0,37 USD (fra 1.1.2027 ca. det dobbelte).
 
 **Lydfil fra telefonens optager:**
 - **Android:** Appen står i Del-menuen (`share_target` i `app/manifest.webmanifest`), når den er lagt på startskærmen fra Chrome. Service workeren lægger filen i Cache Storage og åbner appen med `?delt=1`. Appen kontrollerer og gemmer filen straks og åbner navneskærmen. Kopien i Cache Storage slettes først, når filen er gemt i IndexedDB. Ved fuldt lager eller læsefejl bevares den og prøves igen ved næste start.
@@ -162,7 +164,7 @@ Grænser: højst 500 MiB og 2½ time pr. optagelse eller lydfil. Lyden omkodes a
 
 Formatet afgøres af filens første bytes, ikke af MIME-typen fra den app, der deler.
 
-En afbrudt optagelse, der er fortsat, består af flere dele. Hver del sendes til `POST /transskriber` med `x-kun-tekst: 1` og transskriberes for sig. Derefter laver `POST /referat` ét referat af delteksterne, samlet med "[Optagelsen blev afbrudt her]". Serveren gemmer heller ikke her noget.
+En afbrudt optagelse, der er fortsat, og flere lydfiler består af flere dele. Hver del sendes i bidder som ovenfor. `POST /referat` samler delene: afbrudte dele med "[Optagelsen blev afbrudt her]", filer med overskriften "Del 2: filnavn" i bilaget. Serveren gemmer heller ikke her noget.
 
 ### Sletteregler
 

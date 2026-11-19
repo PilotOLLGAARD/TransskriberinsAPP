@@ -42,7 +42,7 @@ Tryk ikke på "Kan redigeres" under Indstillinger. Så bliver filen ikke en m4a.
 
 Appen står kun i Del-menuen, når den er lagt på startskærmen. Du kan også bruge **Upload lydfil** på Android.
 
-Lydfilen må højst være 500 MB og 2½ time. Er du ikke logget ind, gemmes filen alligevel, og den sendes, når du har logget ind.
+Lydfilen må højst være 500 MB og 4 timer. Du kan vælge flere lydfiler på én gang (højst 10). Så ser du en liste, hvor du kan ændre rækkefølgen med pilene, og filerne bliver til ét referat. Er du ikke logget ind, gemmes filerne alligevel, og de sendes, når du har logget ind.
 
 ## Typer
 
@@ -83,7 +83,7 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 | Du skal logge ind igen | Tryk på Log ind og prøv igen |
 | Appen må ikke bruge mikrofonen | Giv appen tilladelse i telefonens indstillinger |
 | Optagelsen blev afbrudt. Det optagede er gemt | Tryk Fortsæt optagelsen for at optage videre, eller Send for at få referat af det, der er optaget |
-| Optagelsen kan ikke fortsættes mere | Send den, og start en ny. Grænsen er 59 minutter eller 20 dele |
+| Optagelsen kan ikke fortsættes mere | Send den, og start en ny. Grænsen er 4 timer eller 20 dele |
 | Din konto har ikke adgang | Kontakt IT |
 | Det lykkedes ikke at lave referatet | Tryk på Prøv igen. Navnet er gemt |
 | Mailen blev ikke sendt | Tryk på Send igen |
@@ -92,7 +92,8 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 
 ## Godt at vide
 
-- En optagelse kan højst vare 59 minutter. Den stopper selv og bliver gemt.
+- En optagelse kan vare op til 4 timer. Den stopper selv og bliver gemt. Ved lange møder: sæt telefonen til opladning, og lad skærmen være tændt.
+- Et langt møde tager nogle minutter at lave referat af. Hold appen åben imens.
 - Telefonen er ikke en sikkerhedskopi. Mister du den, er optagelser, der ikke er sendt, væk.
 - Svar Ja, når Microsoft spørger "Vil du forblive logget på?".
 - Er du ikke logget ind, står det øverst på startskærmen. Tryk **Log ind med din ØLLGAARD-konto**. Du kan altid optage først. Optagelser, der venter på login, sendes af sig selv, når du er logget ind.

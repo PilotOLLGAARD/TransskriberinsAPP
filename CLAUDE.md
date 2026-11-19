@@ -13,7 +13,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - Alle ansatte i ØLLGAARDs tenant har adgang, gæster har ikke. Serveren kræver gyldig signatur, `iss` og `aud` (v1 eller v2), `exp`, `tid`, scope `access_as_user` og `acct = 0`. Mailadressen afgør aldrig adgang.
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
 - Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
-- Lydkvaliteten sættes ikke ned: ingen omkodning, nedsampling eller opdeling.
+- Lydkvaliteten sættes ikke ned: ingen omkodning eller nedsampling. En del over 35 min. klippes i bidder på 30 min. med 30 s overlap, kun mellem hele lydrammer, så lyden er byte for byte den samme (brugerens ja 18. nov. 2026). En optagelse eller fil må højst vare 4 timer.
 - Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i Word-dokumentet. Mailen har kun Word-dokumentet; PDF'en sendes kun som reserve, hvis Word mangler (fejlet på serveren eller gamle noter). Serveren laver stadig PDF'en til det og til ældre apps.
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper, tekst mindst 18 px (statusmærkerne Sendt, Venter og Fejlet 16 px). Mørk tilstand følger telefonen (farverne er variabler øverst i `app/styles.css`). Logoet ligger i `app/ordmaerke.svg` (`app/ordmaerke-lys.svg` i mørk tilstand) og `app/maerke.svg`. App-ikonet er hvidt Ø på `#0E5AA3`.
 - Forsiden har en fast bundlinje med Tidligere, Optag og Upload lydfil, og Stop ligger præcis, hvor Optag lå. Al bevægelse har en udgave til "reducer bevægelse", og kun `transform` og `opacity` animeres.
@@ -30,16 +30,18 @@ iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | Fil | Ansvar |
 |---|---|
 | `server/src/adgang.js` | Tjek af Entra-bevis |
-| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF og Word. Headere `x-titel`, `x-type` (kun gamle noter), `x-varighed` (over 9000 s afvises), `x-optaget`, `x-kun-tekst` (kun teksten), `x-referat-mangler` (appen forstår `{tekst, referatMangler}`, når referatet fejler efter transskriptionen). `POST /referat`: ét referat af delteksterne fra en afbrudt optagelse |
+| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF og Word. Headere `x-titel`, `x-type` (kun gamle noter), `x-varighed` (over 9000 s afvises), `x-optaget`, `x-kun-tekst` (kun teksten), `x-afsnit` (sammen med `x-kun-tekst`: også afsnittene med tider), `x-referat-mangler` (appen forstår `{tekst, referatMangler}`, når referatet fejler efter transskriptionen). Googles filter giver 422 `blokeret`. `POST /referat`: ét referat af `dele` med bidder (eller gamle `tekster`), højst 40 bidder, 150 s |
+| `server/src/samling.js` | Samler bidder og dele til én tidslinje: fjerner overlappet (fælles ordrække, ellers midten), "Del n: filnavn", afbrudte dele og huller |
 | `server/src/gemini.js` | Upload, transskription og sletning hos Google. Flash først; Transcribe tager over ved 429/5xx (højst 400 s lyd) og ved Googles indholdsfilter (alle længder) |
 | `server/src/genforsoeg.js` | Genforsøg ved 429, 5xx og netfejl. Dagsgrænsen giver 503 `kvote` |
 | `server/src/afsnit.js` | Flashs `[mm:ss]`-markører: fjernes fra teksten, rettes med varigheden og deler bilaget i emner med undertitel |
 | `server/src/referat.js` | Referatets prompt, skema og emner. `server/src/tal.js`: tal, der ikke blev sagt, bliver [uklart] |
 | `server/src/pdf.js`, `server/src/docx.js` | PDF og Word med samme indhold |
 | `server/src/konfig.js` | Miljøvariabler og standarder (500 MiB, 840 s, verbatim, modeller) |
-| `app/js/optager.js` | Optagelse, afbrydelser, varighed |
-| `app/js/lydfil.js` | Upload lydfil: kontrol af format og størrelse, varighed, gemning uden omkodning, fil fra del-menuen (Android) |
-| `app/js/forloeb.js` | Navngiv og send, flere dele, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
+| `app/js/optager.js` | Optagelse, afbrydelser, varighed. Højst 4 timer (59 min., hvis optagelsen ikke kan klippes) |
+| `app/js/lydfil.js` | Upload lydfil: kontrol af format, størrelse og varighed (4 timer, ogg/flac/aac 2½ time), flere filer (højst 10) som én note, gemning uden omkodning, fil fra del-menuen (Android) |
+| `app/js/opdeling/` | Klipper lyd i bidder uden at røre lydrammerne: fragmenteret og almindelig MP4, WebM, MP3, WAV. Kan en fil ikke læses, sendes den hel |
+| `app/js/forloeb.js` | Navngiv og send, bidder (højst 3 ad gangen, hver tekst gemmes straks, blokeret bid prøves i småbidder på 10 min.), flere dele og filer, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
 | `app/js/app.js` | Kun brugerflade |
 | `app/js/lydkurve.js` | Lydkurven på optageskærmen: måler lyden på optagelsens egen strøm og tegner søjler. Kaster aldrig |
 | `app/js/tilbage.js` | Telefonens tilbage (Android-knappen og swipe) går ét skridt tilbage i appen. Går aldrig selv tilbage ud fra en gammel historik |
@@ -47,7 +49,7 @@ iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `scripts/tjek-hemmeligheder.js` | Finder nøgler og interne dokumenter i git og historikken |
 | `scripts/opsaetning/` | `opsaet-google.sh` (Google Cloud, én gang) og `lav-ikoner.js` (ikoner, lyst ordmærke og iPhones startskærme i `app/start/`; kun med `--server` også logo-PNG til PDF'erne) |
 | `scripts/proev/` | `proev-referat.js` (rigtig Gemini, koster penge) og `test-adgang.js` (udgivet server afviser fremmede) |
-| `scripts/testbaenk/` | Testlyd og målinger mod rigtig Gemini (koster penge, spørg først). Forbrug logges i `testlyd/forbrug.json` |
+| `scripts/testbaenk/` | Testlyd og målinger mod rigtig Gemini (koster penge, spørg først). `lange.js` måler 1-3 timer og to filer i bidder (`--falsk` er gratis). `lav-klippelyd.js` laver testlyden i `app/test/lyd/`. Forbrug logges i `testlyd/forbrug.json` |
 
 Mapper: `app/` (PWA, tests i `app/test/`), `server/` (tests i `server/test/`), `e2e/` (browsertests), `scripts/` (tests i `scripts/test/`), `docs/`. Workflows: `tjek.yml`, `app.yml` ("Udgiv appen", `app/**`) og `server.yml` ("Udgiv serveren", `server/**`). Kun lokalt: `testlyd/`, `.vaerktoej/` (browsere, ffmpeg), `.superpowers/`, `arkiv/`. Appens offentlige adresse `/TransskriberinsAPP/` følger repoets navn, ikke mappen: den må aldrig ændres, for login og telefonernes lager hænger på den.
 
