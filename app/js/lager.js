@@ -120,11 +120,10 @@ const stoerrelseAf = (b) => (b instanceof Blob ? b.size : b.byteLength);
  * Stykkernes størrelser læses ét ad gangen, og laes/udsnit henter kun de stykker, der skal bruges, så en lang
  * optagelse aldrig ligger i hukommelsen på én gang.
  */
-export async function lavKilde(id, del = 0) {
-  // [{ nr, fra, til }] for delens stykker i rækkefølge.
-  const stykker = await transaktion(STYKKER, 'readonly', (t, svar) => {
-    const ud = [];
-    let pos = 0;
+/** Alle stykkers placering, delt efter del: Map del -> [{ nr, fra, til }]. Én gennemgang af noten. */
+async function oversigt(id) {
+  return transaktion(STYKKER, 'readonly', (t, svar) => {
+    const ud = new Map();
     const r = t.objectStore(STYKKER).openCursor(alleStykkerInterval(id));
     r.onsuccess = () => {
       const c = r.result;
@@ -132,14 +131,27 @@ export async function lavKilde(id, del = 0) {
         svar(ud);
         return;
       }
-      if ((c.value.del ?? 0) === del) {
-        const str = stoerrelseAf(c.value.bytes);
-        ud.push({ nr: c.value.nr, fra: pos, til: pos + str });
-        pos += str;
-      }
+      const del = c.value.del ?? 0;
+      if (!ud.has(del)) ud.set(del, []);
+      const liste = ud.get(del);
+      const fra = liste.length ? liste.at(-1).til : 0;
+      liste.push({ nr: c.value.nr, fra, til: fra + stoerrelseAf(c.value.bytes) });
       c.continue();
     };
   });
+}
+
+export async function lavKilde(id, del = 0) {
+  return kildeFor(id, (await oversigt(id)).get(del) ?? []);
+}
+
+/** En kilde for hver del, der har lyd: Map del -> kilde. En del uden lyd er ikke med. */
+export async function lavKilder(id) {
+  const alle = await oversigt(id);
+  return new Map([...alle].sort(([a], [b]) => a - b).map(([del, stykker]) => [del, kildeFor(id, stykker)]));
+}
+
+function kildeFor(id, stykker) {
   const stoerrelse = stykker.length ? stykker.at(-1).til : 0;
 
   /** Delene af [fra, til) som Blob-udsnit eller ArrayBuffer-udsnit. */

@@ -17,9 +17,18 @@ function falskLager(noter = []) {
     async sletNote(id) { kort.delete(id); },
     async alleNoter() { return [...kort.values()].map((n) => ({ ...n })); },
     async hentDele(id) { return Array.from({ length: kort.get(id)?.dele ?? 1 }, (_, i) => new Blob([`del${i}`])); },
+    // Alle dele med lyd som kilder (som lager.lavKilder).
+    async lavKilder(id) {
+      const n = kort.get(id);
+      const antal = n?.kilde === 'filer' ? n.filer.length : n?.dele ?? 1;
+      const ud = new Map();
+      for (let d = 0; d < antal; d++) if (!n?.tommeDele?.includes(d)) ud.set(d, await this.lavKilde(id, d));
+      return ud;
+    },
     // Én del som kilde til klipningen. Lyden er teksten "del0", "del1" … så testene kan se, hvad der sendes.
     async lavKilde(id, del = 0) {
-      const blob = new Blob([`del${del}`]);
+      // En del uden lyd (appen blev lukket lige efter Fortsæt) er tom.
+      const blob = new Blob(kort.get(id)?.tommeDele?.includes(del) ? [] : [`del${del}`]);
       return {
         del, stoerrelse: blob.size, varighedMs: kort.get(id)?.delVarigheder?.[del],
         laes: async (a, b) => new Uint8Array(await blob.slice(a, b).arrayBuffer()), udsnit: async (a, b) => blob.slice(a, b),
@@ -1180,4 +1189,30 @@ test('et svar med huller gemmes på noten, så Læs kan vise det', async () => {
   const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD, sendReferat: async () => ({ ...REFERAT_SVAR, huller: 1 }) });
   await s.forloeb.behandl('a');
   assert.equal(s.lager.kort.get('a').huller, 1);
+});
+
+// Rettelser fra gennemgangen
+
+test('flere lydfiler, der ikke blev gemt færdig, sendes aldrig og fjernes ved genstart', async () => {
+  const halv = { id: 'h', status: STATUS.OPTAGER, kilde: 'filer', mime: 'audio/mp4', oprettet: 1, sidstAktiv: 0, filer: [{ navn: 'a.m4a', mime: 'audio/mp4' }] };
+  const s = opsaet({ noter: [halv], nu: () => 10 * 60 * 1000, aktivAndetSted: async () => false });
+  await s.forloeb.behandlOgSend('h');
+  assert.equal(s.t.lydKald, 0);
+  assert.deepEqual(await s.forloeb.genoptag(new Set()), []);
+  assert.equal(s.lager.kort.has('h'), false);
+});
+
+test('en tom del efter Fortsæt springes over, så noten stadig kan sendes', async () => {
+  const s = opsaet({ noter: [{ ...DELT, tommeDele: [1] }], sendLyd: delTekst });
+  await s.forloeb.behandlOgSend('a');
+  assert.equal(s.t.lydKald, 2);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Tekst del0', '', 'Tekst del2']);
+  assert.equal(s.lager.kort.get('a').status, STATUS.SENDT);
+});
+
+test('gamle deltekster hører til delene med lyd, også når en del er tom', async () => {
+  const s = opsaet({ noter: [{ ...DELT, tommeDele: [1], deltekster: ['Gammel A', 'Gammel C'] }], sendLyd: delTekst });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 0);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Gammel A', '', 'Gammel C']);
 });

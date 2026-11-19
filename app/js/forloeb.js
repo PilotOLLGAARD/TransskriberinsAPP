@@ -15,7 +15,7 @@ const UKENDT_LANG_BYTES = 30 * 1000 * 1000;
 
 /** En valgt lydfil, der stadig gemmes, eller som ikke blev gemt færdig. */
 function erHalvFil(note) {
-  return note.kilde === 'fil' && note.status === STATUS.OPTAGER;
+  return (note.kilde === 'fil' || note.kilde === 'filer') && note.status === STATUS.OPTAGER;
 }
 
 /** Fuldt lager hedder plads, så brugeren får at vide, hvad der skal til. */
@@ -31,7 +31,6 @@ export function lavForloeb({
   lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {}, vedUpload = () => {},
   vedBidder = () => {}, opdeling = standardOpdeling, bidder = BIDDER,
 }) {
-  const lavKilde = (...a) => lager.lavKilde(...a);
   const igang = new Set();
   // Afsendelser, der kan stoppes, når brugeren sletter noten.
   const afbrydere = new Map();
@@ -96,8 +95,7 @@ export function lavForloeb({
    * Bidderne for én del. Kan lyden klippes, planlægges bidder på 30 min.; ellers er hele delen én bid.
    * Kun til denne afsendelse: indekset gemmes ikke, planen gør (så tekster altid hører til samme bid).
    */
-  async function planForDel(id, d, del, gemtPlan) {
-    const kilde = await lavKilde(id, d);
+  async function planForDel(kilde, del, gemtPlan) {
     const indeks = await opdeling.lavIndeks(kilde, del.mime).catch(() => null);
     if (gemtPlan) return { kilde, indeks, plan: gemtPlan };
     if (!indeks) {
@@ -133,10 +131,17 @@ export function lavForloeb({
     const dele = delePaa(note);
     // Tilstanden: { [del]: { plan, varighedMs, tekster: { [nr]: { tekst, afsnit } | { mangler } | { smaa: { plan, tekster } } } } }.
     const tilstand = JSON.parse(JSON.stringify(note.bidder ?? {}));
-    // En note fra før bidderne: en gemt deltekst er en færdig del uden tider.
-    (note.deltekster ?? []).forEach((tekst, d) => {
-      if (typeof tekst === 'string' && !tilstand[d]) tilstand[d] = { plan: [{ nr: 0, startMs: 0, slutMs: null, overlapMs: 0, hel: true }], tekster: { 0: { tekst } } };
+    // Alle deles lyd i én gennemgang af lageret. En del uden lyd (appen lukket lige efter Fortsæt) er ikke med.
+    const kildePr = await lager.lavKilder(id);
+    const tom = (d) => !kildePr.has(d) || kildePr.get(d).stoerrelse === 0;
+    const enBid = (tekst) => ({ plan: [{ nr: 0, startMs: 0, slutMs: null, overlapMs: 0, hel: true }], tekster: { 0: { tekst } } });
+    // En note fra før bidderne: en gemt deltekst er en færdig del uden tider. Teksterne hørte til delene med lyd.
+    const medLyd = dele.map((_, d) => d).filter((d) => !tom(d));
+    (note.deltekster ?? []).forEach((tekst, i) => {
+      const d = medLyd[i];
+      if (typeof tekst === 'string' && d !== undefined && !tilstand[d]) tilstand[d] = enBid(tekst);
     });
+    for (let d = 0; d < dele.length; d++) if (tom(d) && !tilstand[d]) tilstand[d] = { ...enBid(''), varighedMs: 0 };
     let skriv = Promise.resolve();
     const gem = () => {
       const kopi = JSON.parse(JSON.stringify(tilstand));
@@ -148,7 +153,7 @@ export function lavForloeb({
     for (let d = 0; d < dele.length; d++) {
       const faerdig = tilstand[d] && tilstand[d].plan.every((b) => tilstand[d].tekster[b.nr] && !tilstand[d].tekster[b.nr].smaa?.plan.some((s) => !tilstand[d].tekster[b.nr].smaa.tekster[s.nr]));
       if (faerdig) continue;
-      const p = await planForDel(id, d, dele[d], tilstand[d]?.plan);
+      const p = await planForDel(kildePr.get(d), dele[d], tilstand[d]?.plan);
       kilder[d] = p;
       tilstand[d] ??= { plan: p.plan, tekster: {} };
       if (p.varighedMs) tilstand[d].varighedMs = p.varighedMs;

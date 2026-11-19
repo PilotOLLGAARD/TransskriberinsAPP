@@ -199,3 +199,18 @@ test('lavKilde læser et udsnit på tværs af stykker og holder delene adskilt',
   assert.deepEqual(svar.kant, [23, 24]);
   await kontekst.close();
 });
+
+test('lavKilder giver en kilde for hver del med lyd i én gennemgang', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.goto(`${miljoe.adresse}/test/tom`);
+  const svar = await side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const id = await l.opretNote({ mime: 'audio/mp4' });
+    await l.gemStykke(id, 0, new Uint8Array([1, 2]).buffer, 0);
+    await l.gemStykke(id, 1, new Uint8Array([3]).buffer, 2);
+    const kilder = await l.lavKilder(id);
+    return { dele: [...kilder.keys()], to: [...await kilder.get(2).laes(0, 9)], nul: kilder.get(0).stoerrelse };
+  });
+  assert.deepEqual(svar, { dele: [0, 2], to: [3], nul: 2 });
+  await kontekst.close();
+});
