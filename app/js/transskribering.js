@@ -34,7 +34,7 @@ export class SendFejl extends Error {
   }
 }
 
-function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst, afsnit } = {}) {
+function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst, afsnit, smaabidder } = {}) {
   // Appen forstår { tekst, referatMangler }: fejler referatet, laves kun det igen. Ældre apps får den gamle fejl.
   const h = { 'x-referat-mangler': '1' };
   // Headere må kun indeholde ASCII, så titlen sendes URL-kodet.
@@ -51,6 +51,8 @@ function metaHeadere({ titel, type, varighedMs, oprettet, kunTekst, afsnit } = {
   if (kunTekst) h['x-kun-tekst'] = '1';
   // En bid af en lang optagelse: serveren giver også afsnittene med tider, så /referat kan samle dem.
   if (kunTekst && afsnit) h['x-afsnit'] = '1';
+  // Appen kan dele bidden i småbidder, hvis Googles filter blokerer den. Så venter serveren med Transcribe.
+  if (kunTekst && smaabidder) h['x-smaabidder'] = '1';
   return h;
 }
 

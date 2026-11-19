@@ -1216,3 +1216,18 @@ test('gamle deltekster hører til delene med lyd, også når en del er tom', asy
   assert.equal(s.t.lydKald, 0);
   assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Gammel A', '', 'Gammel C']);
 });
+
+test('kun bidder, appen kan dele i småbidder, siger det til serveren', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd, ...a) => { if ((await lyd.text()) === 'd0:29-60') throw blokeret(); return bidTekst(lyd, ...a); },
+  });
+  await s.forloeb.behandl('a');
+  const efterTekst = await Promise.all(s.t.lydListe.map(async ([lyd, , , meta]) => [await lyd.text(), meta.smaabidder]));
+  const kort = new Map(efterTekst);
+  assert.equal(kort.get('d0:0-30'), true, 'en hel bid på 30 min.');
+  assert.equal(kort.get('d0:29-39'), false, 'en småbid');
+  const udelt = opsaet({ noter: [{ ...LANG, mime: 'audio/ogg', varighedMs: 100 * MIN, delVarigheder: [100 * MIN] }], sendLyd: bidTekst, opdeling: falskOpdeling({ kanIkke: [0] }), bidder: BIDDER_STD });
+  await udelt.forloeb.behandl('a');
+  assert.equal(udelt.t.lydListe[0][3].smaabidder, false, 'en del, der ikke kan klippes');
+});

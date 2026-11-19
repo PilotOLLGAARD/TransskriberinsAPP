@@ -197,7 +197,9 @@ export function lavForloeb({
       let resultat;
       try {
         const noegle = {};
-        const svar = await sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, varighedMs, oprettet: note.oprettet }, undefined, {
+        // Kan bidden deles i småbidder (klippelig og længere end en småbid), prøver appen dem før Transcribe.
+        const smaabidder = !smaa && Boolean(indeks) && Number.isFinite(varighedMs) && varighedMs > bidder.smaaBidMs;
+        const svar = await sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, smaabidder, varighedMs, oprettet: note.oprettet }, undefined, {
           signal,
           // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
           vedSendt: () => {},

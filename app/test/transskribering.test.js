@@ -344,3 +344,12 @@ test('sendReferat sender dele i stedet for tekster', async () => {
 test('referatet af en lang optagelse må tage op til 4 minutter', () => {
   assert.equal(REFERAT_TIDSGRAENSE_MS, 4 * 60 * 1000);
 });
+
+test('x-smaabidder sendes, når appen kan dele en blokeret bid', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'Del' }), { status: 200 }); };
+  await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true, smaabidder: true }, hent);
+  assert.equal(kald.headers['x-smaabidder'], '1');
+  await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true }, hent);
+  assert.equal(kald.headers['x-smaabidder'], undefined);
+});
