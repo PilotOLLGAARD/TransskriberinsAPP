@@ -30,9 +30,9 @@ iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | Fil | Ansvar |
 |---|---|
 | `server/src/adgang.js` | Tjek af Entra-bevis |
-| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF og Word. Headere `x-titel`, `x-type` (kun gamle noter), `x-varighed` (over 9000 s afvises), `x-optaget`, `x-kun-tekst` (kun teksten), `x-afsnit` (sammen med `x-kun-tekst`: også afsnittene med tider), `x-referat-mangler` (appen forstår `{tekst, referatMangler}`, når referatet fejler efter transskriptionen). Googles filter giver 422 `blokeret`. `POST /referat`: ét referat af `dele` med bidder (eller gamle `tekster`), højst 40 bidder, 150 s |
+| `server/src/handler.js` | `POST /transskriber`: adgang → format → transskription → referat → PDF og Word. Headere `x-titel`, `x-type` (kun gamle noter), `x-varighed` (over 9000 s afvises), `x-optaget`, `x-kun-tekst` (kun teksten), `x-afsnit` (sammen med `x-kun-tekst`: også afsnittene med tider), `x-smaabidder` (appen kan dele bidden, se gemini.js), `x-referat-mangler` (appen forstår `{tekst, referatMangler}`, når referatet fejler efter transskriptionen). Googles filter giver 422 `blokeret`. `POST /referat`: ét referat af `dele` med bidder (eller gamle `tekster`), højst 40 bidder, 150 s |
 | `server/src/samling.js` | Samler bidder og dele til én tidslinje: fjerner overlappet (fælles ordrække, ellers midten), "Del n: filnavn", afbrudte dele og huller |
-| `server/src/gemini.js` | Upload, transskription og sletning hos Google. Flash først; Transcribe tager over ved 429/5xx (højst 400 s lyd) og ved Googles indholdsfilter (alle længder) |
+| `server/src/gemini.js` | Upload, transskription og sletning hos Google. Flash først; Transcribe tager over ved 429/5xx (højst 400 s lyd) og ved Googles indholdsfilter. Sender appen `x-smaabidder: 1`, og er bidden over 12 min., gives blokeringen straks videre, så appen prøver småbidder på 10 min. med Flash før Transcribe |
 | `server/src/genforsoeg.js` | Genforsøg ved 429, 5xx og netfejl. Dagsgrænsen giver 503 `kvote` |
 | `server/src/afsnit.js` | Flashs `[mm:ss]`-markører: fjernes fra teksten, rettes med varigheden og deler bilaget i emner med undertitel |
 | `server/src/referat.js` | Referatets prompt, skema og emner. `server/src/tal.js`: tal, der ikke blev sagt, bliver [uklart] |
