@@ -69,12 +69,16 @@ function fjernOverlap(forrige, naeste, { naesteStartSek, overlapSek }) {
     const foer = forrige.slice(0, skaer.ai);
     const foersteNaeste = { ...naeste[start.ai], tekst: ordAf(naeste[start.ai].tekst).slice(start.wi).join(' ') };
     // Et afsnit, der blev klippet midt i en sætning, fortsætter i bidden efter.
-    if (rest) Object.assign(foersteNaeste, { sek: forrige[skaer.ai].sek, tekst: `${rest} ${foersteNaeste.tekst}`.trim() });
+    if (rest) Object.assign(foersteNaeste, { sek: forrige[skaer.ai].sek, start: forrige[skaer.ai].start, tekst: `${rest} ${foersteNaeste.tekst}`.trim() });
     const efter = [foersteNaeste, ...naeste.slice(start.ai + 1)].filter((a) => a.tekst);
     return { forrige: foer, naeste: efter };
   }
   if (harTid(forrige) && harTid(naeste)) {
-    return { forrige: forrige.filter((a) => a.sek <= midte), naeste: naeste.filter((a) => a.sek > midte) };
+    // Et afsnit i næste bid, der starter før midten, beholdes, hvis det næste først starter efter den forrige bids
+    // slutning: så kan det indeholde ord, den forrige bid aldrig fik. Hellere gentaget end tabt.
+    const forrigeSlut = naesteStartSek + overlapSek;
+    const beholdt = naeste.filter((a, i) => a.sek > midte || !(naeste[i + 1] && naeste[i + 1].sek <= forrigeSlut));
+    return { forrige: forrige.filter((a) => a.sek <= midte), naeste: beholdt };
   }
   return { forrige, naeste };
 }
@@ -122,11 +126,11 @@ function samlDele(dele) {
         samlet = r.forrige;
         nye = r.naeste;
       }
-      // Tekst uden tider placeres ved bidens start.
-      samlet.push(...nye.map((a) => ({ sek: a.sek ?? start, tekst: a.tekst })));
+      // Tekst uden tider får først bidens start, når hele delen er samlet, så overlappet stadig findes ved ordene.
+      samlet.push(...nye.map((a) => ({ sek: a.sek, tekst: a.tekst, start: a.start ?? start })));
       forrigeMangler = false;
     }
-    afsnit.push(...samlet);
+    afsnit.push(...samlet.map((a) => ({ sek: a.sek ?? a.start ?? delStart, tekst: a.tekst })));
 
     const v = delVarighed(del);
     if (v !== null) kendt = true;

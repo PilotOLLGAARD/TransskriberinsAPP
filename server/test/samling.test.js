@@ -132,3 +132,22 @@ test('samlDele: en bid uden tider (Transcribe) placeres ved sin start', () => {
 test('HUL_TEKST og AFBRUDT_TEKST har ingen cifre', () => {
   assert.doesNotMatch(HUL_TEKST + AFBRUDT_TEKST, /\d/);
 });
+
+// Rettelser fra gennemgangen: ingen ord må tabes ved overgangen
+
+test('fjernOverlap ved midten beholder det afsnit i næste bid, der dækker slutningen af den forrige', () => {
+  const forrige = [{ sek: 1760, tekst: 'A et.' }, { sek: 1790, tekst: 'A to.' }];
+  const naeste = [{ sek: 1775, tekst: 'B et går forbi slutningen af A.' }, { sek: 1805, tekst: 'B to fra 1805.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  assert.deepEqual(r.naeste.map((a) => a.tekst), ['B et går forbi slutningen af A.', 'B to fra 1805.']);
+});
+
+test('samlDele: en bid uden tider (Transcribe) før en bid med tider bruger stadig fælles ord', () => {
+  const r = samlDele([{ bidder: [
+    { startSek: 0, overlapSek: 0, varighedSek: 1800, tekst: 'Start af mødet. Til sidst taler vi om tagrenderne på nordsiden af huset' },
+    bid(1770, [{ sek: 2, tekst: 'om tagrenderne på nordsiden af huset og ord efter bid A slut.' }, { sek: 40, tekst: 'Mere.' }]),
+  ] }]);
+  assert.match(r.tekst, /ord efter bid A slut/);
+  assert.equal(r.tekst.split('tagrenderne på nordsiden').length - 1, 1);
+  assert.equal(r.afsnit[0].sek, 0, 'teksten uden tider står ved bidens start');
+});
