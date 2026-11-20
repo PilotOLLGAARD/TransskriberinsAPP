@@ -10,7 +10,7 @@ const { BASE, GeminiFejl, svarFejl, fejltype, udtraekTekst, hentUdenGraense } = 
 const { medGenforsoeg } = require('./genforsoeg.js');
 const { TYPER, ETIKET, BESKRIVELSE, FELTER, AFSNIT, laesType } = require('./typer.js');
 const { kontrollerTal } = require('./tal.js');
-const { harTider, medTider, knytEmner } = require('./afsnit.js');
+const { harTider, medTider, knytEmner, formaterTid } = require('./afsnit.js');
 
 const KORT_SEKUNDER = 30;
 // Kortere optagelser deles ikke i emner. Bilaget viser kun tidspunkterne.
@@ -76,8 +76,15 @@ function maksEmner(varighedSek) {
   return Number.isFinite(varighedSek) ? Math.min(40, Math.max(20, Math.ceil(varighedSek / 300))) : 20;
 }
 
-const emneRegler = (maks) => [
-  `Del også transskriptionen i emner i feltet emner, ca. ét emne pr. 3-5 minutter, mindst 2 og højst ${maks}:`,
+// Over en time: fast afstand mellem emnerne, så de rækker til slutningen (testbænken 20. nov. 2026: 36 emner
+// med 3½ min. imellem sluttede ved 2:12 i en optagelse på 3 timer).
+const LANG_SEK = 3600;
+const emneAfstand = (maks, varighedSek) => (Number.isFinite(varighedSek) && varighedSek > LANG_SEK
+  ? `ca. ét emne pr. ${Math.ceil(varighedSek / 60 / maks)} minutter, fordelt over hele optagelsen til slutningen (${formaterTid(varighedSek)})`
+  : 'ca. ét emne pr. 3-5 minutter');
+
+const emneRegler = (maks, varighedSek) => [
+  `Del også transskriptionen i emner i feltet emner, ${emneAfstand(maks, varighedSek)}, mindst 2 og højst ${maks}:`,
   '- tid: tidspunktet for det afsnit, hvor emnet begynder, præcis som det står i transskriptionen (fx "04:26").',
   '- undertitel: 2-6 ord, der KUN beskriver, hvad der faktisk bliver sagt i emnet. Intet opfundet og ingen vurdering.',
   'Tidspunkterne i [mm:ss] viser kun, hvor i lyden afsnittene begynder. Skriv ikke tidspunkterne i referatet.',
@@ -105,7 +112,10 @@ function opgaveDel({ kort, type, emner, varighedSek }) {
     del.push(...VALGBARE.map((t) => `- ${t}: ${AFSNIT[t].map((a) => a.felt).join(', ')}`));
   }
   del.push('Lad en liste være tom, hvis der ikke er noget til den.');
-  if (emner) del.push('', ...emneRegler(maksEmner(varighedSek)));
+  if (emner) del.push('', ...emneRegler(maksEmner(varighedSek), varighedSek));
+  if (Number.isFinite(varighedSek) && varighedSek > LANG_SEK) {
+    del.push('', `Optagelsen varer ${formaterTid(varighedSek)}. Referatet skal dække hele optagelsen fra start til slut, også den sidste del.`);
+  }
   return del;
 }
 
