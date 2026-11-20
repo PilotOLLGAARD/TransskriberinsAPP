@@ -1126,6 +1126,19 @@ function skaermStart() {
 
 // Skærmen efter Send: fire trin, der krydses af undervejs
 
+/** Teksten, når et afsnit ikke kunne transskriberes, med tidsrum. null, når intet mangler. */
+function hulBesked(note) {
+  if (Array.isArray(note.mangler) && note.mangler.length) {
+    return `Dette afsnit kunne ikke transskriberes: ${note.mangler.join(', ')}. Det står i referatet og i bilaget.`;
+  }
+  return note.huller ? 'Et stykke af optagelsen kunne ikke transskriberes. Se bilaget i Word-dokumentet.' : null;
+}
+
+/** En advarsel i den røde fejlstil med ikon. */
+function advarselLinje(tekst, egenskaber = {}) {
+  return h('p', { klasse: 'besked fejl', ...egenskaber }, ikon('advarsel'), h('span', {}, tekst));
+}
+
 function trinPunkt(tilstand, titel, tekst, egenskaber = {}, ekstra = null) {
   const tegnet = tilstand === 'faerdig' ? ikon('tjek')
     : tilstand === 'fejl' ? ikon('advarsel')
@@ -1174,7 +1187,7 @@ function skaermFremdrift() {
     fejl?.trin === 2 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
       : p > 1 ? trinPunkt('faerdig', 'Lyden er sendt') : uploadTrin(note.id),
     fejl?.trin === 3 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
-      : p > 2 ? trinPunkt('faerdig', 'Referatet er lavet')
+      : p > 2 ? trinPunkt('faerdig', 'Referatet er lavet', null, {}, hulBesked(note) ? advarselLinje(hulBesked(note), { klasse: 'besked fejl trin-hul' }) : null)
         : p === 2 && !fejl ? trinPunkt('igang', 'Referatet laves …', 'Det kan tage et par minutter.')
           : trinPunkt('venter', 'Referatet laves'),
     fejl?.trin === 4 ? trinPunkt('fejl', fejl.titel, fejl.tekst)
@@ -1615,7 +1628,7 @@ function skaermTekst() {
     ? knap('Log ind og prøv igen', () => logInd({ id: note.id, handling: sendt ? 'sendIgen' : 'send' }), { ikonNavn: 'person' })
     : sendt ? knap('Send referat igen', () => sendIgen(note.id), { ikonNavn: 'send' })
       : knap('Send til mig', () => sendTilMig(note.id), { ikonNavn: 'send' });
-  const advarsel = (tekst) => h('p', { klasse: 'besked fejl', role: 'alert' }, ikon('advarsel'), h('span', {}, tekst));
+  const advarsel = (tekst) => advarselLinje(tekst, { role: 'alert' });
   return [
     h(
       'div',
@@ -1626,7 +1639,7 @@ function skaermTekst() {
       beskedElement(),
       fejl ? advarsel(fejl) : null,
       note.maaskeSendt ? advarsel(BESKEDER.maaskeSendt) : null,
-      note.huller ? advarsel('Et stykke af optagelsen kunne ikke transskriberes. Se bilaget i Word-dokumentet.') : null,
+      hulBesked(note) ? advarsel(hulBesked(note)) : null,
       referatVisning(note),
     ),
     h(

@@ -122,6 +122,12 @@ export function lavForloeb({
       }));
   }
 
+  /** Et svar uden et eneste ord, hverken i teksten eller i afsnittene. */
+  function erTomtSvar(svar) {
+    const afsnit = Array.isArray(svar?.afsnit) ? svar.afsnit.map((a) => a?.tekst ?? '').join('') : '';
+    return !String(svar?.tekst ?? '').trim() && !afsnit.trim();
+  }
+
   /**
    * Transskriberer hver bid af hver del, højst SAMTIDIGE ad gangen, og laver ét referat via /referat.
    * Hver bids tekst gemmes, så snart den kommer, så et genforsøg aldrig sender noget, der er betalt.
@@ -196,16 +202,24 @@ export function lavForloeb({
       const varighedMs = Number.isFinite(bid.slutMs) ? bid.slutMs - bid.startMs : undefined;
       let resultat;
       try {
-        const noegle = {};
         // Kan bidden deles i småbidder (klippelig og længere end en småbid), prøver appen dem før Transcribe.
         const smaabidder = !smaa && Boolean(indeks) && Number.isFinite(varighedMs) && varighedMs > bidder.smaaBidMs;
-        const svar = await sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, smaabidder, varighedMs, oprettet: note.oprettet }, undefined, {
-          signal,
-          // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
-          vedSendt: () => {},
-          vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
-        }).finally(() => upload.delete(noegle));
-        resultat = { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };
+        const sendBid = () => {
+          const noegle = {};
+          return sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, smaabidder, varighedMs, oprettet: note.oprettet }, undefined, {
+            signal,
+            // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
+            vedSendt: () => {},
+            vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
+          }).finally(() => upload.delete(noegle));
+        };
+        let svar = await sendBid();
+        // En tom bid godtages aldrig som stilhed: den prøves én gang til, og er den stadig tom, mangler den
+        // (serveren skriver så "[Dette afsnit (tidsrum) kunne ikke transskriberes]").
+        if (erTomtSvar(svar) && !signal.aborted && !fejl) svar = await sendBid();
+        resultat = erTomtSvar(svar)
+          ? { mangler: true, tom: true, tekst: '' }
+          : { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };
       } catch (e) {
         if (e?.type !== 'blokeret') throw e;
         // Googles filter: en hel bid prøves i småbidder, en småbid (eller en bid, der ikke kan deles) mangler.
@@ -246,6 +260,7 @@ export function lavForloeb({
       const bidListe = t.plan.flatMap((bid) => {
         const svar = t.tekster[bid.nr];
         const enkelt = (b, s) => ({
+          tom: s.tom === true,
           startSek: b.startMs / 1000, overlapSek: b.overlapMs / 1000,
           varighedSek: Number.isFinite(b.slutMs) ? (b.slutMs - b.startMs) / 1000 : 0,
           tekst: s.tekst || '', ...(s.afsnit ? { afsnit: s.afsnit } : {}), ...(s.mangler ? { mangler: true } : {}),
@@ -260,8 +275,10 @@ export function lavForloeb({
       };
     });
     const alle = tilServer.flatMap((d) => d.bidder);
+    // Intet ord nogen steder: "ingen tale" som før. Ellers blokeret, hvis Googles filter afviste det hele.
+    if (!alle.some((b) => b.tekst.trim()) && alle.every((b) => b.mangler ? b.tom : true)) return { tekst: '' };
     if (alle.every((b) => b.mangler)) throw Object.assign(new Error('blokeret'), { type: 'blokeret' });
-    if (!alle.some((b) => b.tekst.trim())) return { tekst: '' };
+    for (const d of tilServer) for (const b of d.bidder) delete b.tom;
     return sendReferat(
       { dele: tilServer, titel: note.titel, type: note.type, varighedMs: note.varighedMs, oprettet: note.oprettet },
       bevis,
@@ -348,7 +365,7 @@ export function lavForloeb({
           return;
         }
         const felter = { status: STATUS.TEKST_KLAR, tekst: svar.tekst };
-        for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'docx', 'docxFilnavn', 'emne', 'html', 'huller']) if (svar[k] !== undefined) felter[k] = svar[k];
+        for (const k of ['titel', 'type', 'referat', 'pdf', 'filnavn', 'docx', 'docxFilnavn', 'emne', 'html', 'huller', 'mangler']) if (svar[k] !== undefined) felter[k] = svar[k];
         await lager.opdaterNote(id, felter);
       } catch (e) {
         await opdaterTrygt(id, { status: STATUS.FEJL, fejlType: fejlTypeFor(e, 'tjeneste') });

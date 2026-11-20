@@ -2,7 +2,7 @@
 // Lange optagelser og flere lydfiler: listen over filer, bidder, fremdrift i dele og advarslen om plads.
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { startMiljoe, nyTelefon, ryd } = require('./hjaelpere.js');
+const { startMiljoe, nyTelefon, ryd, saetNaesteFejl } = require('./hjaelpere.js');
 
 let miljoe;
 before(async () => { miljoe = await startMiljoe(); });
@@ -162,4 +162,27 @@ test('Lydfiler-skærmen: tekst mindst 18 px og knapper mindst 44 px, i lys og m�
     assert.ok(maal.bredde, `${colorScheme}: siden ruller sidelæns`);
     await kontekst.close();
   }
+});
+
+test('en bid, der kommer tom tilbage to gange, står med tidsrum på trin-skærmen, i mailen og i bilaget', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript(() => { globalThis.__BIDDER__ = { bidMs: 20000, overlapMs: 5000, delFraMs: 25000, smaaBidMs: 10000 }; });
+  await logInd(side);
+  const transskriber = [];
+  side.on('request', (r) => { if (r.url().endsWith('/transskriber') && r.method() === 'POST') transskriber.push(r); });
+  const [vaelger] = await Promise.all([side.waitForEvent('filechooser'), knap(side, 'Upload lydfil').click()]);
+  await vaelger.setFiles({ name: 'Møde med stille stykke.wav', mimeType: 'audio/wav', buffer: wav(70) });
+  await side.getByLabel('Hvad handler optagelsen om?').waitFor();
+  // Den første bid, serveren får, kommer tom tilbage, også når den sendes igen.
+  await saetNaesteFejl(miljoe, 'tomBid');
+  const krop = await sendOgFangReferat(side);
+  assert.equal(transskriber.length, 5, '4 bidder og ét nyt forsøg af den tomme');
+  const mangler = krop.dele[0].bidder.filter((b) => b.mangler);
+  assert.equal(mangler.length, 1, 'den tomme bid sendes som manglende');
+  await vis(side, SENDT, 20000);
+  await vis(side, /Dette afsnit kunne ikke transskriberes: \d{2}:\d{2}-\d{2}:\d{2}/);
+  const tal = await (await fetch(`${miljoe.adresse}/test/tal`)).json();
+  const html = tal.sidsteMail.message.body.content;
+  assert.match(html, /Dette afsnit kunne ikke transskriberes: \d{2}:\d{2}-\d{2}:\d{2}\. Se bilaget\./);
+  await kontekst.close();
 });

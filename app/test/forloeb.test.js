@@ -653,10 +653,11 @@ test('genforsøg sender ikke dele, der allerede er transskriberet', async () => 
   assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
 });
 
-test('en tavs del springes over, og alle tavse giver ingenTale', async () => {
+test('en tavs del markeres som manglende (aldrig stille sprunget over), og alle tavse giver ingenTale', async () => {
   const s = opsaet({ noter: [DELT], sendLyd: async (del) => ((await del.text()) === 'del1' ? { tekst: '' } : delTekst(del)) });
   await s.forloeb.behandl('a');
   assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].tekst), ['Tekst del0', '', 'Tekst del2']);
+  assert.deepEqual(s.t.referatKald[0][0].dele.map((d) => d.bidder[0].mangler === true), [false, true, false]);
   const tavs = opsaet({ noter: [DELT], sendLyd: async () => ({ tekst: '' }) });
   await tavs.forloeb.behandl('a');
   assert.equal(tavs.lager.kort.get('a').status, STATUS.FEJL);
@@ -1186,9 +1187,38 @@ test('slet under afsendelse af bidder stopper alle, og intet mailes', async () =
 });
 
 test('et svar med huller gemmes på noten, så Læs kan vise det', async () => {
-  const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD, sendReferat: async () => ({ ...REFERAT_SVAR, huller: 1 }) });
+  const s = opsaet({ noter: [LANG], sendLyd: bidTekst, opdeling: falskOpdeling(), bidder: BIDDER_STD, sendReferat: async () => ({ ...REFERAT_SVAR, huller: 1, mangler: ['29:00-1:00:00'] }) });
   await s.forloeb.behandl('a');
   assert.equal(s.lager.kort.get('a').huller, 1);
+  assert.deepEqual(s.lager.kort.get('a').mangler, ['29:00-1:00:00'], 'tidsrummet til trin-skærmen og Læs');
+});
+
+test('en bid, der kommer tom tilbage, prøves igen og bruger teksten fra andet forsøg', async () => {
+  let forsoeg = 0;
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => {
+      if ((await lyd.text()) === 'd0:29-60' && forsoeg++ === 0) return { tekst: '', afsnit: [] };
+      return bidTekst(lyd);
+    },
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 7, '6 bidder og ét nyt forsøg');
+  const bid = s.t.referatKald[0][0].dele[0].bidder[1];
+  assert.equal(bid.tekst, 'Tekst d0:29-60');
+  assert.notEqual(bid.mangler, true);
+});
+
+test('en bid, der også er tom anden gang, sendes som manglende, aldrig som stilhed', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => ((await lyd.text()) === 'd0:29-60' ? { tekst: '   ', afsnit: [{ sek: 0, tekst: '' }] } : bidTekst(lyd)),
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 7, 'kun ét nyt forsøg');
+  const bid = s.t.referatKald[0][0].dele[0].bidder[1];
+  assert.deepEqual([bid.startSek, bid.mangler, bid.tekst], [1740, true, '']);
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
 });
 
 // Rettelser fra gennemgangen

@@ -70,6 +70,12 @@ function startLokal({ port = 4280 } = {}) {
       for await (const d of strom) dele.push(d);
       const krop = Buffer.concat(dele);
       tilstand.modtaget = { bytes: krop.length, mime, sha256: createHash('sha256').update(krop).digest('hex') };
+      // tomBid: den første bid, der kommer, er tom, også når samme lyd sendes igen.
+      if (tilstand.naesteFejl === 'tomBid') {
+        tilstand.naesteFejl = null;
+        tilstand.tomSha = tilstand.modtaget.sha256;
+      }
+      if (tilstand.tomSha && tilstand.tomSha === tilstand.modtaget.sha256) return { tekst: '' };
       // Kun transskriptionens egne fejl bruges her. Fejl i referat og mail venter på deres tur.
       const fejl = ['tjeneste', 'format', 'tom', 'langsom'].includes(tilstand.naesteFejl) ? tilstand.naesteFejl : null;
       if (fejl) tilstand.naesteFejl = null;
@@ -136,6 +142,7 @@ function startLokal({ port = 4280 } = {}) {
     }
     if (url.pathname === '/test/fejl') {
       tilstand.naesteFejl = url.searchParams.get('naeste');
+      tilstand.tomSha = null;
       return json(200, {});
     }
     if (url.pathname === '/test/graph/v1.0/me/sendMail') {
