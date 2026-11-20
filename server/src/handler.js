@@ -38,8 +38,8 @@ const TIDLIGSTE_TIDSPUNKT = Date.UTC(2020, 0, 1);
 const DAG_MS = 24 * 60 * 60 * 1000;
 const MAX_REFERAT_BYTES = 2 * 1024 * 1024;
 const MAX_DELE = 20;
-// Bidder i alt i /referat: 4 timer i bidder på 30 min. plus småbidder og afbrudte dele.
-const MAX_BIDDER = 40;
+// Bidder i alt i /referat: 4 timer, hvor alt er blokeret ned til 5-min.-bidder (ca. 50), plus afbrudte dele.
+const MAX_BIDDER = 200;
 // Referatet af en lang optagelse har sin egen kørsel og må tage længere tid end efter en transskription.
 const REFERAT_DELE_TIMEOUT_MS = 150000;
 const tidsfelt = (v) => Number.isFinite(v) && v >= 0;
@@ -324,7 +324,7 @@ function lavHandler({
       res.writeHead(204, {
         ...cors,
         'access-control-allow-methods': 'POST',
-        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler, x-afsnit, x-smaabidder',
+        'access-control-allow-headers': 'authorization, content-type, x-titel, x-type, x-varighed, x-optaget, x-kun-tekst, x-referat-mangler, x-afsnit, x-smaabidder, x-reserve',
         'access-control-max-age': '600',
       });
       res.end();
@@ -365,8 +365,10 @@ function lavHandler({
     try {
       // Appen kan selv dele denne bid i småbidder, hvis Googles filter blokerer den.
       const smaabidder = req.headers['x-smaabidder'] === '1';
+      // Appen fik en tom tekst og beder om den anden model.
+      const reserve = req.headers['x-reserve'] === '1';
       const { tekst: raa } = await gemini.transskriber(vagt, {
-        bytes, mime, signal: afbryd.signal, varighedSek: varighed, smaabidder,
+        bytes, mime, signal: afbryd.signal, varighedSek: varighed, smaabidder, reserve,
       });
       // Flashs tidspunkter deler kun bilaget op. Alt andet bruger teksten uden dem.
       const fraFlash = skalerTider(laesAfsnit(raa), varighed);

@@ -836,10 +836,10 @@ test('/referat med kun manglende bidder giver tom tekst og intet referat', async
   assert.equal(s.referat.kald, 0);
 });
 
-test('/referat afviser mere end 40 bidder og ugyldige dele', async () => {
+test('/referat afviser mere end 200 bidder og ugyldige dele', async () => {
   const s = await start();
   const b = { startSek: 0, overlapSek: 0, varighedSek: 60, tekst: 'a' };
-  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: Array(41).fill(b) }] })).status, 400);
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: Array(201).fill(b) }] })).status, 400);
   assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, startSek: -1 }] }] })).status, 400);
   assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, tekst: 7 }] }] })).status, 400);
   assert.equal((await postReferat(s.adresse, { dele: [{ bidder: [{ ...b, afsnit: [{ sek: 'x', tekst: 'a' }] }] }] })).status, 400);
@@ -865,4 +865,20 @@ test('x-smaabidder fortæller Gemini-delen, at appen kan dele en blokeret bid', 
   assert.ok(svar.headers.get('access-control-allow-headers').includes('x-smaabidder'));
   await post(s.adresse, { headers: { 'x-varighed': '1800' } });
   assert.equal(s.gemini.valg.smaabidder, false);
+});
+
+test('x-reserve beder om Transcribe først og er tilladt i CORS', async () => {
+  const s = await start();
+  await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-reserve': '1', 'x-varighed': '300' } });
+  assert.equal(s.gemini.valg.reserve, true);
+  await post(s.adresse, { headers: { 'x-kun-tekst': '1', 'x-varighed': '300' } });
+  assert.equal(s.gemini.valg.reserve, false);
+  const svar = await fetch(`${s.adresse}/transskriber`, { method: 'OPTIONS', headers: { origin: OPRINDELSE, 'access-control-request-method': 'POST' } });
+  assert.ok(svar.headers.get('access-control-allow-headers').includes('x-reserve'));
+});
+
+test('/referat tager imod 60 bidder (4 timer, hvor alt er blokeret ned til 5-min.-bidder)', async () => {
+  const s = await start();
+  const b = { startSek: 0, overlapSek: 0, varighedSek: 300, tekst: 'a' };
+  assert.equal((await postReferat(s.adresse, { dele: [{ bidder: Array(60).fill(b) }] })).status, 200);
 });
