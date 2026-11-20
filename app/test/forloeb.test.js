@@ -1384,3 +1384,54 @@ test('ventetiderne ved midlertidige fejl kan sættes (bruges af browsertestene)'
   await s.forloeb.behandl('a');
   assert.deepEqual(ventet, [5, 7]);
 });
+
+// Flash kan springe minutter af talen over uden fejl (diagnosen 20. nov.: 171 ord på 7½ min., tider med spring på 2 min.).
+// Et spring på over 2 min. mellem Flashs tider behandles som en tom bid.
+
+/** En tekst med Flashs tider (sekunder i bidden). */
+const medTider = (lyd, tider) => async () => ({
+  tekst: tider.map((t) => `ord ved ${t}`).join('\n'),
+  afsnit: tider.map((t) => ({ sek: t, tekst: `Tekst ${t} ${lyd}` })),
+});
+const hver30 = (fra, til) => Array.from({ length: Math.floor((til - fra) / 30) + 1 }, (_, i) => fra + i * 30);
+
+test('en bid, hvor Flashs tider springer over 2 min., deles i småbidder', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => {
+      const t = await lyd.text();
+      // 30-min.-bidden mangler minut 10-15. Småbidderne har tider hvert 30. s.
+      if (t === 'd0:29-60') return medTider(t, [...hver30(0, 600), ...hver30(900, 1860)])();
+      return medTider(t, hver30(0, 600))();
+    },
+  });
+  await s.forloeb.behandl('a');
+  const sendt = await Promise.all(s.t.lydListe.map(([lyd]) => lyd.text()));
+  assert.ok(sendt.includes('d0:29-39'), 'delt i småbidder');
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+});
+
+test('et spring på under 2 min. er i orden og giver ingen nye kald', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => medTider(await lyd.text(), [...hver30(0, 600), ...hver30(700, 1860)])(),
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 6);
+});
+
+test('en bid på 5 min. med et spring prøves med den anden model, og teksten med flest ord bruges', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd, mime, bevis, meta) => {
+      const t = await lyd.text();
+      if (['d0:29-60', 'd0:38-49'].includes(t)) throw blokeret();
+      if (t === 'd0:42-48' && meta.reserve) return { tekst: 'Fuld tekst fra den anden model med mange flere ord end før i denne bid' };
+      if (t === 'd0:42-48') return medTider(t, [0, 10, 20, 300])();
+      return medTider(t, hver30(0, 300))();
+    },
+  });
+  await s.forloeb.behandl('a');
+  const bid = s.t.referatKald[0][0].dele[0].bidder.find((b) => b.startSek === 42 * 60);
+  assert.match(bid.tekst, /Fuld tekst fra den anden model/);
+});

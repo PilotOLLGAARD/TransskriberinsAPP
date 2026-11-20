@@ -13,6 +13,9 @@ const SMAA_TRIN = (bidder) => [bidder.smaaBidMs, bidder.smaaBidMs / 2];
 // Midlertidige fejl ventes ud så længe, før noten fejler. Login, dagsgrænse og formatfejl ventes ikke ud.
 const VENT_MS = [20000, 60000];
 const VENTES_UD = new Set(['net', 'tjeneste']);
+// Flash skriver et tidspunkt mindst hvert 30. s. Et spring på over 2 min. betyder, at tale kan være sprunget over
+// (diagnosen 20. nov. 2026: 171 ord på 7½ min., uden fejl). Så behandles bidden som tom.
+const MAKS_SPRING_SEK = 120;
 const standardVent = (ms, signal) => new Promise((ok) => {
   const t = setTimeout(ok, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); ok(); }, { once: true });
@@ -133,6 +136,15 @@ export function lavForloeb({
         overlapMs: k === 0 ? bid.overlapMs : s.overlapMs, fraEnhed: bid.fraEnhed + s.fraEnhed, tilEnhed: bid.fraEnhed + s.tilEnhed,
       }));
   }
+
+  /** Et spring på over MAKS_SPRING_SEK mellem Flashs tider (eller til bidens slutning). Kun med mindst tre tider. */
+  function harSpring(svar, varighedMs) {
+    const tider = (Array.isArray(svar?.afsnit) ? svar.afsnit : []).map((a) => a?.sek).filter(Number.isFinite);
+    if (tider.length < 3) return false;
+    const punkter = [0, ...tider, Number.isFinite(varighedMs) ? varighedMs / 1000 : tider.at(-1)];
+    return punkter.some((p, i) => i > 0 && p - punkter[i - 1] > MAKS_SPRING_SEK);
+  }
+  const antalOrd = (svar) => String(svar?.tekst ?? '').split(/\s+/).filter(Boolean).length;
 
   /** Et svar uden et eneste ord, hverken i teksten eller i afsnittene. */
   function erTomtSvar(svar) {
@@ -265,6 +277,12 @@ export function lavForloeb({
         // Fejlede en anden bid imens (eller blev afsendelsen stoppet), er bidden ikke prøvet færdig. Den sendes igen ved Prøv igen.
         if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
         if (erTomtSvar(svar) && plan.length) return delOp();
+        // Tale sprunget over: mindre bidder, eller på det mindste trin den anden model. Teksten med flest ord bruges.
+        if (harSpring(svar, varighedMs) && !signal.aborted && !fejl) {
+          if (plan.length) return delOp();
+          const anden = await sendBid(true);
+          if (antalOrd(anden) > antalOrd(svar)) svar = anden;
+        }
         // Den mindste bid: den anden model prøver (Transcribe, inden for dens grænse).
         if (erTomtSvar(svar)) svar = await sendBid(true);
         if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
