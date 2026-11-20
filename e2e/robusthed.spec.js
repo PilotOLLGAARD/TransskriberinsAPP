@@ -147,10 +147,19 @@ for (const kb of [100, 2048]) test(`net væk midt i upload af ${kb} KB: lyden be
 test('afbrudt efter første del af en fortsat optagelse: kun den manglende del sendes igen, og én mail', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);
+  // Korte ventetider: appen venter ellers 20 og 60 s, før en del, der ikke kom igennem, giver Fejlet.
+  await side.addInitScript(() => { globalThis.__BIDDER__ = { ventMs: [10, 10] }; });
   const id = await lagOptagelse(side, { bytes: 256 * KB, dele: 2 });
   const foer = await tal(miljoe);
   let kald = 0;
-  await side.route('**/transskriber', (route) => (++kald === 2 ? route.abort('internetdisconnected') : route.continue()));
+  let fejlDel = null;
+  // Den anden del, der sendes, kommer aldrig igennem (heller ikke ved de automatiske genforsøg).
+  await side.route('**/transskriber', (route) => {
+    kald++;
+    const del = route.request().postDataBuffer()?.subarray(0, 16).toString('hex');
+    if (kald === 2) fejlDel = del;
+    return del === fejlDel ? route.abort('internetdisconnected') : route.continue();
+  });
   await sendLagt(side, 'To dele');
   await vis(side, 'Ingen forbindelse. Optagelsen er gemt.');
   const n = await note(side, id);

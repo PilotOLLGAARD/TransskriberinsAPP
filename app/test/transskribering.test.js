@@ -353,3 +353,12 @@ test('x-smaabidder sendes, når appen kan dele en blokeret bid', async () => {
   await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true }, hent);
   assert.equal(kald.headers['x-smaabidder'], undefined);
 });
+
+test('x-reserve sendes, når appen beder om den anden model', async () => {
+  let kald;
+  const hent = async (url, valg) => { kald = valg; return new Response(JSON.stringify({ tekst: 'Del' }), { status: 200 }); };
+  await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true, reserve: true }, hent);
+  assert.equal(kald.headers['x-reserve'], '1');
+  await sendLyd(LYD, 'audio/mp4', 'b', { kunTekst: true, afsnit: true }, hent);
+  assert.equal(kald.headers['x-reserve'], undefined);
+});

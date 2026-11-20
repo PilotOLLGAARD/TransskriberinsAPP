@@ -8,6 +8,15 @@ const KAN_BEHANDLES = new Set([STATUS.GEMT, STATUS.FEJL, STATUS.OPTAGER, STATUS.
 const FRISK_MS = 30 * 1000;
 // Højst så mange bidder af en lang optagelse sendes ad gangen.
 const SAMTIDIGE_BIDDER = 3;
+// Blokeret eller tom bid: mindre bidder på 10 min. (efter en hel bid), derefter 5 min. (efter en på 10 min.).
+const SMAA_TRIN = (bidder) => [bidder.smaaBidMs, bidder.smaaBidMs / 2];
+// Midlertidige fejl ventes ud så længe, før noten fejler. Login, dagsgrænse og formatfejl ventes ikke ud.
+const VENT_MS = [20000, 60000];
+const VENTES_UD = new Set(['net', 'tjeneste']);
+const standardVent = (ms, signal) => new Promise((ok) => {
+  const t = setTimeout(ok, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); ok(); }, { once: true });
+});
 // En del, der ikke kan klippes, sendes hel, men kun op til 2½ time (serverens grænse for ét kald).
 const MAKS_UDELT_MS = 9000 * 1000;
 // En lydfil, hvis længde ikke kunne læses, er måske lang: over ca. 35 min. ved 128 kbit/s går den i bidder.
@@ -29,7 +38,7 @@ function fejlTypeFor(e, reserve) {
  */
 export function lavForloeb({
   lager, login, sendLyd, sendMail, sendReferat, aktivAndetSted = async () => false, nu = Date.now, vedAendring = () => {}, vedUpload = () => {},
-  vedBidder = () => {}, opdeling = standardOpdeling, bidder = BIDDER,
+  vedBidder = () => {}, opdeling = standardOpdeling, bidder = BIDDER, vent = standardVent,
 }) {
   const igang = new Set();
   // Afsendelser, der kan stoppes, når brugeren sletter noten.
@@ -109,13 +118,16 @@ export function lavForloeb({
     return { kilde, indeks, plan, varighedMs: indeks.varighedMs };
   }
 
-  /** Småbidder på 10 min. af en bid, som Googles filter afviste. Tider i forhold til delen. */
-  function smaaPlan(indeks, bid) {
-    if (!indeks || bid.hel && bid.slutMs === null) return [];
+  /**
+   * Mindre bidder af en bid (størrelse str: 10, derefter 5 min.), når Googles filter afviste den, eller den kom tom
+   * tilbage. Tider i forhold til delen. [] når bidden ikke kan deles.
+   */
+  function delPlan(indeks, bid, str) {
+    if (!indeks || !Number.isFinite(bid.slutMs) || !str) return [];
     const enheder = indeks.enheder.slice(bid.fraEnhed, bid.tilEnhed).map((e) => ({ ...e, tidMs: e.tidMs - bid.startMs }));
     const varighed = bid.slutMs - bid.startMs;
-    if (varighed <= bidder.smaaBidMs || enheder.length < 2) return [];
-    return opdeling.planlaegBidder(varighed, enheder, { bidMs: bidder.smaaBidMs, overlapMs: bidder.overlapMs, delFraMs: bidder.smaaBidMs })
+    if (varighed <= str || enheder.length < 2) return [];
+    return opdeling.planlaegBidder(varighed, enheder, { bidMs: str, overlapMs: bidder.overlapMs, delFraMs: str })
       .map((s, k) => ({
         nr: k, startMs: bid.startMs + s.startMs, slutMs: bid.startMs + s.slutMs,
         overlapMs: k === 0 ? bid.overlapMs : s.overlapMs, fraEnhed: bid.fraEnhed + s.fraEnhed, tilEnhed: bid.fraEnhed + s.tilEnhed,
@@ -128,10 +140,27 @@ export function lavForloeb({
     return !String(svar?.tekst ?? '').trim() && !afsnit.trim();
   }
 
+  // Bidderne i en del er et træ: en bid, der blev delt, har { smaa: { plan, tekster } } i stedet for sin tekst.
+  // sti er numrene fra den øverste bid og ned, fx [1, 2, 0].
+  function* bladeAf(svar, bid, sti) {
+    if (svar?.smaa) for (const s of svar.smaa.plan) yield* bladeAf(svar.smaa.tekster[s.nr], s, [...sti, s.nr]);
+    else yield { bid, svar, sti };
+  }
+  function* blade(t) {
+    for (const bid of t.plan) yield* bladeAf(t.tekster[bid.nr], bid, [bid.nr]);
+  }
+  function saetSvar(t, sti, svar) {
+    let tekster = t.tekster;
+    for (const nr of sti.slice(0, -1)) tekster = tekster[nr].smaa.tekster;
+    tekster[sti.at(-1)] = svar;
+  }
+
   /**
    * Transskriberer hver bid af hver del, højst SAMTIDIGE ad gangen, og laver ét referat via /referat.
    * Hver bids tekst gemmes, så snart den kommer, så et genforsøg aldrig sender noget, der er betalt.
-   * Blokerer Googles filter en bid, prøves den i småbidder; en småbid, der også blokeres, mangler i referatet.
+   * Blokerer Googles filter en bid, eller kommer den tom tilbage, prøves den i mindre bidder (10, derefter 5 min.);
+   * en tom bid på 5 min. prøves med den anden model. Først derefter mangler den, og det står i referatet.
+   * Midlertidige fejl (net, tjeneste) ventes ud og prøves igen, før noten fejler.
    */
   async function behandlBidder(id, note, bevis, signal) {
     const dele = delePaa(note);
@@ -148,17 +177,18 @@ export function lavForloeb({
       if (typeof tekst === 'string' && d !== undefined && !tilstand[d]) tilstand[d] = enBid(tekst);
     });
     for (let d = 0; d < dele.length; d++) if (tom(d) && !tilstand[d]) tilstand[d] = { ...enBid(''), varighedMs: 0 };
+    // Hver gemning skriver hele tilstanden. En, der fejler (fx fuldt lager), stopper ikke de næste.
     let skriv = Promise.resolve();
     const gem = () => {
       const kopi = JSON.parse(JSON.stringify(tilstand));
-      skriv = skriv.then(() => lager.opdaterNote(id, { bidder: kopi }));
-      return skriv;
+      const skrivNu = () => lager.opdaterNote(id, { bidder: kopi });
+      skriv = skriv.then(skrivNu, skrivNu);
+      return skriv.catch(() => {});
     };
 
     const kilder = [];
     for (let d = 0; d < dele.length; d++) {
-      const faerdig = tilstand[d] && tilstand[d].plan.every((b) => tilstand[d].tekster[b.nr] && !tilstand[d].tekster[b.nr].smaa?.plan.some((s) => !tilstand[d].tekster[b.nr].smaa.tekster[s.nr]));
-      if (faerdig) continue;
+      if (tilstand[d] && [...blade(tilstand[d])].every((b) => b.svar)) continue;
       const p = await planForDel(kildePr.get(d), dele[d], tilstand[d]?.plan);
       kilder[d] = p;
       tilstand[d] ??= { plan: p.plan, tekster: {} };
@@ -166,23 +196,13 @@ export function lavForloeb({
     }
     await gem();
 
-    // Opgaverne: hver bid (eller småbid), der mangler sin tekst.
+    // Opgaverne: hver bid (på et hvilket som helst trin), der mangler sin tekst.
     const ventende = [];
-    const opgave = (d, bid, smaa) => ventende.push({ d, bid, smaa });
-    for (const [d, t] of Object.entries(tilstand)) {
-      for (const bid of t.plan) {
-        const svar = t.tekster[bid.nr];
-        if (!svar) opgave(Number(d), bid, null);
-        else if (svar.smaa) for (const s of svar.smaa.plan) if (!svar.smaa.tekster[s.nr]) opgave(Number(d), s, bid);
-      }
-    }
-    const taelBidder = () => Object.values(tilstand).reduce((sum, t) => sum + t.plan.reduce((n, b) => n + (t.tekster[b.nr]?.smaa ? t.tekster[b.nr].smaa.plan.length : 1), 0), 0);
-    const taelFaerdige = () => Object.values(tilstand).reduce((sum, t) => sum + t.plan.reduce((n, b) => {
-      const svar = t.tekster[b.nr];
-      if (!svar) return n;
-      return n + (svar.smaa ? svar.smaa.plan.filter((s) => svar.smaa.tekster[s.nr]).length : 1);
-    }, 0), 0);
-    const meld = () => vedBidder(id, { ialt: taelBidder(), faerdige: taelFaerdige() });
+    for (const [d, t] of Object.entries(tilstand)) for (const b of blade(t)) if (!b.svar) ventende.push({ d: Number(d), bid: b.bid, sti: b.sti });
+    const meld = () => {
+      const alle = Object.values(tilstand).flatMap((t) => [...blade(t)]);
+      vedBidder(id, { ialt: alle.length, faerdige: alle.filter((b) => b.svar).length });
+    };
     meld();
 
     let fejl = null;
@@ -194,82 +214,112 @@ export function lavForloeb({
       for (const u of upload.values()) { sendt += u.sendt; ialt += u.ialt; }
       vedUpload(id, sendt, ialt);
     };
-    async function send({ d, bid, smaa }) {
+
+    /** Midlertidige fejl ventes ud (20 s, derefter 60 s), så en kortvarig fejl hos Google eller på nettet ikke stopper noten. */
+    async function medVent(arbejde) {
+      for (let i = 0; ; i++) {
+        try {
+          return await arbejde();
+        } catch (e) {
+          const plan = bidder.ventMs ?? VENT_MS;
+          if (!VENTES_UD.has(e?.type) || i >= plan.length || signal.aborted || fejl) throw e;
+          await vent(plan[i], signal);
+          if (signal.aborted) throw e;
+        }
+      }
+    }
+
+    async function send({ d, bid, sti }) {
       const del = dele[d];
       const { kilde, indeks } = kilder[d];
       const lyd = bid.hel ? await kilde.udsnit(0, kilde.stoerrelse) : await opdeling.lavBid(kilde, indeks, bid);
       if (signal.aborted || fejl) return;
       const varighedMs = Number.isFinite(bid.slutMs) ? bid.slutMs - bid.startMs : undefined;
+      // Næste trin: 10 min. efter en hel bid, 5 min. efter en bid på 10 min. Derefter kan bidden ikke deles mere.
+      const naesteStr = SMAA_TRIN(bidder)[sti.length - 1];
+      const plan = delPlan(indeks, bid, naesteStr);
+      const sendBid = (reserve = false) => medVent(() => {
+        const noegle = {};
+        // smaabidder: appen kan dele bidden, så serveren giver en blokering videre i stedet for at bruge Transcribe.
+        return sendLyd(lyd, del.mime, bevis, {
+          kunTekst: true, afsnit: true, smaabidder: plan.length > 0, reserve, varighedMs, oprettet: note.oprettet,
+        }, undefined, {
+          signal,
+          // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
+          vedSendt: () => {},
+          vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
+        }).finally(() => upload.delete(noegle));
+      });
+      const delOp = async () => {
+        saetSvar(tilstand[d], sti, { smaa: { plan, tekster: {} } });
+        for (const s of plan) ventende.push({ d, bid: s, sti: [...sti, s.nr] });
+        await gem();
+        meld();
+        vaek();
+      };
       let resultat;
       try {
-        // Kan bidden deles i småbidder (klippelig og længere end en småbid), prøver appen dem før Transcribe.
-        const smaabidder = !smaa && Boolean(indeks) && Number.isFinite(varighedMs) && varighedMs > bidder.smaaBidMs;
-        const sendBid = () => {
-          const noegle = {};
-          return sendLyd(lyd, del.mime, bevis, { kunTekst: true, afsnit: true, smaabidder, varighedMs, oprettet: note.oprettet }, undefined, {
-            signal,
-            // Skærmen viser bidder; "referatet laves" først, når alle bidder er færdige.
-            vedSendt: () => {},
-            vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
-          }).finally(() => upload.delete(noegle));
-        };
         let svar = await sendBid();
-        // En tom bid godtages aldrig som stilhed: den prøves én gang til, og er den stadig tom, mangler den
-        // (serveren skriver så "[Dette afsnit (tidsrum) kunne ikke transskriberes]").
+        // En tom bid godtages aldrig som stilhed: den prøves én gang til.
         if (erTomtSvar(svar) && !signal.aborted && !fejl) svar = await sendBid();
-        // Fejlede en anden bid imens (eller blev afsendelsen stoppet), er bidden ikke prøvet færdig.
-        // Den gemmes så ikke som manglende, men sendes igen ved Prøv igen.
+        // Fejlede en anden bid imens (eller blev afsendelsen stoppet), er bidden ikke prøvet færdig. Den sendes igen ved Prøv igen.
+        if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
+        if (erTomtSvar(svar) && plan.length) return delOp();
+        // Den mindste bid: den anden model prøver (Transcribe, inden for dens grænse).
+        if (erTomtSvar(svar)) svar = await sendBid(true);
         if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
         resultat = erTomtSvar(svar)
           ? { mangler: true, tom: true, tekst: '' }
           : { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };
       } catch (e) {
         if (e?.type !== 'blokeret') throw e;
-        // Googles filter: en hel bid prøves i småbidder, en småbid (eller en bid, der ikke kan deles) mangler.
-        const plan = smaa ? [] : smaaPlan(indeks, bid);
-        if (plan.length) {
-          tilstand[d].tekster[bid.nr] = { smaa: { plan, tekster: {} } };
-          for (const s of plan) ventende.push({ d, bid: s, smaa: bid });
-          await gem();
-          meld();
-          return;
-        }
+        // Googles filter: bidden prøves i mindre bidder. Den mindste bid (eller en, der ikke kan deles) mangler.
+        if (plan.length) return delOp();
         resultat = { mangler: true, tekst: '' };
       }
-      if (smaa) tilstand[d].tekster[smaa.nr].smaa.tekster[bid.nr] = resultat;
-      else tilstand[d].tekster[bid.nr] = resultat;
+      saetSvar(tilstand[d], sti, resultat);
       await gem();
       meld();
     }
 
+    // Arbejderne venter på hinanden: en bid, der bliver delt, lægger nye opgaver i køen.
+    let aktive = 0;
+    let vaekkere = [];
+    const vaek = () => { const v = vaekkere; vaekkere = []; v.forEach((ok) => ok()); };
     async function arbejder() {
-      while (ventende.length && !fejl && !signal.aborted) {
+      for (;;) {
+        if (fejl || signal.aborted) return;
+        if (!ventende.length) {
+          if (!aktive) return;
+          await new Promise((ok) => vaekkere.push(ok));
+          continue;
+        }
         const naeste = ventende.shift();
+        aktive++;
         try {
           await send(naeste);
         } catch (e) {
           fejl ??= e;
+        } finally {
+          aktive--;
+          vaek();
         }
       }
     }
     await Promise.all(Array.from({ length: SAMTIDIGE_BIDDER }, arbejder));
-    await skriv;
+    await skriv.catch(() => {});
     if (signal.aborted) throw Object.assign(new Error('net'), { type: 'net' });
     if (fejl) throw fejl;
 
     await fremdrift(id, 'laver');
     const tilServer = dele.map((del, d) => {
       const t = tilstand[d];
-      const bidListe = t.plan.flatMap((bid) => {
-        const svar = t.tekster[bid.nr];
-        const enkelt = (b, s) => ({
-          tom: s.tom === true,
-          startSek: b.startMs / 1000, overlapSek: b.overlapMs / 1000,
-          varighedSek: Number.isFinite(b.slutMs) ? (b.slutMs - b.startMs) / 1000 : 0,
-          tekst: s.tekst || '', ...(s.afsnit ? { afsnit: s.afsnit } : {}), ...(s.mangler ? { mangler: true } : {}),
-        });
-        return svar.smaa ? svar.smaa.plan.map((s) => enkelt(s, svar.smaa.tekster[s.nr])) : [enkelt(bid, svar)];
-      });
+      const bidListe = [...blade(t)].map(({ bid: b, svar: s }) => ({
+        tom: s.tom === true,
+        startSek: b.startMs / 1000, overlapSek: b.overlapMs / 1000,
+        varighedSek: Number.isFinite(b.slutMs) ? (b.slutMs - b.startMs) / 1000 : 0,
+        tekst: s.tekst || '', ...(s.afsnit ? { afsnit: s.afsnit } : {}), ...(s.mangler ? { mangler: true } : {}),
+      }));
       return {
         ...(del.filnavn ? { filnavn: del.filnavn } : {}),
         afbrudt: d > 0 && note.kilde !== 'filer',

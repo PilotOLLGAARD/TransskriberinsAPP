@@ -164,9 +164,10 @@ test('Lydfiler-skærmen: tekst mindst 18 px og knapper mindst 44 px, i lys og m�
   }
 });
 
-test('en bid, der kommer tom tilbage to gange, står med tidsrum på trin-skærmen, i mailen og i bilaget', async () => {
+test('en bid, der også er tom med den anden model, står med tidsrum på trin-skærmen, i mailen og i bilaget', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
-  await side.addInitScript(() => { globalThis.__BIDDER__ = { bidMs: 20000, overlapMs: 5000, delFraMs: 25000, smaaBidMs: 10000 }; });
+  // Uden småbidder (smaaBidMs 0), så den tomme bid går direkte til den anden model og derefter mangler.
+  await side.addInitScript(() => { globalThis.__BIDDER__ = { bidMs: 20000, overlapMs: 5000, delFraMs: 25000, smaaBidMs: 0 }; });
   await logInd(side);
   const transskriber = [];
   side.on('request', (r) => { if (r.url().endsWith('/transskriber') && r.method() === 'POST') transskriber.push(r); });
@@ -176,7 +177,8 @@ test('en bid, der kommer tom tilbage to gange, står med tidsrum på trin-skærm
   // Den første bid, serveren får, kommer tom tilbage, også når den sendes igen.
   await saetNaesteFejl(miljoe, 'tomBid');
   const krop = await sendOgFangReferat(side);
-  assert.equal(transskriber.length, 5, '4 bidder og ét nyt forsøg af den tomme');
+  assert.equal(transskriber.length, 6, '4 bidder, ét nyt forsøg af den tomme og ét med den anden model');
+  assert.equal(transskriber.filter((r) => r.headers()['x-reserve'] === '1').length, 1);
   const mangler = krop.dele[0].bidder.filter((b) => b.mangler);
   assert.equal(mangler.length, 1, 'den tomme bid sendes som manglende');
   await vis(side, SENDT, 20000);
