@@ -16,8 +16,10 @@ const MARGEN_SEK = 15;
 const MAKS_ORD_UDEN_TID = 150;
 const MIN_FAELLES_ORD = 6;
 // Omtrentlig ordrække (lokal justering): +2 for et ens ord, -1 for et andet ord eller et ord for meget eller for lidt.
-// Mindst så meget point, før den bruges: ca. 8 ens ord i et overlap, der er skrevet lidt forskelligt.
-const MIN_LIGHED = 12;
+// Den bruges kun inden for overlappet (ca. 3 ord pr. sekund) og med mindst 8 ens ord, der udgør mindst 70 % af rækken.
+const ORD_PR_SEK = 3;
+const MIN_ENS_ORD = 8;
+const MIN_ENS_ANDEL = 0.7;
 
 const ordAf = (tekst) => String(tekst).split(/\s+/).filter(Boolean);
 const normaliser = (ord) => ord.toLocaleLowerCase('da-DK').replace(/[^\p{L}\p{N}]/gu, '');
@@ -40,36 +42,38 @@ function vindue(afsnit, { fraSlut, graense }) {
 
 /** Den længste fælles række af ord, nærmest midten ved lige lange. { i, j, laengde } eller null. */
 /**
- * Den bedste omtrentlige fælles række (Smith-Waterman på ord): { i, j } er dens start i hale og hoved, eller null.
- * Klippes der ved starten, står ordene i overlappet kun én gang (fra den næste bid).
+ * Den bedste omtrentlige fælles række (lokal justering på ord): { i, j } er dens start i hale og hoved, eller null.
+ * Kun inden for de sidste og første ord, et overlap kan fylde (ca. 3 ord pr. sekund), og kun en række med mindst
+ * MIN_ENS_ORD ens ord og mindst 70 % ens ord. Så kan en sætning, der gentages et andet sted, aldrig klippe tekst væk.
  */
-function lignendeRaekke(hale, hoved) {
-  const n = hale.length;
+function lignendeRaekke(haleHel, hovedHel, overlapSek) {
+  const maks = Math.max(40, Math.round(overlapSek * ORD_PR_SEK));
+  const skub = Math.max(0, haleHel.length - maks);
+  const hale = haleHel.slice(skub);
+  const hoved = hovedHel.slice(0, maks);
   const m = hoved.length;
-  let bedst = { score: 0 };
-  // Pointtabellen og hvor hver celles række startede.
-  let forrige = new Array(m + 1).fill(0);
-  let forrigeStart = new Array(m + 1).fill(null);
-  for (let a = 1; a <= n; a++) {
-    const nu = new Array(m + 1).fill(0);
-    const nuStart = new Array(m + 1).fill(null);
+  let bedst = null;
+  // Pr. celle: point, hvor rækken startede, antal ens ord og rækkens længde.
+  const tom = () => Array.from({ length: m + 1 }, () => ({ p: 0, start: null, ens: 0, laengde: 0 }));
+  let forrige = tom();
+  for (let a = 1; a <= hale.length; a++) {
+    const nu = tom();
     for (let b = 1; b <= m; b++) {
-      const ens = hale[a - 1].n && hale[a - 1].n === hoved[b - 1].n;
+      const ens = Boolean(hale[a - 1].n) && hale[a - 1].n === hoved[b - 1].n;
+      const d = forrige[b - 1];
       const valg = [
-        [0, null],
-        [forrige[b - 1] + (ens ? 2 : -1), forrigeStart[b - 1] ?? (ens ? [a - 1, b - 1] : null)],
-        [forrige[b] - 1, forrigeStart[b]],
-        [nu[b - 1] - 1, nuStart[b - 1]],
-      ].filter(([p, start]) => p > 0 && start);
-      const [p, start] = valg.reduce((x, y) => (y[0] > x[0] ? y : x), [0, null]);
-      nu[b] = p;
-      nuStart[b] = start;
-      if (p > bedst.score) bedst = { score: p, i: start[0], j: start[1] };
+        { p: d.p + (ens ? 2 : -1), start: d.start ?? (ens ? [a - 1, b - 1] : null), ens: d.ens + (ens ? 1 : 0), laengde: d.laengde + 1 },
+        { ...forrige[b], p: forrige[b].p - 1, laengde: forrige[b].laengde + 1 },
+        { ...nu[b - 1], p: nu[b - 1].p - 1, laengde: nu[b - 1].laengde + 1 },
+      ].filter((c) => c.p > 0 && c.start);
+      const c = valg.reduce((x, y) => (y.p > x.p ? y : x), { p: 0, start: null, ens: 0, laengde: 0 });
+      nu[b] = c;
+      if (c.p > (bedst?.p ?? 0)) bedst = c;
     }
     forrige = nu;
-    forrigeStart = nuStart;
   }
-  return bedst.score >= MIN_LIGHED ? { i: bedst.i, j: bedst.j } : null;
+  if (!bedst || bedst.ens < MIN_ENS_ORD || bedst.ens / bedst.laengde < MIN_ENS_ANDEL) return null;
+  return { i: skub + bedst.start[0], j: bedst.start[1] };
 }
 
 function faellesRaekke(hale, hoved, midte) {
@@ -98,10 +102,14 @@ function faellesRaekke(hale, hoved, midte) {
  */
 function fjernOverlap(forrige, naeste, { naesteStartSek, overlapSek }) {
   const midte = naesteStartSek + overlapSek / 2;
-  const hale = vindue(forrige, { fraSlut: true, graense: naesteStartSek - MARGEN_SEK });
-  const hoved = vindue(naeste, { fraSlut: false, graense: naesteStartSek + overlapSek + MARGEN_SEK });
+  // Uden tider på den ene side findes overlappet kun blandt de sidste og første ord, det kan fylde, så en sætning,
+  // der gentages længere væk, aldrig klipper tekst væk. Med tider afgrænser tiden vinduet.
+  const udenTid = !harTid(forrige) || !harTid(naeste);
+  const maks = udenTid ? Math.max(40, Math.round(overlapSek * ORD_PR_SEK)) : MAKS_ORD_UDEN_TID * 2;
+  const hale = vindue(forrige, { fraSlut: true, graense: naesteStartSek - MARGEN_SEK }).slice(-maks);
+  const hoved = vindue(naeste, { fraSlut: false, graense: naesteStartSek + overlapSek + MARGEN_SEK }).slice(0, maks);
   // Først en ens række på 6 ord, ellers en omtrentlig (to modeller eller to forsøg skriver overlappet lidt forskelligt).
-  const fund = faellesRaekke(hale, hoved, midte) ?? lignendeRaekke(hale, hoved);
+  const fund = faellesRaekke(hale, hoved, midte) ?? lignendeRaekke(hale, hoved, overlapSek);
 
   if (fund) {
     const skaer = hale[fund.i];

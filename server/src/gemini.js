@@ -349,7 +349,7 @@ function lavGemini({
             log({ haendelse: 'model-skift', grund, fra: FLASH, til: TRANSCRIBE });
             try {
               // Efter en blokering er Transcribe den sidste mulighed: et 429 ventes ud i stedet for at fejle.
-              return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist, { vent429: grund === 'blokeret' }) };
+              return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist, { vent429: grund === 'blokeret' && !lang }) };
             } catch (fejl) {
               // Blokeret indhold er ikke midlertidigt: brugeren skal have den fejl, ikke en, der lokker til nye betalte forsøg.
               throw grund === 'blokeret' ? e : fejl;

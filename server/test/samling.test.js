@@ -215,3 +215,13 @@ test('fjernOverlap: et langt afsnit, der starter før overlappet og går ind i d
   assert.equal(tekst.split('stilladset').length - 1, 1, tekst);
   assert.match(tekst, /Næste punkt\.$/);
 });
+
+test('fjernOverlap uden tider: en gentaget sætning langt fra overgangen fjerner aldrig rigtige ord', () => {
+  const fyld = (navn, n) => Array.from({ length: n }, (_, i) => `${navn}${i}`).join(' ');
+  const forrige = [{ sek: null, tekst: `${fyld('a', 200)} det er rigtigt så vi tager den med op på næste møde ${fyld('b', 100)}` }];
+  const naeste = [{ sek: null, tekst: `${fyld('c', 120)} det er rigtigt nu vi tager den med op på næste møde ${fyld('d', 200)}` }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  const ind = [...forrige, ...naeste].map((a) => a.tekst.split(' ').length).reduce((x, y) => x + y);
+  const ud = [...r.forrige, ...r.naeste].map((a) => a.tekst.split(' ').length).reduce((x, y) => x + y, 0);
+  assert.equal(ud, ind, 'ingen ord fjernet');
+});

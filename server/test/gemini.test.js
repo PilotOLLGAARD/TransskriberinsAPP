@@ -1070,3 +1070,9 @@ test('kun ét kald til Transcribe ad gangen pr. server, så grænsen pr. minut i
   await Promise.all([1, 2, 3].map(() => g.transskriber(lyd(), valg('audio/mp4', { varighedSek: 300 }))));
   assert.equal(hoejest, 1);
 });
+
+test('efter en blokering ventes 429 kun ud for lyd, Transcribe kan klare (ikke lyd over 400 s)', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe: raekke(429, 200) }) });
+  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 630 })), (e) => e.googleKode === 'content_blocked');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe'], 'ét forsøg med Transcribe, ingen venten');
+});
