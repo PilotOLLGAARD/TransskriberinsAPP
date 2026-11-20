@@ -65,4 +65,6 @@ test('mailen nævner det, når et stykke af optagelsen ikke kunne transskriberes
   const r = { ...TOM, type: 'moede', opsummering: 'Nyt tag.' };
   assert.match(lavHtml({ titel: 'X', referat: r, huller: 1 }), /Et stykke af optagelsen kunne ikke transskriberes\. Se bilaget\./);
   assert.doesNotMatch(lavHtml({ titel: 'X', referat: r }), /kunne ikke transskriberes/);
+  assert.match(lavHtml({ titel: 'X', referat: r, huller: 2, mangler: ['30:00-60:00', '1:00:00-1:30:00'] }),
+    /Dette afsnit kunne ikke transskriberes: 30:00-60:00, 1:00:00-1:30:00. Se bilaget./);
 });

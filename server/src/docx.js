@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
-const { lavAfsnit, lavMeta, formaterTidspunkt } = require('./pdf.js');
+const { lavAfsnit, lavMeta, formaterTidspunkt, manglerLinje } = require('./pdf.js');
 const { formaterTid } = require('./afsnit.js');
 
 const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
@@ -81,13 +81,14 @@ const logo = '<w:p><w:pPr><w:spacing w:after="240"/></w:pPr><w:r><w:drawing>'
   + '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
 
 function lavDokument({
-  titel, tidspunkt, varighedSek, referat, tekst, bilag,
+  titel, tidspunkt, varighedSek, referat, tekst, bilag, mangler = [],
 }) {
   const p = [
     logo,
     afsnit(titel, 'Title'),
     afsnit(lavMeta({ type: referat.type, tidspunkt, varighedSek }), 'Meta'),
   ];
+  if (mangler.length) p.push(afsnit(manglerLinje(mangler)));
   if (!referat.kort && referat.opsummering) {
     p.push(afsnit('Opsummering', 'Heading1'), ...linjer(referat.opsummering).map((l) => afsnit(l)));
   }
@@ -229,13 +230,13 @@ function lavZip(filer) {
 }
 
 function lavDocx({
-  titel, tidspunkt, varighedSek, referat, tekst, bilag,
+  titel, tidspunkt, varighedSek, referat, tekst, bilag, mangler,
 }) {
   return lavZip([
     ['[Content_Types].xml', INDHOLDSTYPER],
     ['_rels/.rels', RELATIONER],
     ['word/document.xml', lavDokument({
-      titel, tidspunkt, varighedSek, referat, tekst, bilag,
+      titel, tidspunkt, varighedSek, referat, tekst, bilag, mangler,
     })],
     ['word/_rels/document.xml.rels', DOKUMENT_RELATIONER],
     ['word/styles.xml', TYPOGRAFIER],

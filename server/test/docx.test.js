@@ -336,3 +336,10 @@ test('bilag med dele: overskrift som eget afsnit, og tiden er inden for filen', 
   assert.deepEqual(bilagDel(xml), ['Del 1: Møde_del1.m4a', '00:00\tFørste fil.', 'Del 2: Møde & del2.m4a', '01:00\tAnden fil.']);
   assert.match(bilagXml(xml), /<w:pStyle w:val="Deloverskrift"\/><\/w:pPr><w:r><w:t xml:space="preserve">Del 2: Møde &amp; del2.m4a/);
 });
+
+test('et afsnit, der ikke kunne transskriberes, står øverst ved referatet med tidsrum', () => {
+  const a = afsnitAf(dokument({ mangler: ['30:00-60:00', '1:00:00-1:30:00'] }));
+  assert.equal(a[2], 'Dette afsnit kunne ikke transskriberes: 30:00-60:00, 1:00:00-1:30:00. Referatet dækker det ikke. Se bilaget.');
+  assert.equal(a[3], 'Opsummering');
+  assert.ok(!afsnitAf(dokument()).some((l) => l.includes('kunne ikke transskriberes')));
+});

@@ -8,7 +8,21 @@ const wordDel = require('./docx.js');
 const {
   laesAfsnit, skalerTider, delLangeAfsnit, harTider, samletTekst, lavBilag,
 } = require('./afsnit.js');
-const { samlDele } = require('./samling.js');
+const { samlDele, medTidsrum } = require('./samling.js');
+
+/** Bilaget med tidsrum i hul-teksterne. Hullerne tælles i rækkefølge hen over alle grupper. */
+function medTidsrumIBilag(bilag, mangler) {
+  let i = 0;
+  return bilag.map((g) => ({
+    ...g,
+    afsnit: g.afsnit.map((a) => {
+      const antal = String(a).split('[Dette afsnit kunne ikke transskriberes]').length - 1;
+      const ud = medTidsrum(a, mangler.slice(i, i + antal));
+      i += antal;
+      return ud;
+    }),
+  }));
+}
 
 // Optagelser fra appen (mp4, webm) og uploadede lydfiler. Lyden sendes uændret til Google.
 const FORMATER = new Set([
@@ -146,7 +160,7 @@ function lavHandler({
 
   /** Referat, PDF og mail af en tekst. Fælles for én optagelse og flere dele. */
   async function lavResultat({
-    tekst, afsnit, titel, type, varighedSek, tidspunkt, signal, dele = [], huller = 0, timeoutMs,
+    tekst, afsnit, titel, type, varighedSek, tidspunkt, signal, dele = [], huller = 0, mangler = [], timeoutMs,
   }, spor) {
     log({ haendelse: 'referat-kald' });
     spor.trin = 'referat';
@@ -155,15 +169,20 @@ function lavHandler({
       tekst, titel, type, varighedSek, signal, ...(afsnit ? { afsnit } : {}), ...(timeoutMs ? { timeoutMs } : {}),
     });
     spor.trin = 'pdf';
+    // Referatet og talkontrollen fik hul-teksten uden tal. Bilag, mail og app får tidsrummet.
+    const bilag = lavBilag(afsnit || [], emner, dele);
+    const visTekst = medTidsrum(tekst, mangler);
     const indhold = {
-      titel: r.titel, tidspunkt, varighedSek, referat: r, tekst, bilag: lavBilag(afsnit || [], emner, dele),
+      titel: r.titel, tidspunkt, varighedSek, referat: r, tekst: visTekst,
+      bilag: bilag && mangler.length ? medTidsrumIBilag(bilag, mangler) : bilag,
+      ...(mangler.length ? { mangler } : {}),
     };
     const fil = await pdf.lavPdf(indhold);
     const filnavn = pdf.filnavn({ titel: r.titel, tidspunkt });
     // Appen sender kun Word-dokumentet. PDF'en er reserve (fejlet Word) og til ældre apps.
     const word = lavWord(indhold, filnavn);
     return {
-      tekst,
+      tekst: visTekst,
       titel: r.titel,
       type: r.type,
       referat: r,
@@ -171,9 +190,10 @@ function lavHandler({
       filnavn,
       ...word,
       emne: lavEmne({ type: r.type, titel: r.titel, tidspunkt }),
-      html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx), huller }),
-      // Et stykke, Googles filter afviste: appen viser det ved referatet.
+      html: lavHtml({ titel: r.titel, referat: r, medWord: Boolean(word.docx), huller, mangler }),
+      // Et stykke, der ikke kunne transskriberes: appen viser det på trin-skærmen og ved referatet.
       ...(huller > 0 ? { huller } : {}),
+      ...(mangler.length ? { mangler } : {}),
     };
   }
 
@@ -268,7 +288,7 @@ function lavHandler({
       } catch { /* bilaget får afsnittene, som de er */ }
       try {
         return sendJson(res, cors, 200, await lavResultat({
-          ...faelles, varighedSek: varighed, tekst: samlet.tekst, afsnit, dele: samlet.dele, huller: samlet.huller,
+          ...faelles, varighedSek: varighed, tekst: samlet.tekst, afsnit, dele: samlet.dele, huller: samlet.huller, mangler: samlet.mangler,
         }, spor));
       } catch (e) {
         return sendFejl(res, cors, e, spor.trin);

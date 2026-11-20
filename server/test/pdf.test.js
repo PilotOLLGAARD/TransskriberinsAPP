@@ -277,3 +277,10 @@ test('bilag med dele: overskriften står over filens tekst, og tiden er inden fo
   assert.ok(p.some((x) => x.s === '01:00'), 'tiden inden for filen');
   assert.ok(!p.some((x) => x.s === '46:00'), 'ikke tiden fra første fils start');
 });
+
+test('et afsnit, der ikke kunne transskriberes, giver en gyldig PDF', async () => {
+  const pdf = await lavPdf({ titel: REFERAT.titel, tidspunkt: TIDSPUNKT, varighedSek: 252, referat: REFERAT, tekst: 'Fuld tekst.', mangler: ['30:00-60:00'] });
+  const uden = await lavPdf({ titel: REFERAT.titel, tidspunkt: TIDSPUNKT, varighedSek: 252, referat: REFERAT, tekst: 'Fuld tekst.' });
+  assert.match(indhold(pdf), /%%EOF\s*$/);
+  assert.ok(pdf.length > uden.length, 'beskeden står i PDF\'en');
+});

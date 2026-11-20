@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fjernOverlap, samlDele, HUL_TEKST, AFBRUDT_TEKST } = require('../src/samling.js');
+const { fjernOverlap, samlDele, hulTekst, HUL_TEKST, AFBRUDT_TEKST } = require('../src/samling.js');
 const { samletTekst } = require('../src/afsnit.js');
 
 const tael = (tekst, s) => tekst.split(s).length - 1;
@@ -119,6 +119,42 @@ test('samlDele: en bid, der mangler, bliver til hul-teksten', () => {
   assert.deepEqual(r.afsnit.map((a) => a.tekst), ['Før.', HUL_TEKST, 'Efter.']);
   assert.equal(r.afsnit[1].sek, 1770);
   assert.equal(r.huller, 1);
+  assert.deepEqual(r.mangler, ['29:30-59:30']);
+});
+
+test('hulTekst: tidsrum i minutter og over en time med timer', () => {
+  assert.equal(hulTekst(1800, 3600), '[Dette afsnit (30:00-1:00:00) kunne ikke transskriberes]');
+  assert.equal(hulTekst(3600, 5400), '[Dette afsnit (1:00:00-1:30:00) kunne ikke transskriberes]');
+  assert.equal(hulTekst(600, null), '[Dette afsnit (fra 10:00) kunne ikke transskriberes]');
+});
+
+test('samlDele: en tom bid med længde godtages aldrig som stilhed, men markeres', () => {
+  const r = samlDele([{ bidder: [
+    bid(0, [{ sek: 0, tekst: 'Før.' }]),
+    { startSek: 1770, overlapSek: 30, varighedSek: 1830, tekst: '' },
+    { startSek: 3570, overlapSek: 30, varighedSek: 600, tekst: '  ', afsnit: [] },
+  ] }]);
+  assert.deepEqual(r.afsnit.map((a) => a.tekst), ['Før.', HUL_TEKST, HUL_TEKST]);
+  assert.equal(r.huller, 2);
+  assert.deepEqual(r.mangler, ['29:30-1:00:00', '59:30-1:09:30']);
+});
+
+test('samlDele: en hel del uden klip, der mangler, får delens tidsrum', () => {
+  const r = samlDele([
+    { varighedSek: 600, bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 0, tekst: 'Første fil.' }] },
+    { filnavn: 'b.m4a', varighedSek: 1200, bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 0, tekst: '' }] },
+  ]);
+  assert.deepEqual(r.afsnit.map((a) => a.tekst), ['Første fil.', HUL_TEKST]);
+  assert.deepEqual(r.mangler, ['10:00-30:00']);
+});
+
+test('samlDele: en del uden lyd (længde 0) er ikke et hul', () => {
+  const r = samlDele([
+    { varighedSek: 600, bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 0, tekst: 'Lyd.' }] },
+    { afbrudt: true, varighedSek: 0, bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 0, tekst: '' }] },
+  ]);
+  assert.equal(r.huller, 0);
+  assert.deepEqual(r.mangler, []);
 });
 
 test('samlDele: en bid uden tider (Transcribe) placeres ved sin start', () => {

@@ -808,9 +808,25 @@ test('/referat med en bid, der mangler, laver referatet af resten og nævner det
     { startSek: 1770, overlapSek: 30, varighedSek: 600, tekst: '', mangler: true },
   ] }];
   const j = await (await postReferat(s.adresse, { dele })).json();
-  assert.equal(j.tekst, 'Før.\n[Dette stykke kunne ikke transskriberes]');
-  assert.match(j.html, /Et stykke af optagelsen kunne ikke transskriberes/);
+  assert.equal(j.tekst, 'Før.\n[Dette afsnit (29:30-39:30) kunne ikke transskriberes]');
+  assert.match(j.html, /Dette afsnit kunne ikke transskriberes: 29:30-39:30\. Se bilaget\./);
   assert.equal(j.huller, 1, 'appen får at vide, at et stykke mangler');
+  assert.deepEqual(j.mangler, ['29:30-39:30'], 'og hvilket tidsrum');
+  assert.deepEqual(s.pdf.valg.mangler, ['29:30-39:30'], 'PDF og Word nævner det ved referatet');
+  assert.equal(s.referat.valg.tekst, 'Før.\n[Dette afsnit kunne ikke transskriberes]', 'referatet og talkontrollen får ingen tal fra hullet');
+  const bilagTekst = s.pdf.valg.bilag ? s.pdf.valg.bilag.flatMap((g) => g.afsnit).join(' ') : s.pdf.valg.tekst;
+  assert.match(bilagTekst, /\[Dette afsnit \(29:30-39:30\) kunne ikke transskriberes\]/, 'bilaget viser tidsrummet');
+});
+
+test('/referat: en tom bid fra en ældre app markeres også som hul', async () => {
+  const s = await start();
+  const dele = [{ bidder: [
+    { startSek: 0, overlapSek: 0, varighedSek: 1800, tekst: 'Før.', afsnit: [{ sek: 0, tekst: 'Før.' }] },
+    { startSek: 1770, overlapSek: 30, varighedSek: 1800, tekst: '' },
+  ] }];
+  const j = await (await postReferat(s.adresse, { dele })).json();
+  assert.equal(j.huller, 1);
+  assert.deepEqual(j.mangler, ['29:30-59:30']);
 });
 
 test('/referat med kun manglende bidder giver tom tekst og intet referat', async () => {

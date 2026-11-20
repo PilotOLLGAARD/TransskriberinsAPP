@@ -159,7 +159,12 @@ function tegnBilag(doc, bilag) {
   });
 }
 
-function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst, bilag }) {
+/** Står øverst ved referatet, når et afsnit ikke kunne transskriberes. Samme tekst i Word. */
+function manglerLinje(mangler) {
+  return `Dette afsnit kunne ikke transskriberes: ${mangler.join(', ')}. Referatet dækker det ikke. Se bilaget.`;
+}
+
+function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst, bilag, mangler = [] }) {
   return new Promise((ok, fejl) => {
     const doc = new PDFDocument({
       size: 'A4',
@@ -183,6 +188,9 @@ function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst, bilag }) {
       doc.moveTo(MARGEN, y).lineTo(doc.page.width - MARGEN, y).lineWidth(1.5).strokeColor(BLAA).stroke();
       doc.y = y + 4;
 
+      if (mangler.length) {
+        doc.moveDown(0.6).font('fed').fontSize(11.5).fillColor(BLAEK).text(manglerLinje(mangler), { lineGap: 2 });
+      }
       if (!referat.kort && referat.opsummering) {
         overskrift(doc, 'Opsummering');
         broedtekst(doc, referat.opsummering);
@@ -211,4 +219,4 @@ function lavPdf({ titel, tidspunkt, varighedSek, referat, tekst, bilag }) {
   });
 }
 
-module.exports = { lavPdf, filnavn, lavAfsnit, lavMeta, formaterVarighed, formaterTidspunkt };
+module.exports = { lavPdf, manglerLinje, filnavn, lavAfsnit, lavMeta, formaterVarighed, formaterTidspunkt };

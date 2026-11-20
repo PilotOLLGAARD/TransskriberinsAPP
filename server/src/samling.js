@@ -6,9 +6,10 @@
  * Ordene skrives aldrig om: der klippes kun mellem hele ord. Hellere et par ord gentaget end ét ord tabt.
  */
 
-const { samletTekst } = require('./afsnit.js');
+const { samletTekst, formaterTid } = require('./afsnit.js');
 
-const HUL_TEKST = '[Dette stykke kunne ikke transskriberes]';
+// Uden cifre: teksten går til referatet og talkontrollen. Tidsrummet sættes først ind i bilag, mail og app (medTidsrum).
+const HUL_TEKST = '[Dette afsnit kunne ikke transskriberes]';
 const AFBRUDT_TEKST = '[Optagelsen blev afbrudt her]';
 // Overlappets ord søges lidt uden for selve overlappet, da Flashs tider er anslået.
 const MARGEN_SEK = 15;
@@ -89,6 +90,32 @@ function delVarighed(del) {
   return sidste && Number.isFinite(sidste.varighedSek) ? sidste.startSek + sidste.varighedSek : null;
 }
 
+/** "30:00-60:00", eller "fra 30:00", når slutningen ikke kendes. */
+function tidsrum(fraSek, tilSek) {
+  return Number.isFinite(tilSek) && tilSek > fraSek ? `${formaterTid(fraSek)}-${formaterTid(tilSek)}` : `fra ${formaterTid(fraSek)}`;
+}
+
+/** Hul-teksten med tidsrum, fx "[Dette afsnit (30:00-60:00) kunne ikke transskriberes]". */
+function hulTekst(fraSek, tilSek) {
+  return `[Dette afsnit (${tidsrum(fraSek, tilSek)}) kunne ikke transskriberes]`;
+}
+
+/** Sætter tidsrummene ind i hul-teksterne i rækkefølge, også når et hul er lagt sammen med andre afsnit. */
+function medTidsrum(tekst, mangler = []) {
+  let i = 0;
+  return String(tekst).split(HUL_TEKST).reduce((ud, stykke, n) => {
+    if (n === 0) return stykke;
+    const rum = mangler[i++];
+    return ud + (rum ? `[Dette afsnit (${rum}) kunne ikke transskriberes]` : HUL_TEKST) + stykke;
+  }, '');
+}
+
+/** En bid uden et eneste ord. */
+function erTom(bid) {
+  const afsnitTekst = Array.isArray(bid.afsnit) ? bid.afsnit.map((a) => a.tekst).join('') : '';
+  return !String(bid.tekst || '').trim() && !afsnitTekst.trim();
+}
+
 /** En bids afsnit med globale tider. Afsnit uden tid beholder null, til overlappet er fjernet. */
 function bidAfsnit(bid, start) {
   const egne = Array.isArray(bid.afsnit) && bid.afsnit.length ? bid.afsnit : (bid.tekst ? [{ sek: null, tekst: bid.tekst }] : []);
@@ -103,6 +130,7 @@ function samlDele(dele) {
   const afsnit = [];
   const ud = [];
   let huller = 0;
+  const mangler = [];
   let forskydning = 0;
   let kendt = false;
   dele.forEach((del, d) => {
@@ -112,11 +140,15 @@ function samlDele(dele) {
 
     let samlet = [];
     let forrigeMangler = true;
+    const delSek = delVarighed(del);
     for (const bid of del.bidder) {
       const start = delStart + bid.startSek;
-      if (bid.mangler) {
+      // En bid med længde, men uden ord, godtages aldrig som stilhed: den står som et hul med tidsrum.
+      const laengde = bid.varighedSek > 0 ? bid.varighedSek : (del.bidder.length === 1 && delSek > 0 ? delSek : 0);
+      if (bid.mangler || (laengde > 0 && erTom(bid))) {
         samlet.push({ sek: start, tekst: HUL_TEKST });
         huller++;
+        mangler.push(tidsrum(start, laengde > 0 ? start + laengde : null));
         forrigeMangler = true;
         continue;
       }
@@ -132,9 +164,8 @@ function samlDele(dele) {
     }
     afsnit.push(...samlet.map((a) => ({ sek: a.sek ?? a.start ?? delStart, tekst: a.tekst })));
 
-    const v = delVarighed(del);
-    if (v !== null) kendt = true;
-    forskydning += v ?? 0;
+    if (delSek !== null) kendt = true;
+    forskydning += delSek ?? 0;
   });
 
   // Tiderne må aldrig falde, så emner og bilag kan følge dem.
@@ -143,7 +174,7 @@ function samlDele(dele) {
     hoejeste = Math.max(hoejeste, a.sek);
     a.sek = hoejeste;
   }
-  return { afsnit, tekst: samletTekst(afsnit), dele: ud, huller, varighedSek: kendt ? forskydning : null };
+  return { afsnit, tekst: samletTekst(afsnit), dele: ud, huller, mangler, varighedSek: kendt ? forskydning : null };
 }
 
-module.exports = { fjernOverlap, samlDele, HUL_TEKST, AFBRUDT_TEKST };
+module.exports = { fjernOverlap, samlDele, hulTekst, medTidsrum, HUL_TEKST, AFBRUDT_TEKST };
