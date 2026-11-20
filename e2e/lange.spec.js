@@ -180,7 +180,7 @@ test('en bid, der kommer tom tilbage to gange, står med tidsrum på trin-skærm
   const mangler = krop.dele[0].bidder.filter((b) => b.mangler);
   assert.equal(mangler.length, 1, 'den tomme bid sendes som manglende');
   await vis(side, SENDT, 20000);
-  await vis(side, /Dette afsnit kunne ikke transskriberes: \d{2}:\d{2}-\d{2}:\d{2}/);
+  await vis(side, /Dette afsnit kunne ikke transskriberes: \d{2}:\d{2}[-‑]\d{2}:\d{2}/);
   const tal = await (await fetch(`${miljoe.adresse}/test/tal`)).json();
   const html = tal.sidsteMail.message.body.content;
   assert.match(html, /Dette afsnit kunne ikke transskriberes: \d{2}:\d{2}-\d{2}:\d{2}\. Se bilaget\./);

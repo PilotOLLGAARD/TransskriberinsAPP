@@ -1,10 +1,11 @@
 // Kun brugerflade. Logikken ligger i forloeb.js og optager.js.
 
 import { BESKEDER, besked, lidtPlads } from './beskeder.js';
-import { ENTRA, LOKAL } from './konfig.js';
+import { APP_VERSION, ENTRA, LOKAL } from './konfig.js';
+import { MAKS_TEGN, lavFeedbackKoe, renFeedback, sendFeedback, telefonType } from './feedback.js';
 import { lavForloeb } from './forloeb.js';
 import * as lager from './lager.js';
-import { lavLogin, lavLokalLogin } from './login.js';
+import { LoginKraevet, lavLogin, lavLokalLogin } from './login.js';
 import {
   ACCEPT, MAKS_FILER, fjernDeltKopi, formaterMB, gemFil, gemFiler, hentDeltFil, kontrollerFil, kontrollerFiler, navnUdenEndelse,
 } from './lydfil.js';
@@ -58,7 +59,9 @@ const NAT = '#0f1a26';
 const TEMA = [[document.getElementById('tema-lys'), '#f3f5f8'], [document.getElementById('tema-moerk'), NAT]];
 
 const t = {
-  visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt | filer
+  visning: 'start', // start | optager | navn | tekst | fremdrift | tidligere | information | delt | filer | feedback
+  feedbackTekst: '', // det, brugeren har skrevet i feedback, så det overlever en ny tegning
+  senderFeedback: false,
   filListe: null, // [{ noegle, fil, kontrol }] de valgte lydfiler, før de gemmes som én note
   bidder: new Map(), // id -> { ialt, faerdige } for en lang optagelse, der sendes i bidder
   delt: null, // { fil, fjern } en lydfil fra del-menuen, der venter på brugerens svar
@@ -99,6 +102,7 @@ const IKONER = {
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   tilbage: '<path d="M15 5l-7 7 7 7"/>',
   liste: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  boble: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/>',
   upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M5 15v4.5h14V15"/>',
   fil: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 17.5v-4l5-1v4"/><circle cx="9" cy="17.5" r="1.3"/><circle cx="14" cy="16.5" r="1.3"/>',
@@ -584,6 +588,92 @@ async function logUd() {
   t.loginStatus = 'nej';
   t.visning = 'start';
   tegn();
+}
+
+// Feedback til Rasmus. Sendes fra brugerens egen Outlook, som referatet. Intet går til serveren eller AI.
+
+const feedbackKoe = lavFeedbackKoe({
+  async send(f) {
+    let bevis;
+    try {
+      bevis = await login.hentBevis('mail');
+    } catch (e) {
+      throw Object.assign(new Error(), { type: e instanceof LoginKraevet ? 'login' : 'net' });
+    }
+    await sendFeedback({ tekst: f.tekst, skrevet: f.skrevet, version: APP_VERSION, telefon: telefonType(), bevis });
+  },
+});
+
+const FEEDBACK_SVAR = {
+  sendt: { tekst: 'Tak! Din feedback er sendt til Rasmus.', type: 'ok' },
+  net: { tekst: 'Ingen forbindelse. Din feedback er gemt og sendes, når du har net.', type: 'ok' },
+  login: { tekst: 'Din feedback er gemt. Den sendes, når du har logget ind.', type: 'ok' },
+  fejl: { tekst: 'Din feedback er gemt, men kunne ikke sendes lige nu. Den sendes af sig selv senere.', type: 'ok' },
+};
+
+/** Sender gemt feedback i baggrunden, fx når nettet kommer igen. Viser intet. */
+function sendGemtFeedback() {
+  if (feedbackKoe.antal()) feedbackKoe.sendVentende().catch(() => {});
+}
+
+function feedbackKnap() {
+  return h('button', { type: 'button', klasse: 'feedback-knap', vedTryk: aabnFeedback }, ikon('boble'), 'Giv feedback');
+}
+
+function aabnFeedback() {
+  t.besked = null;
+  t.visning = 'feedback';
+  tegn();
+}
+
+async function sendFeedbackNu() {
+  if (t.senderFeedback) return;
+  const tekst = renFeedback(t.feedbackTekst);
+  if (!tekst) {
+    t.besked = { tekst: 'Skriv din feedback først.', type: 'fejl' };
+    tegn();
+    return;
+  }
+  // Gemmes på telefonen først, så intet går tabt, hvis nettet forsvinder midt i.
+  feedbackKoe.tilfoej(tekst);
+  t.feedbackTekst = '';
+  t.senderFeedback = true;
+  tegn();
+  let udfald;
+  try {
+    udfald = await feedbackKoe.sendVentende();
+  } finally {
+    t.senderFeedback = false;
+  }
+  t.besked = FEEDBACK_SVAR[udfald] ?? FEEDBACK_SVAR.fejl;
+  t.visning = 'start';
+  tegn();
+}
+
+function skaermFeedback() {
+  const felt = h('textarea', {
+    id: 'feedbacktekst',
+    klasse: 'feedback-felt',
+    maxlength: String(MAKS_TEGN),
+    rows: '7',
+    autocapitalize: 'sentences',
+    placeholder: 'Fx hvad der virker godt, hvad der var svært, eller en idé',
+  });
+  felt.value = t.feedbackTekst;
+  const taeller = h('p', { klasse: 'feedback-taeller', 'aria-hidden': 'true' }, `${felt.value.length} / ${MAKS_TEGN}`);
+  felt.addEventListener('input', () => {
+    t.feedbackTekst = felt.value;
+    taeller.textContent = `${felt.value.length} / ${MAKS_TEGN}`;
+  });
+  return [
+    topMedTilbage(tilForsiden),
+    h('h1', { klasse: 'titel' }, 'Giv feedback'),
+    h('p', { klasse: 'intro' }, 'Fortæl, hvad der virker, og hvad der kan blive bedre.'),
+    h('div', { klasse: 'info feedback-info' }, ikon('person'), h('span', {}, 'Din feedback sendes som mail fra din egen Outlook til Rasmus Winther. Han kan se dit navn og svare dig, så den er ikke anonym.')),
+    h('div', { klasse: 'felt feedback-felt-boks' }, h('label', { for: 'feedbacktekst', klasse: 'felt-titel' }, 'Din feedback'), felt, taeller),
+    beskedElement(),
+    h('button', { type: 'button', klasse: 'feedback-send', vedTryk: sendFeedbackNu, disabled: t.senderFeedback }, ikon('send'), t.senderFeedback ? 'Sender …' : 'Send'),
+  ];
 }
 
 function aabnInformation() {
@@ -1117,6 +1207,7 @@ function skaermStart() {
       // Intet venter: en kort forklaring til den, der åbner appen første gang.
       : h('p', { klasse: 'kom-i-gang' }, ikon('mikrofon'), h('span', {}, 'Tryk Optag, og tal. Tryk Stop, når du er færdig. Så laver appen referatet.')),
     hjaelpTilHjemmeskaerm(),
+    feedbackKnap(),
     // Plads, så det nederste indhold kan rulles fri af bundlinjen.
     h('div', { klasse: 'bund-plads', 'aria-hidden': 'true' }),
     bundStatus(),
@@ -1129,7 +1220,9 @@ function skaermStart() {
 /** Teksten, når et afsnit ikke kunne transskriberes, med tidsrum. null, når intet mangler. */
 function hulBesked(note) {
   if (Array.isArray(note.mangler) && note.mangler.length) {
-    return `Dette afsnit kunne ikke transskriberes: ${note.mangler.join(', ')}. Det står i referatet og i bilaget.`;
+    // Bindestregen knækker ikke, så et tidsrum aldrig deles over to linjer.
+    const rum = note.mangler.map((r) => String(r).replace(/-/g, '‑'));
+    return `Dette afsnit kunne ikke transskriberes: ${rum.join(', ')}. Det står i referatet og i bilaget.`;
   }
   return note.huller ? 'Et stykke af optagelsen kunne ikke transskriberes. Se bilaget i Word-dokumentet.' : null;
 }
@@ -1425,6 +1518,7 @@ function skaermInformation() {
     afsnit(
       'Kontakt',
       h('p', {}, 'Hvis noget ikke virker: ', h('a', { href: 'mailto:rw@ollgaard.dk' }, 'Kontakt Rasmus Winther på rw@ollgaard.dk'), '.'),
+      feedbackKnap(),
     ),
   ];
 }
@@ -1688,6 +1782,7 @@ function tegn() {
   else if (t.visning === 'tidligere') indhold = skaermTidligere();
   else if (t.visning === 'fremdrift') indhold = skaermFremdrift();
   else if (t.visning === 'information') indhold = skaermInformation();
+  else if (t.visning === 'feedback') indhold = skaermFeedback();
   else if (t.visning === 'delt') indhold = skaermDelt();
   else if (t.visning === 'filer') indhold = skaermFiler();
   // Kontoen kan være væk efter en koldstart. Optagelse skal stadig kunne startes, også uden net.
@@ -1695,7 +1790,7 @@ function tegn() {
   else indhold = skaermStart();
   for (const [meta, farve] of TEMA) meta?.setAttribute('content', t.visning === 'optager' ? NAT : farve);
   // En note, der bliver færdig i baggrunden, tegner skærmen på ny. Skriver brugeren, skal feltet beholde fokus.
-  const aktivt = document.activeElement?.tagName === 'INPUT' ? document.activeElement : null;
+  const aktivt = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) ? document.activeElement : null;
   const markering = aktivt && [aktivt.id, aktivt.selectionStart, aktivt.selectionEnd];
   app.replaceChildren(...indhold.filter(Boolean));
   sidsteBesked = tegnetBesked;
@@ -1827,7 +1922,10 @@ async function tjekLoginVedStart() {
     }
   }
   t.loginStatus = status === 'ukendt' ? null : status;
-  if (status === 'ja') await forloeb.sendVentende();
+  if (status === 'ja') {
+    await forloeb.sendVentende();
+    sendGemtFeedback();
+  }
   await opdater();
 }
 
@@ -1856,4 +1954,6 @@ async function start() {
   await tjekLoginVedStart().catch(() => {});
 }
 
+// Gemt feedback sendes, så snart nettet er tilbage.
+window.addEventListener('online', sendGemtFeedback);
 start();

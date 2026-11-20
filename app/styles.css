@@ -889,3 +889,44 @@ body:has(.bund) .toast { bottom: calc(var(--optag-str) + 32px + var(--kant-bund)
 .fil-ialt { margin: 0 0 16px; color: var(--graa); font-size: 18px; }
 
 .fil-hjaelp { margin: -6px 0 14px; color: var(--graa); font-size: 18px; }
+
+/* Feedback: en lille, stille knap på forsiden og under Information. Den må aldrig tage fokus fra Optag. */
+.feedback-knap {
+  width: auto;
+  min-height: 48px;
+  margin: 18px auto 0;
+  padding: 8px 18px 8px 14px;
+  gap: 8px;
+  border-radius: 999px;
+  color: var(--tone-tekst);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--linje);
+  font-size: 18px;
+  font-weight: 600;
+}
+.feedback-knap svg { width: 22px; height: 22px; }
+.info-afsnit .feedback-knap { margin: 12px 0 0; }
+/* På de laveste skærme er der kun plads til det vigtigste. Feedback findes også under Information. */
+@media (max-height: 680px) { .start-navn ~ .feedback-knap { display: none; } }
+
+.feedback-info { margin-top: 18px; }
+.feedback-info svg { width: 24px; height: 24px; flex: none; margin-top: 1px; }
+.feedback-felt-boks { margin-top: 20px; }
+.feedback-felt {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 18px;
+  border: 2px solid var(--felt-kant);
+  border-radius: var(--radius);
+  color: var(--blaek);
+  background: var(--felt);
+  font-family: inherit;
+  font-size: 20px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.feedback-felt:focus { outline: 3px solid rgba(45, 137, 229, 0.35); outline-offset: 2px; }
+.feedback-felt::placeholder { color: var(--graa); }
+.feedback-taeller { margin-top: 6px; color: var(--graa); font-size: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+.feedback-send { margin-top: 20px; }

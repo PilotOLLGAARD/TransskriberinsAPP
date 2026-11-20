@@ -14,6 +14,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 - En optagelse må aldrig gå tabt: Lyd slettes kun, når Microsoft har svaret 202 på mailen, eller brugeren selv har valgt Slet.
 - Sendte noter (tekst, referat og PDF, uden lyd) bliver på telefonen i 7 dage efter første afsendelse og slettes derefter automatisk. Noter, der ikke er sendt eller er fejlet, slettes aldrig automatisk. "Send referat igen" bruger det, der ligger på telefonen, og koster intet AI-kald.
 - Lydkvaliteten sættes ikke ned: ingen omkodning eller nedsampling. En del over 35 min. klippes i bidder på 30 min. med 30 s overlap, kun mellem hele lydrammer, så lyden er byte for byte den samme (brugerens ja 18. nov. 2026). En optagelse eller fil må højst vare 4 timer.
+- Der må aldrig mangle tekst, uden at det står der: en tom bid prøves igen, og er den stadig tom, står "[Dette afsnit (tidsrum) kunne ikke transskriberes]" i bilaget, mailen, Word og på trin-skærmen. Teksten til referatet og talkontrollen har ingen tal (`HUL_TEKST` i `server/src/samling.js`).
 - Referatet må aldrig opfinde noget. Reglerne står i `server/src/referat.js`. Den fulde transskription følger altid med som bilag i Word-dokumentet. Mailen har kun Word-dokumentet; PDF'en sendes kun som reserve, hvis Word mangler (fejlet på serveren eller gamle noter). Serveren laver stadig PDF'en til det og til ældre apps.
 - Design: ØLLGAARDs blå (`#2D89E5`, knapper `#0E5AA3`) og `#282828`, systemskrift, store knapper, tekst mindst 18 px (statusmærkerne Sendt, Venter og Fejlet 16 px). Mørk tilstand følger telefonen (farverne er variabler øverst i `app/styles.css`). Logoet ligger i `app/ordmaerke.svg` (`app/ordmaerke-lys.svg` i mørk tilstand) og `app/maerke.svg`. App-ikonet er hvidt Ø på `#0E5AA3`.
 - Forsiden har en fast bundlinje med Tidligere, Optag og Upload lydfil, og Stop ligger præcis, hvor Optag lå. Al bevægelse har en udgave til "reducer bevægelse", og kun `transform` og `opacity` animeres.
@@ -25,7 +26,7 @@ Repoet er offentligt. Disse filer ligger kun i projektmappen og må aldrig i git
 
 ## Arkitektur
 
-iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument med logo (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med Word-dokumentet via Microsoft Graph (`app/js/mail.js`). Azure bruges ikke.
+iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`server/`, Node 24, eneste afhængighed er `pdfkit`, Google Cloud Run, `europe-north2`) → transskription med Gemini 3.8 Flash (Gemini 3.5 Transcribe som reserve for korte optagelser, `TRANSSKRIPTION_FOERST`) → referat med Gemini 3.8 Flash (`server/src/referat.js`) → PDF i hukommelsen med Lato og logo (`server/src/pdf.js`) og Word-dokument med logo (`server/src/docx.js`, egen ZIP uden nye afhængigheder). Telefonen sender mailen med Word-dokumentet via Microsoft Graph (`app/js/mail.js`). Feedback ("Giv feedback") sendes også fra telefonen via Graph, fra brugerens egen konto til rw@ollgaard.dk (`app/js/feedback.js`); den går aldrig til serveren eller AI. Azure bruges ikke.
 
 | Fil | Ansvar |
 |---|---|
@@ -42,6 +43,7 @@ iPhone/Android-PWA (`app/`, ren HTML/JS uden build, GitHub Pages) → server (`s
 | `app/js/lydfil.js` | Upload lydfil: kontrol af format, størrelse og varighed (4 timer, ogg/flac/aac 2½ time), flere filer (højst 10) som én note, gemning uden omkodning, fil fra del-menuen (Android) |
 | `app/js/opdeling/` | Klipper lyd i bidder uden at røre lydrammerne: fragmenteret og almindelig MP4, WebM, MP3, WAV. Kan en fil ikke læses, sendes den hel |
 | `app/js/forloeb.js` | Navngiv og send, bidder (højst 3 ad gangen, hver tekst gemmes straks, blokeret bid prøves i småbidder på 10 min.), flere dele og filer, genforsøg, genstart, Send referat igen, Slet med Fortryd, oprydning efter 7 dage. Lyd slettes kun ved 202 eller Slet |
+| `app/js/feedback.js` | Feedback til rw@ollgaard.dk: ren tekst (højst 2.000 tegn), app-version og telefontype. Gemmes i en kø på telefonen og fjernes først ved 202; sendes igen, når nettet eller login er tilbage |
 | `app/js/app.js` | Kun brugerflade |
 | `app/js/lydkurve.js` | Lydkurven på optageskærmen: måler lyden på optagelsens egen strøm og tegner søjler. Kaster aldrig |
 | `app/js/tilbage.js` | Telefonens tilbage (Android-knappen og swipe) går ét skridt tilbage i appen. Går aldrig selv tilbage ud fra en gammel historik |

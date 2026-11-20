@@ -14,6 +14,9 @@ export const BIDDER = {
   ...(globalThis.__BIDDER__ ?? {}),
 };
 
+// Sættes til commit-nummeret, når appen udgives (.github/workflows/app.yml). Står i feedback-mailen.
+export const APP_VERSION = 'udvikling';
+
 export const GRAPH_URL = LOKAL ? '/test/graph/v1.0' : 'https://graph.microsoft.com/v1.0';
 
 export const ENTRA = {

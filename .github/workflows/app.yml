@@ -37,6 +37,8 @@ jobs:
           # Hver udgivelse får sin egen version, så telefonerne henter den nye udgave samlet.
           sed -i "s/const VERSION = 'udvikling';/const VERSION = '${GITHUB_SHA}';/" _site/sw.js
           grep -q "${GITHUB_SHA}" _site/sw.js
+          sed -i "s/export const APP_VERSION = 'udvikling';/export const APP_VERSION = '${GITHUB_SHA::7}';/" _site/js/konfig.js
+          grep -q "APP_VERSION = '${GITHUB_SHA::7}'" _site/js/konfig.js
           # Serverens adresse er ikke hemmelig. Den sættes som variabel på GitHub.
           if [ -n "$SERVER_ADRESSE" ]; then
             sed -i "s#https://SERVER-ADRESSE-SAETTES-VED-UDRULNING.invalid#${SERVER_ADRESSE%/}#g" _site/js/konfig.js _site/index.html

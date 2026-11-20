@@ -101,4 +101,6 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 
 ## Hjælp
 
+Har du en idé eller en kommentar, så tryk **Giv feedback** på startskærmen eller under **Information**. Feedbacken sendes som mail fra din egen Outlook til Rasmus, så den er ikke anonym. Uden net gemmes den og sendes senere.
+
 Virker noget ikke? Kontakt Rasmus Winther på rw@ollgaard.dk. Skriv, hvornår det skete, hvad skærmen sagde, og hvilken telefon du har. Send ikke selve optagelsen.
