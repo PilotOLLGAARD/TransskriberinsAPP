@@ -367,3 +367,13 @@ test('lavBilag: en afbrudt optagelse uden filnavne beholder tiden fra optagelsen
 test('lavBilag: med kun én del uden navn er bilaget som før', () => {
   assert.deepEqual(lavBilag(AFSNIT, [], [{ fra: 0, startSek: 0, overskrift: null }]), lavBilag(AFSNIT, []));
 });
+
+test('laesAfsnit: Flash skrev alle tidspunkter midt i én linje: de bruges stadig og står ikke i teksten', () => {
+  const a = laesAfsnit('[00:00] Vi starter. [00:07] Så taget. [00:15] Og facaden. [00:21] Slut.');
+  assert.deepEqual(a, [{ sek: 0, tekst: 'Vi starter.' }, { sek: 7, tekst: 'Så taget.' }, { sek: 15, tekst: 'Og facaden.' }, { sek: 21, tekst: 'Slut.' }]);
+});
+
+test('laesAfsnit: et klokkeslæt i teksten bliver stående, også i én lang linje', () => {
+  const a = laesAfsnit('[00:00] Vi mødes kl. [14:30] på pladsen og taler om taget og facaden.');
+  assert.deepEqual(a, [{ sek: 0, tekst: 'Vi mødes kl. [14:30] på pladsen og taler om taget og facaden.' }]);
+});

@@ -25,8 +25,6 @@ const TRANSCRIBE = 'transcribe';
 const FLASH = 'flash';
 // Flash tager kun over efter 5xx fra Transcribe, hvis der er mindst så meget tid tilbage.
 const FLASH_MIN_MS = 60 * 1000;
-// En blokeret bid over så mange sekunder prøves af appen som småbidder på 10 min. med Flash, før Transcribe bruges.
-const SMAABID_MAKS_SEK = 720;
 // Tidspunkterne bruges kun til at dele bilaget i PDF'en op og fjernes fra teksten bagefter (afsnit.js).
 const FLASH_PROMPT = 'Transskriber lyden ordret på dansk. Skriv kun det, der bliver sagt, uden kommentarer, overskrifter '
   + 'eller talernavne. Start en ny linje, hver gang en ny person taler, og mindst hvert 30. sekund, også midt i '
@@ -212,16 +210,30 @@ function lavGemini({
     return { model, input: [lyd], generation_config: { transcription_config }, store: false };
   }
 
-  async function transskriberFil(hvilken, fil, mime, signal, frist) {
+  // Transcribe har kun 10.000 tokens/min. og 10 kald/min. på Tier 1: højst ét kald ad gangen pr. server.
+  let transcribeKoe = Promise.resolve();
+  function iKoe(arbejde) {
+    const koer = transcribeKoe.then(arbejde, arbejde);
+    transcribeKoe = koer.catch(() => {});
+    return koer;
+  }
+
+  /** vent429: ingen anden model at falde tilbage på (efter en blokering), så Googles ventetid ventes ud. */
+  async function transskriberFil(hvilken, fil, mime, signal, frist, { vent429 = false } = {}) {
+    if (hvilken === TRANSCRIBE) return iKoe(() => transskriberFilNu(hvilken, fil, mime, signal, frist, vent429));
+    return transskriberFilNu(hvilken, fil, mime, signal, frist, vent429);
+  }
+
+  async function transskriberFilNu(hvilken, fil, mime, signal, frist, vent429) {
     const anmodning = JSON.stringify(interaktion(hvilken, fil, mime));
     // Filen ligger allerede hos Google, så transskriptionen kan sikkert bestilles igen.
-    // Transcribe genforsøges ikke ved 429: så tager Flash straks over med samme fil.
+    // Transcribe genforsøges ikke ved 429, når Flash kan tage over med samme fil.
     const svar = await genforsoeg('interactions', () => hentTransskription(`${BASE}/v1beta/interactions`, {
       method: 'POST',
       signal,
       headers: { 'x-goog-api-key': noegle, 'Content-Type': 'application/json' },
       body: anmodning,
-    }), signal, frist, { stopVed429: hvilken === TRANSCRIBE });
+    }), signal, frist, { stopVed429: hvilken === TRANSCRIBE && !vent429 });
     if (!svar.ok) throw await svarFejl(svar, 'interactions');
     const krop = await svar.json();
     // Alt andet end completed er fejl, så en halv tekst aldrig tages for en hel.
@@ -298,10 +310,11 @@ function lavGemini({
      * varighedSek fra telefonen (kan mangle). Lyd over transcribeMaksSek går direkte til Flash,
      * da Transcribe på Tier 1 kun tager 10.000 tokens i minuttet (ca. 6 min. 40 s lyd).
      */
-    async transskriber(strom, { bytes, mime, signal, varighedSek, smaabidder = false }) {
+    async transskriber(strom, { bytes, mime, signal, varighedSek, smaabidder = false, reserve = false }) {
       planlaegOprydning();
       const lang = Number.isFinite(varighedSek) && varighedSek > transcribeMaksSek;
-      const flashFoerst = foerst === 'flash' || lang;
+      // reserve: appen fik en tom tekst fra Flash og beder om den anden model (kun inden for Transcribes grænse).
+      const flashFoerst = lang || (foerst === 'flash' && !reserve);
       log({ haendelse: 'gemini-kald', model: flashFoerst ? FLASH : TRANSCRIBE });
       if (lang && foerst !== 'flash') log({ haendelse: 'model-skift', grund: 'laengde', fra: TRANSCRIBE, til: FLASH });
       const type = geminiMime(mime);
@@ -323,8 +336,9 @@ function lavGemini({
             return { tekst: await transskriberFil(FLASH, fil, type, samlet, frist) };
           } catch (e) {
             const grund = flashSkiftGrund(e, startetFlash, frist, samlet);
-            // Appen kan dele bidden: Flash prøver småbidder, som filteret oftere lader gå (testbænken 19. nov. 2026).
-            if (grund === 'blokeret' && smaabidder && Number.isFinite(varighedSek) && varighedSek > SMAABID_MAKS_SEK) {
+            // Appen kan dele bidden: Flash prøver småbidder (10, derefter 5 min.), som filteret oftere lader gå
+            // (testbænken 19. nov. 2026). Først en bid inden for Transcribes grænse får Transcribe.
+            if (grund === 'blokeret' && smaabidder && lang) {
               log({ haendelse: 'blokeret-til-smaabidder' });
               throw e;
             }
@@ -334,7 +348,8 @@ function lavGemini({
             if (!grund) throw e;
             log({ haendelse: 'model-skift', grund, fra: FLASH, til: TRANSCRIBE });
             try {
-              return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist) };
+              // Efter en blokering er Transcribe den sidste mulighed: et 429 ventes ud i stedet for at fejle.
+              return { tekst: await transskriberFil(TRANSCRIBE, fil, type, samlet, frist, { vent429: grund === 'blokeret' && !lang }) };
             } catch (fejl) {
               // Blokeret indhold er ikke midlertidigt: brugeren skal have den fejl, ikke en, der lokker til nye betalte forsøg.
               throw grund === 'blokeret' ? e : fejl;

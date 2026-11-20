@@ -1008,7 +1008,7 @@ test('fejler Transcribe efter en blokering hos Flash, gives Flashs fejl videre (
 // Transcribe bruges (testbænken 19. nov. 2026: alle 3 småbidder af en blokeret 30-min.-bid gik gennem Flash med tider;
 // Transcribe koster ca. 6 gange så meget, giver ingen tider og svarede 429 på 30 min.).
 
-test('kan appen dele bidden, og er den over 12 min., gives Flashs blokering straks videre uden Transcribe', async () => {
+test('kan appen dele bidden, og er den over Transcribes grænse (400 s), gives Flashs blokering straks videre uden Transcribe', async () => {
   const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
   const logs = [];
   await assert.rejects(
@@ -1019,9 +1019,15 @@ test('kan appen dele bidden, og er den over 12 min., gives Flashs blokering stra
   assert.ok(logs.some((l) => l.haendelse === 'blokeret-til-smaabidder'));
 });
 
-test('en småbid på op til 12 min., som Flash blokerer, får stadig Transcribe som reserve', async () => {
+test('en blokeret bid på 10 min., som appen kan dele igen, gives videre (5-min.-bidder passer til Transcribes grænse)', async () => {
   const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
-  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 636, smaabidder: true }));
+  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 636, smaabidder: true })), (e) => e.googleKode === 'content_blocked');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+});
+
+test('en småbid på op til 400 s, som Flash blokerer, får Transcribe som reserve', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
+  const svar = await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 330, smaabidder: true }));
   assert.equal(svar.tekst, 'Hej');
   assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
 });
@@ -1030,4 +1036,43 @@ test('uden kendt længde får en blokeret bid stadig Transcribe, også når appe
   const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET }) });
   await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { smaabidder: true }));
   assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe']);
+});
+
+// Transcribe efter en blokering: ingen anden model at falde tilbage på, så 429 ventes ud (kø i stedet for fejl)
+
+test('efter en blokering venter Transcribe ved 429 og prøver igen', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe: raekke(429, 200) }) });
+  const ventet = [];
+  const svar = await lav(hent, { foerst: 'flash', vent: async (ms) => { ventet.push(ms); } }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 330 }));
+  assert.equal(svar.tekst, 'Hej');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe', 'gemini-3.5-transcribe']);
+  assert.equal(ventet.length, 1);
+});
+
+test('reserve: appen beder om Transcribe først (en tom 5-min.-bid fra Flash)', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 330, reserve: true }));
+  assert.deepEqual(modelIKald(kald), ['gemini-3.5-transcribe']);
+});
+
+test('reserve gælder kun op til Transcribes grænse; længere lyd går stadig til Flash', async () => {
+  const { hent, kald } = falskHent();
+  await lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 900, reserve: true }));
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash']);
+});
+
+test('kun ét kald til Transcribe ad gangen pr. server, så grænsen pr. minut ikke rammes af flere bidder på én gang', async () => {
+  let igang = 0;
+  let hoejest = 0;
+  const transcribe = async () => { igang++; hoejest = Math.max(hoejest, igang); await new Promise((ok) => setTimeout(ok, 10)); igang--; return json(200, SVAR_OK); };
+  const { hent } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe }) });
+  const g = lav(hent, { foerst: 'flash' });
+  await Promise.all([1, 2, 3].map(() => g.transskriber(lyd(), valg('audio/mp4', { varighedSek: 300 }))));
+  assert.equal(hoejest, 1);
+});
+
+test('efter en blokering ventes 429 kun ud for lyd, Transcribe kan klare (ikke lyd over 400 s)', async () => {
+  const { hent, kald } = falskHent({ interaktion: perModel({ flash: BLOKERET, transcribe: raekke(429, 200) }) });
+  await assert.rejects(lav(hent, { foerst: 'flash' }).transskriber(lyd(), valg('audio/mp4', { varighedSek: 630 })), (e) => e.googleKode === 'content_blocked');
+  assert.deepEqual(modelIKald(kald), ['gemini-3.8-flash', 'gemini-3.5-transcribe'], 'ét forsøg med Transcribe, ingen venten');
 });

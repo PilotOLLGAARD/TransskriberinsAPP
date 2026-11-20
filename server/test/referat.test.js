@@ -526,3 +526,12 @@ test('tidsgrænsen kan sættes for det enkelte referat', async () => {
   const ok = await lav(hentEfter(40), { timeoutMs: 5 }).lav({ ...INPUT, signal: signal(), timeoutMs: 60000 });
   assert.equal(ok.titel, 'Møde om tag');
 });
+
+test('lange optagelser: emner og referat skal dække hele optagelsen, med et emne ca. hvert 5. minut til slutningen', () => {
+  const p = lavPrompt({ tekst: '[00:00] Hej', titel: '', kort: false, emner: true, varighedSek: 10800 });
+  assert.ok(p.includes('ca. ét emne pr. 5 minutter'), 'afstanden passer til højst 36 emner');
+  assert.ok(p.includes('hele optagelsen'), 'referatet skal dække det hele');
+  assert.ok(p.includes('3:00:00'), 'optagelsens længde står i prompten');
+  const kort = lavPrompt({ tekst: '[00:00] Hej', titel: '', kort: false, emner: true, varighedSek: 600 });
+  assert.ok(kort.includes('ca. ét emne pr. 3-5 minutter'));
+});
