@@ -93,6 +93,8 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 ## Godt at vide
 
 - En optagelse kan vare op til 4 timer. Den stopper selv og bliver gemt. Ved lange møder: sæt telefonen til opladning, og lad skærmen være tændt.
+- 3 timers optagelse fylder ca. 175 MB på telefonen. Skærmen er tændt hele tiden, så det bruger anslået en tredjedel af batteriet (ikke målt på alle telefoner).
+- iPhone: Stopper optagelsen, når skærmen slukker, så sæt Autolås til Aldrig under lange møder (Indstillinger → Skærm & lysstyrke → Autolås).
 - Et langt møde tager nogle minutter at lave referat af. Hold appen åben imens.
 - Telefonen er ikke en sikkerhedskopi. Mister du den, er optagelser, der ikke er sendt, væk.
 - Svar Ja, når Microsoft spørger "Vil du forblive logget på?".

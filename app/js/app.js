@@ -1472,6 +1472,8 @@ function godeRaad() {
         'En lydfil må højst vare 4 timer og fylde 500 MB. Appen kan bruge m4a, mp3, wav, ogg og webm. Filer i ogg kan højst være 2½ time.',
         'Du kan vælge op til 10 lydfiler på én gang. De bliver til ét referat i den rækkefølge, du vælger.',
         'Et langt møde sendes i dele og kan tage nogle minutter. Lyden bliver den samme.',
+        '3 timer fylder ca. 175 MB på telefonen, og skærmen er tændt hele tiden. Det bruger anslået en tredjedel af batteriet, så sæt telefonen til opladning.',
+        'iPhone: Hvis optagelsen stopper, når skærmen slukker, så sæt Autolås til Aldrig under lange møder (Indstillinger → Skærm & lysstyrke → Autolås).',
       ),
     ),
   );

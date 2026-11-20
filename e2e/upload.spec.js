@@ -524,6 +524,8 @@ test('Information har gode råd foldet sammen, og hvert afsnit åbner ved tryk',
   await vis(side, 'op til 4 timer');
   await vis(side, '4 timer og fylde 500 MB');
   await vis(side, 'op til 10 lydfiler');
+  await vis(side, '3 timer fylder ca. 175 MB');
+  await vis(side, 'Autolås');
   await kontekst.close();
 });
 
