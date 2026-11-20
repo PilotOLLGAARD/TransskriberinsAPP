@@ -107,6 +107,11 @@ const KOERSLER = {
   '3t': () => ({ dele: [lavFil('lang-3t', 180, 33)] }),
   to: () => ({ dele: [lavFil('to-a', 45, 44), lavFil('to-b', 45, 55, 'mp3')], filnavne: ['Møde_del1.m4a', 'Møde_del2.mp3'] }),
   kontrol: () => ({ dele: [lavFil('lang-3t', 180, 33)], helt: true }),
+  // Med appens eget forløb (koerApp): to forskellige 3-timers-optagelser, 2½ time og 3 filer på ca. 1 time.
+  '3t-a': () => ({ app: true, dele: [lavFil('lang-3t', 180, 33)] }),
+  '3t-b': () => ({ app: true, dele: [lavFil('lang-3t-b', 180, 77)] }),
+  '2t30': () => ({ app: true, dele: [lavFil('lang-2t30', 150, 66)] }),
+  tre: () => ({ app: true, dele: [lavFil('tre-a', 60, 81), lavFil('tre-b', 60, 82, 'mp3'), lavFil('tre-c', 60, 83)], filnavne: ['Møde_del1.m4a', 'Møde_del2.mp3', 'Møde_del3.m4a'] }),
 };
 
 // Serveren, som på Cloud Run, med falsk login og optælling af tokens pr. model
@@ -265,6 +270,106 @@ const VINDUE = { vindue: 120, kerne: 60 };
  * For hver overgang: find den næste bids første ord i den samlede tekst og mål tabte og gentagne ord.
  * Til sammenligning det samme midt mellem to overgange (kontrol), så almindelige fejl i transskriptionen kan skelnes.
  */
+// Hele kæden som på telefonen: appens eget forløb (app/js/forloeb.js) med et lager i hukommelsen og den rigtige
+// server i samme proces. Så måles præcis det, telefonen gør: bidder, småbidder (10 og 5 min.), den anden model,
+// ventetid ved midlertidige fejl, samling af overlap og ét referat.
+
+/** Pakker document.xml ud af Word-filen (egen ZIP fra server/src/docx.js). */
+function wordXml(base64) {
+  const zlib = require('node:zlib');
+  const b = Buffer.from(base64, 'base64');
+  for (let p = 0; p + 30 <= b.length && b.readUInt32LE(p) === 0x04034b50;) {
+    const metode = b.readUInt16LE(p + 8);
+    const str = b.readUInt32LE(p + 18);
+    const navnL = b.readUInt16LE(p + 26);
+    const ekstraL = b.readUInt16LE(p + 28);
+    const navn = b.toString('utf8', p + 30, p + 30 + navnL);
+    const data = b.subarray(p + 30 + navnL + ekstraL, p + 30 + navnL + ekstraL + str);
+    if (navn === 'word/document.xml') return (metode === 8 ? zlib.inflateRawSync(data) : data).toString('utf8');
+    p += 30 + navnL + ekstraL + str;
+  }
+  return '';
+}
+
+/** Emnernes tider i bilaget (sekunder) og antal "Del n: …"-overskrifter. */
+function bilagIWord(base64) {
+  const xml = wordXml(base64);
+  const tider = [...xml.matchAll(/w:val="Emne"\/><\/w:pPr><w:r><w:rPr><w:rStyle w:val="Tid"\/><\/w:rPr><w:t xml:space="preserve">([\d:]+)<\/w:t>/g)]
+    .map((m) => m[1].split(':').map(Number).reduce((s, x) => s * 60 + x, 0));
+  return { emner: tider, dele: (xml.match(/w:val="Deloverskrift"/g) || []).length, huller: (xml.match(/kunne ikke transskriberes/g) || []).length };
+}
+
+async function koerApp(miljoe, navn, opsaetning) {
+  const app = (f) => import(`file:///${ROD.replace(/\\/g, '/')}/app/js/${f}`);
+  const [{ lavForloeb }, { sendLyd, sendReferat }, { STATUS }] = await Promise.all([app('forloeb.js'), app('transskribering.js'), app('tilstand.js')]);
+  const maal = nytMaal();
+  maalPr.set(navn, maal);
+  const mime = (fil) => (fil.endsWith('.mp3') ? 'audio/mpeg' : 'audio/mp4');
+  const filer = opsaetning.dele.map((d) => ({ ...d, kilde: filKilde(d.fil), mime: mime(d.fil) }));
+  const sek = filer.reduce((s, f) => s + f.sek, 0);
+  const note = {
+    id: navn, status: STATUS.GEMT, titel: `Testbænk ${navn}`, oprettet: Date.now(), mime: filer[0].mime, varighedMs: sek * 1000,
+    ...(filer.length > 1 ? {
+      kilde: 'filer',
+      filer: filer.map((f, i) => ({ navn: opsaetning.filnavne?.[i] ?? path.basename(f.fil), mime: f.mime, varighedMs: f.sek * 1000, bytes: f.kilde.stoerrelse })),
+    } : {}),
+  };
+  const noter = new Map([[navn, note]]);
+  const lager = {
+    hentNote: async (id) => (noter.has(id) ? JSON.parse(JSON.stringify(noter.get(id))) : null),
+    opdaterNote: async (id, felter) => { Object.assign(noter.get(id), felter); },
+    lavKilder: async () => new Map(filer.map((f, i) => [i, f.kilde])),
+    hentLyd: async () => new Blob([]),
+    sletLyd: async () => {},
+    alleNoter: async () => [...noter.values()],
+  };
+  const taelling = { kald: 0, blokeret: 0, tomme: 0, midlertidige: 0, reserve: 0 };
+  const hent = (sti) => (_url, o) => fetch(`${miljoe.adresse}${sti}`, { ...o, headers: { ...o.headers, 'x-testid': navn } });
+  let sidsteKrop = null;
+  let bidderIalt = 0;
+  const forloeb = lavForloeb({
+    lager,
+    login: { hentBevis: async () => miljoe.bevis, brugerMail: () => 'test@example.invalid' },
+    sendLyd: async (lyd, m, bevis, meta, _h, v) => {
+      taelling.kald++;
+      if (meta.reserve) taelling.reserve++;
+      try {
+        const svar = await sendLyd(lyd, m, bevis, meta, hent('/transskriber'), v);
+        if (!String(svar.tekst || '').trim()) taelling.tomme++;
+        return svar;
+      } catch (e) {
+        if (e.type === 'blokeret') taelling.blokeret++;
+        else taelling.midlertidige++;
+        throw e;
+      }
+    },
+    sendReferat: (krop, bevis, _h, v) => { sidsteKrop = krop; return sendReferat(krop, bevis, hent('/referat'), v); },
+    sendMail: async () => {},
+    vedBidder: (_id, f) => { bidderIalt = f.ialt; },
+  });
+  const start = Date.now();
+  await forloeb.behandl(navn);
+  for (const f of filer) f.kilde.luk();
+  const n = noter.get(navn);
+  const facit = opsaetning.dele.map((d) => d.facit).join(' ');
+  const r = {
+    navn, sek, status: n.status, fejlType: n.fejlType, ms: Date.now() - start, bidder: bidderIalt, taelling,
+    huller: n.huller ?? 0, mangler: n.mangler, usd: usd(maal), tokens: maal,
+  };
+  if (n.tekst) {
+    r.wer = wer(facit, n.tekst);
+    r.overgange = maalOvergange(facit, n.tekst, sidsteKrop?.dele ?? []);
+  }
+  if (n.referat) r.tal = talNoejagtighed(n.referat, facit, []);
+  if (n.docx) {
+    r.bilag = bilagIWord(n.docx);
+    fs.writeFileSync(path.join(UD, `${navn}.docx`), Buffer.from(n.docx, 'base64'));
+  }
+  r.dele = sidsteKrop?.dele;
+  if (!process.argv.includes('--falsk')) tilfoejForbrug({ hvad: `lange (app) ${navn}`, usd: r.usd });
+  return r;
+}
+
 function maalOvergange(facit, samlet, dele) {
   const ord = kanonisk(samlet);
   const ud = [];
@@ -288,7 +393,7 @@ function findRaekke(ord, raekke) {
 }
 
 (async () => {
-  const kun = valg('kun', 'to,1t,2t,3t,kontrol').split(',');
+  const kun = valg('kun', '3t-a,3t-b,2t30,tre').split(',');
   if (process.argv.includes('--lav')) {
     for (const k of kun) for (const d of KOERSLER[k]().dele) console.log(path.relative(ROD, d.fil), `${(d.sek / 60).toFixed(1)} min.`);
     return;
@@ -303,10 +408,12 @@ function findRaekke(ord, raekke) {
       console.error(`Grænsen på ${GRAENSE_KR} kr. er nået. Stopper før ${k}.`);
       break;
     }
-    const r = await koer(miljoe, k, KOERSLER[k]());
+    const opsaetning = KOERSLER[k]();
+    const r = opsaetning.app ? await koerApp(miljoe, k, opsaetning) : await koer(miljoe, k, opsaetning);
     resultater.push(r);
     const o = r.overgange?.overgange ?? [];
     const kt = r.overgange?.kontrol;
+    if (r.taelling) console.log(`${k}: ${r.bidder} bidder, ${r.taelling.kald} kald (blokeret ${r.taelling.blokeret}, tomme ${r.taelling.tomme}, midlertidige fejl ${r.taelling.midlertidige}, reserve ${r.taelling.reserve}), huller ${r.huller}, bilag: ${r.bilag ? `${r.bilag.emner.length} emner, sidste ${Math.round((r.bilag.emner.at(-1) ?? 0) / 60)} min., ${r.bilag.dele} delhoveder` : '-'}`);
     console.log(`${k.padEnd(8)} ${(r.sek / 60).toFixed(0).padStart(4)} min  ${String(r.status).padEnd(4)} ${(r.ms / 1000).toFixed(0).padStart(5)} s  `
       + `${r.usd.toFixed(3)} USD  WER ${r.wer ? (r.wer.rate * 100).toFixed(1) : '-'} %  tal ${r.tal ? `${r.tal.korrekte}/${r.tal.uklart}/${r.tal.forkerte}` : '-'}  `
       + `overgange ${o.length}: tabt ${o.reduce((s, x) => s + (x.tabt ?? 0), 0)}, gentaget ${o.reduce((s, x) => s + (x.gentaget ?? 0), 0)}, ikke fundet ${o.filter((x) => !x.fundet).length}`
