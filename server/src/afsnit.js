@@ -10,6 +10,10 @@
 // Kun i starten af en linje: et tidspunkt i selve teksten ("kl. [14:30]") skal blive stående.
 // Minutter må gå over 59, hvis Flash ikke skriver timer. Sekunder skal være gyldige, ellers er det ikke en markør.
 const MARKOER = /^[ \t]*\[(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)\]/gm;
+// Flash skriver af og til alle tidspunkter i én linje ("[00:00] En. [00:07] To."). Så bruges markører efter et mellemrum,
+// men kun når der er mindst tre, og de aldrig falder, så et klokkeslæt i teksten ("kl. [14:30]") bliver stående.
+const MARKOER_I_LINJE = /(?<=^|\s)\[(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)\]/g;
+const MIN_I_LINJE = 3;
 const TID = /^\[?(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)\]?$/;
 const MAX_UNDERTITEL_ORD = 6;
 const MAX_UNDERTITEL_TEGN = 60;
@@ -25,7 +29,12 @@ const renLinjer = (tekst) => tekst.split(/\r?\n/).map((l) => l.trim()).filter(Bo
 function laesAfsnit(tekst) {
   const kilde = typeof tekst === 'string' ? tekst.trim() : '';
   if (!kilde) return [];
-  const markoerer = [...kilde.matchAll(MARKOER)];
+  let markoerer = [...kilde.matchAll(MARKOER)];
+  if (markoerer.length <= 1) {
+    const iLinje = [...kilde.matchAll(MARKOER_I_LINJE)];
+    const tider = iLinje.map((m) => sekunder(m[1], m[2], m[3]));
+    if (iLinje.length >= MIN_I_LINJE && tider.every((t, i) => i === 0 || t >= tider[i - 1])) markoerer = iLinje;
+  }
   if (!markoerer.length) return [{ sek: null, tekst: kilde }];
 
   const ud = [];

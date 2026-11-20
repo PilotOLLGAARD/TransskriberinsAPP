@@ -187,3 +187,31 @@ test('samlDele: en bid uden tider (Transcribe) før en bid med tider bruger stad
   assert.equal(r.tekst.split('tagrenderne på nordsiden').length - 1, 1);
   assert.equal(r.afsnit[0].sek, 0, 'teksten uden tider står ved bidens start');
 });
+
+// Bidder uden tider (Transcribe) skriver overlappet lidt forskelligt: en omtrentlig ordrække fjerner det alligevel
+
+test('fjernOverlap uden tider: et overlap, der er skrevet lidt forskelligt, står kun én gang', () => {
+  const forrige = [{ sek: null, tekst: 'Start af mødet. Vi skal bestille de nye vinduer til den tredje sal inden fredag, og så tager vi taget bagefter med tømreren' }];
+  const naeste = [{ sek: null, tekst: 'skal bestille nye vinduer til tredje sal inden på fredag så tager vi taget efter med tømreren. Næste punkt er stilladset.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  const tekst = samletTekst([...r.forrige, ...r.naeste]);
+  assert.equal(tekst.split('vinduer').length - 1, 1, tekst);
+  assert.match(tekst, /^Start af mødet\. Vi/);
+  assert.match(tekst, /Næste punkt er stilladset\.$/);
+});
+
+test('fjernOverlap uden tider: helt forskellige tekster beholdes stadig begge', () => {
+  const forrige = [{ sek: null, tekst: 'Vi taler om betonen og armeringen i kælderen i dag.' }];
+  const naeste = [{ sek: null, tekst: 'Tagrenderne skal skiftes på nordsiden af bygningen snart.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  assert.deepEqual(r, { forrige, naeste });
+});
+
+test('fjernOverlap: et langt afsnit, der starter før overlappet og går ind i det, bruges i søgningen', () => {
+  const forrige = [{ sek: 0, tekst: `${'fyld '.repeat(50)}og så tager vi stilladset ned på fredag efter frokost` }];
+  const naeste = [{ sek: null, tekst: 'tager vi stilladset ned på fredag efter frokost. Næste punkt.' }];
+  const r = fjernOverlap(forrige, naeste, { naesteStartSek: 1770, overlapSek: 30 });
+  const tekst = samletTekst([...r.forrige, ...r.naeste]);
+  assert.equal(tekst.split('stilladset').length - 1, 1, tekst);
+  assert.match(tekst, /Næste punkt\.$/);
+});
