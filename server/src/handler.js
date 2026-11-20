@@ -6,7 +6,7 @@ const { laesType } = require('./typer.js');
 const { lavEmne, lavHtml } = require('./besked.js');
 const wordDel = require('./docx.js');
 const {
-  laesAfsnit, skalerTider, delLangeAfsnit, harTider, samletTekst, lavBilag,
+  laesAfsnit, skalerTider, delLangeAfsnit, delLangeAfsnitIDele, harTider, samletTekst, lavBilag,
 } = require('./afsnit.js');
 const { samlDele, medTidsrum } = require('./samling.js');
 
@@ -282,13 +282,14 @@ function lavHandler({
       // Kun huller eller ingen tale: intet referat, appen viser "ingen tale" som før.
       if (!samlet.tekst.trim() || samlet.huller === dele.reduce((n, d) => n + d.bidder.length, 0)) return sendJson(res, cors, 200, { tekst: '' });
       const varighed = faelles.varighedSek ?? (samlet.varighedSek !== null ? laesVarighed(samlet.varighedSek) : null);
-      let afsnit = samlet.afsnit;
+      // Delenes starter regnes om, når et langt afsnit deles, så overskrifterne bliver ved den rigtige fil.
+      let { afsnit, dele: delStarter } = samlet;
       try {
-        afsnit = delLangeAfsnit(samlet.afsnit, varighed);
+        ({ afsnit, dele: delStarter } = delLangeAfsnitIDele(samlet.afsnit, varighed, samlet.dele));
       } catch { /* bilaget får afsnittene, som de er */ }
       try {
         return sendJson(res, cors, 200, await lavResultat({
-          ...faelles, varighedSek: varighed, tekst: samlet.tekst, afsnit, dele: samlet.dele, huller: samlet.huller, mangler: samlet.mangler,
+          ...faelles, varighedSek: varighed, tekst: samlet.tekst, afsnit, dele: delStarter, huller: samlet.huller, mangler: samlet.mangler,
         }, spor));
       } catch (e) {
         return sendFejl(res, cors, e, spor.trin);

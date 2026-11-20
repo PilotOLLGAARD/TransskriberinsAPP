@@ -93,8 +93,13 @@ function enheder(tekst) {
  */
 function delLangeAfsnit(afsnit, varighedSek) {
   if (!harTider(afsnit)) return afsnit;
+  return delHvert(afsnit, varighedSek).flat();
+}
+
+/** Hvert afsnits stykker: [[{ sek, tekst }, …], …], ét element pr. afsnit. */
+function delHvert(afsnit, varighedSek) {
   const kendtSlut = Number.isFinite(varighedSek) && varighedSek > 0 ? Math.floor(varighedSek) : null;
-  return afsnit.flatMap((a, i) => {
+  return afsnit.map((a, i) => {
     const slut = i + 1 < afsnit.length ? afsnit[i + 1].sek : kendtSlut;
     const ordIalt = antalOrd(a.tekst);
     if (slut === null || a.sek === null || slut <= a.sek) return [a];
@@ -126,6 +131,19 @@ function delLangeAfsnit(afsnit, varighedSek) {
     }
     return stykker.map((s) => ({ sek: a.sek + Math.floor((spaend * s.ordFoer) / ordIalt), tekst: s.tekst }));
   });
+}
+
+/**
+ * Som delLangeAfsnit, når afsnittene består af flere dele (filer). Delenes fra er afsnittenes numre før delingen;
+ * de regnes om, så hver dels overskrift stadig står ved dens første afsnit: { afsnit, dele }.
+ */
+function delLangeAfsnitIDele(afsnit, varighedSek, dele = []) {
+  if (!harTider(afsnit)) return { afsnit, dele };
+  const stykker = delHvert(afsnit, varighedSek);
+  // nyFra[i]: nummeret på afsnit i's første stykke. nyFra[afsnit.length] er antallet i alt.
+  const nyFra = [0];
+  stykker.forEach((s, i) => nyFra.push(nyFra[i] + s.length));
+  return { afsnit: stykker.flat(), dele: dele.map((d) => ({ ...d, fra: nyFra[Math.min(d.fra, afsnit.length)] })) };
 }
 
 /** "04:26", og over en time "1:04:12". */
@@ -248,5 +266,5 @@ function bilagMedDele(afsnit, emner, dele) {
 }
 
 module.exports = {
-  laesAfsnit, harTider, samletTekst, skalerTider, delLangeAfsnit, formaterTid, laesTid, medTider, trimUndertitel, knytEmner, lavBilag,
+  laesAfsnit, harTider, samletTekst, skalerTider, delLangeAfsnit, delLangeAfsnitIDele, formaterTid, laesTid, medTider, trimUndertitel, knytEmner, lavBilag,
 };

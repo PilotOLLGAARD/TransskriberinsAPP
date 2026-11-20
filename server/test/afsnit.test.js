@@ -308,6 +308,20 @@ test('delLangeAfsnit: mange ord på kort tid deles også (Flash har presset tide
   for (let i = 1; i < ud.length; i += 1) assert.ok(ud[i].sek >= ud[i - 1].sek);
 });
 
+test('delLangeAfsnitIDele: delenes start følger med, når et afsnit i en tidligere del deles', () => {
+  const { delLangeAfsnitIDele } = require('../src/afsnit.js');
+  const kilde = [{ sek: 0, tekst: langTekst(150) }, { sek: 600, tekst: 'Del to.' }, { sek: 700, tekst: 'Del tre.' }];
+  const dele = [{ fra: 0, overskrift: 'Del 1: a' }, { fra: 1, overskrift: 'Del 2: b' }, { fra: 2, overskrift: 'Del 3: c' }, { fra: 3, overskrift: 'Del 4: tom' }];
+  const ud = delLangeAfsnitIDele(kilde, 800, dele);
+  assert.deepEqual(ud.afsnit, delLangeAfsnit(kilde, 800), 'samme afsnit som uden dele');
+  assert.deepEqual(ud.dele.map((d) => ud.afsnit[d.fra]?.tekst ?? null), [ud.afsnit[0].tekst, 'Del to.', 'Del tre.', null]);
+  assert.equal(ud.dele[3].fra, ud.afsnit.length, 'en tom sidste del peger stadig efter sidste afsnit');
+  assert.equal(ud.dele[1].overskrift, 'Del 2: b');
+  // Uden tider røres intet.
+  const udenTider = [{ sek: null, tekst: langTekst(150) }];
+  assert.deepEqual(delLangeAfsnitIDele(udenTider, 600, dele.slice(0, 1)), { afsnit: udenTider, dele: dele.slice(0, 1) });
+});
+
 test('delLangeAfsnit: så kan referatets emner knyttes til hele optagelsen', () => {
   const ud = delLangeAfsnit([{ sek: 0, tekst: langTekst(150) }], 600);
   const emner = knytEmner(ud, [{ tid: '00:00', undertitel: 'Start' }, { tid: '05:00', undertitel: 'Midt' }]);
