@@ -1435,3 +1435,83 @@ test('en bid på 5 min. med et spring prøves med den anden model, og teksten me
   const bid = s.t.referatKald[0][0].dele[0].bidder.find((b) => b.startSek === 42 * 60);
   assert.match(bid.tekst, /Fuld tekst fra den anden model/);
 });
+
+// Rettelser fra gennemgangen 20. nov.: Flashs betalte tekst må aldrig smides væk, og en rigtig pause koster ikke ekstra
+
+/** Tider hvert 30. s med et spring, og nok ord pr. minut til at være en rigtig samtale. */
+const tætMedSpring = (lyd) => async () => {
+  const tider = [0, 30, 60, 300, 330];
+  return { tekst: tider.map(() => 'ord '.repeat(400)).join('\n'), afsnit: tider.map((t) => ({ sek: t, tekst: `${'ord '.repeat(400)}${lyd}` })) };
+};
+
+test('et spring med mange ord pr. minut (en rigtig pause) giver ingen nye kald', async () => {
+  const s = opsaet({ noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD, sendLyd: async (lyd) => tætMedSpring(await lyd.text())() });
+  await s.forloeb.behandl('a');
+  assert.equal(s.t.lydKald, 6);
+});
+
+test('blokeres reserven, beholdes Flashs tekst for bidden (aldrig hultekst, når der er tekst)', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd, mime, bevis, meta) => {
+      const t = await lyd.text();
+      if (['d0:29-60', 'd0:38-49'].includes(t)) throw blokeret();
+      if (t === 'd0:42-48' && meta.reserve) throw blokeret();
+      if (t === 'd0:42-48') return medTider(t, [0, 10, 20, 300])();
+      return medTider(t, hver30(0, 300))();
+    },
+  });
+  await s.forloeb.behandl('a');
+  const bid = s.t.referatKald[0][0].dele[0].bidder.find((b) => b.startSek === 42 * 60);
+  assert.ok(!bid.mangler);
+  assert.match(bid.tekst, /ord ved 300/);
+});
+
+test('fejler reserven efter ventetiden, beholdes Flashs tekst, og noten fejler ikke', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd, mime, bevis, meta) => {
+      const t = await lyd.text();
+      if (['d0:29-60', 'd0:38-49'].includes(t)) throw blokeret();
+      if (t === 'd0:42-48' && meta.reserve) throw Object.assign(new Error(), { type: 'tjeneste' });
+      if (t === 'd0:42-48') return medTider(t, [0, 10, 20, 300])();
+      return medTider(t, hver30(0, 300))();
+    },
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+  const bid = s.t.referatKald[0][0].dele[0].bidder.find((b) => b.startSek === 42 * 60);
+  assert.match(bid.tekst, /ord ved 300/);
+});
+
+test('fejler reserven for en tom bid, står den som manglende, og noten fejler ikke', async () => {
+  const tomme = new Set(['d0:29-60', 'd0:38-49', 'd0:42-48']);
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd, mime, bevis, meta) => {
+      const t = await lyd.text();
+      if (t === 'd0:42-48' && meta.reserve) throw blokeret();
+      return tomme.has(t) ? { tekst: '' } : bidTekst(lyd);
+    },
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.TEKST_KLAR);
+  assert.equal(s.t.referatKald[0][0].dele[0].bidder.filter((b) => b.mangler).length, 1);
+});
+
+test('er alle småbidder under en bid med spring blokeret, bruges bidens egen tekst i stedet for hultekst', async () => {
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => {
+      const t = await lyd.text();
+      if (t === 'd0:29-60') return medTider(t, [...hver30(0, 600), ...hver30(900, 1860)])();
+      if (t !== 'd0:0-30' && !t.startsWith('d0:59') && !t.startsWith('d0:89') && !t.startsWith('d0:119') && !t.startsWith('d0:149')) throw blokeret();
+      return medTider(t, hver30(0, 1800))();
+    },
+  });
+  await s.forloeb.behandl('a');
+  const bidder = s.t.referatKald[0][0].dele[0].bidder;
+  assert.equal(bidder.filter((b) => b.mangler).length, 0, 'ingen hultekst');
+  const bid = bidder.find((b) => b.startSek === 29 * 60);
+  assert.match(bid.tekst, /ord ved 900/);
+});

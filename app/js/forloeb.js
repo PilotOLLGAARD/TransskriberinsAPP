@@ -16,6 +16,8 @@ const VENTES_UD = new Set(['net', 'tjeneste']);
 // Flash skriver et tidspunkt mindst hvert 30. s. Et spring på over 2 min. betyder, at tale kan være sprunget over
 // (diagnosen 20. nov. 2026: 171 ord på 7½ min., uden fejl). Så behandles bidden som tom.
 const MAKS_SPRING_SEK = 120;
+// ... og kun når bidden har få ord pr. minut (diagnosen: 22 ord/min.; en almindelig samtale har ca. 100).
+const MIN_ORD_PR_MIN = 60;
 const standardVent = (ms, signal) => new Promise((ok) => {
   const t = setTimeout(ok, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); ok(); }, { once: true });
@@ -137,14 +139,18 @@ export function lavForloeb({
       }));
   }
 
+  const antalOrd = (svar) => String(svar?.tekst ?? '').split(/\s+/).filter(Boolean).length;
+
   /** Et spring på over MAKS_SPRING_SEK mellem Flashs tider (eller til bidens slutning). Kun med mindst tre tider. */
   function harSpring(svar, varighedMs) {
     const tider = (Array.isArray(svar?.afsnit) ? svar.afsnit : []).map((a) => a?.sek).filter(Number.isFinite);
     if (tider.length < 3) return false;
+    if (Number.isFinite(varighedMs) && antalOrd(svar) / (varighedMs / 60000) >= MIN_ORD_PR_MIN) return false;
     const punkter = [0, ...tider, Number.isFinite(varighedMs) ? varighedMs / 1000 : tider.at(-1)];
     return punkter.some((p, i) => i > 0 && p - punkter[i - 1] > MAKS_SPRING_SEK);
   }
-  const antalOrd = (svar) => String(svar?.tekst ?? '').split(/\s+/).filter(Boolean).length;
+
+  const somResultat = (svar) => ({ tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) });
 
   /** Et svar uden et eneste ord, hverken i teksten eller i afsnittene. */
   function erTomtSvar(svar) {
@@ -160,6 +166,19 @@ export function lavForloeb({
   }
   function* blade(t) {
     for (const bid of t.plan) yield* bladeAf(t.tekster[bid.nr], bid, [bid.nr]);
+  }
+  /** Som blade, men en delt bid, hvis småbidder alle mangler, giver sin egen tekst (forrige) i stedet for huller. */
+  function* bladeMedReserveAf(svar, bid) {
+    if (!svar?.smaa) {
+      yield { bid, svar };
+      return;
+    }
+    const under = svar.smaa.plan.flatMap((s) => [...bladeMedReserveAf(svar.smaa.tekster[s.nr], s)]);
+    if (svar.smaa.forrige && under.every((b) => b.svar?.mangler)) yield { bid, svar: svar.smaa.forrige };
+    else yield* under;
+  }
+  function* bladeMedReserve(t) {
+    for (const bid of t.plan) yield* bladeMedReserveAf(t.tekster[bid.nr], bid);
   }
   function saetSvar(t, sti, svar) {
     let tekster = t.tekster;
@@ -262,12 +281,20 @@ export function lavForloeb({
           vedFremdrift: (sendt, ialt) => { upload.set(noegle, { sendt, ialt }); meldUpload(); },
         }).finally(() => upload.delete(noegle));
       });
-      const delOp = async () => {
-        saetSvar(tilstand[d], sti, { smaa: { plan, tekster: {} } });
+      const delOp = async (forrige) => {
+        saetSvar(tilstand[d], sti, { smaa: { plan, tekster: {}, ...(forrige ? { forrige } : {}) } });
         for (const s of plan) ventende.push({ d, bid: s, sti: [...sti, s.nr] });
         await gem();
         meld();
         vaek();
+      };
+      /** Den anden model. Fejler den (blokeret, net, dagsgrænse), gives null: den har ingen bedre tekst. */
+      const reserve = async () => {
+        try {
+          return await sendBid(true);
+        } catch {
+          return null;
+        }
       };
       let resultat;
       try {
@@ -279,16 +306,17 @@ export function lavForloeb({
         if (erTomtSvar(svar) && plan.length) return delOp();
         // Tale sprunget over: mindre bidder, eller på det mindste trin den anden model. Teksten med flest ord bruges.
         if (harSpring(svar, varighedMs) && !signal.aborted && !fejl) {
-          if (plan.length) return delOp();
-          const anden = await sendBid(true);
+          if (plan.length) return delOp(somResultat(svar));
+          // Flashs tekst er betalt: den gemmes først, så en genstart aldrig sender bidden igen.
+          saetSvar(tilstand[d], sti, somResultat(svar));
+          await gem();
+          const anden = await reserve();
           if (antalOrd(anden) > antalOrd(svar)) svar = anden;
         }
         // Den mindste bid: den anden model prøver (Transcribe, inden for dens grænse).
-        if (erTomtSvar(svar)) svar = await sendBid(true);
+        if (erTomtSvar(svar)) svar = (await reserve()) ?? svar;
         if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
-        resultat = erTomtSvar(svar)
-          ? { mangler: true, tom: true, tekst: '' }
-          : { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };
+        resultat = erTomtSvar(svar) ? { mangler: true, tom: true, tekst: '' } : somResultat(svar);
       } catch (e) {
         if (e?.type !== 'blokeret') throw e;
         // Googles filter: bidden prøves i mindre bidder. Den mindste bid (eller en, der ikke kan deles) mangler.
@@ -332,7 +360,7 @@ export function lavForloeb({
     await fremdrift(id, 'laver');
     const tilServer = dele.map((del, d) => {
       const t = tilstand[d];
-      const bidListe = [...blade(t)].map(({ bid: b, svar: s }) => ({
+      const bidListe = [...bladeMedReserve(t)].map(({ bid: b, svar: s }) => ({
         tom: s.tom === true,
         startSek: b.startMs / 1000, overlapSek: b.overlapMs / 1000,
         varighedSek: Number.isFinite(b.slutMs) ? (b.slutMs - b.startMs) / 1000 : 0,
