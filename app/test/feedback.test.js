@@ -110,3 +110,31 @@ test('et ødelagt lager giver en tom kø i stedet for en fejl', async () => {
   const koe = lavFeedbackKoe({ hukommelse: mem, send: async () => {} });
   assert.equal(koe.antal(), 0);
 });
+
+test('feedback, der lægges i køen, mens køen allerede sendes, kommer med i samme kørsel', async () => {
+  const mem = hukommelse();
+  const sendt = [];
+  let slip;
+  const venter = new Promise((ok) => { slip = ok; });
+  const koe = lavFeedbackKoe({ hukommelse: mem, send: async (f) => { if (f.tekst === 'A') await venter; sendt.push(f.tekst); } });
+  koe.tilfoej('A');
+  const foerste = koe.sendVentende();
+  koe.tilfoej('B');
+  const anden = koe.sendVentende();
+  slip();
+  assert.equal(await foerste, 'sendt');
+  assert.equal(await anden, 'sendt');
+  assert.deepEqual(sendt, ['A', 'B']);
+  assert.equal(koe.antal(), 0);
+});
+
+test('fuldt lager: tilfoej kaster, så appen kan sige det, og et lager, der ikke kan skrives, sender aldrig i ring', async () => {
+  const fuld = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); }, removeItem: () => {} };
+  assert.throws(() => lavFeedbackKoe({ hukommelse: fuld, send: async () => {} }).tilfoej('X'));
+  // Et lager, der kan læses, men ikke skrives: hver feedback sendes højst én gang pr. kørsel.
+  const fast = { getItem: () => JSON.stringify([{ id: '1', tekst: 'X', skrevet: 0 }]), setItem: () => { throw new Error('x'); }, removeItem: () => { throw new Error('x'); } };
+  let antal = 0;
+  const koe = lavFeedbackKoe({ hukommelse: fast, send: async () => { antal++; } });
+  assert.equal(await koe.sendVentende(), 'sendt');
+  assert.equal(antal, 1);
+});

@@ -217,6 +217,9 @@ export function lavForloeb({
         // En tom bid godtages aldrig som stilhed: den prøves én gang til, og er den stadig tom, mangler den
         // (serveren skriver så "[Dette afsnit (tidsrum) kunne ikke transskriberes]").
         if (erTomtSvar(svar) && !signal.aborted && !fejl) svar = await sendBid();
+        // Fejlede en anden bid imens (eller blev afsendelsen stoppet), er bidden ikke prøvet færdig.
+        // Den gemmes så ikke som manglende, men sendes igen ved Prøv igen.
+        if (erTomtSvar(svar) && (signal.aborted || fejl)) return;
         resultat = erTomtSvar(svar)
           ? { mangler: true, tom: true, tekst: '' }
           : { tekst: svar.tekst || '', ...(Array.isArray(svar.afsnit) ? { afsnit: svar.afsnit } : {}) };

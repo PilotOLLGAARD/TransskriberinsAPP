@@ -1261,3 +1261,24 @@ test('kun bidder, appen kan dele i småbidder, siger det til serveren', async ()
   await udelt.forloeb.behandl('a');
   assert.equal(udelt.t.lydListe[0][3].smaabidder, false, 'en del, der ikke kan klippes');
 });
+
+test('en tom bid gemmes ikke som manglende, når en anden bid fejler samtidig, så Prøv igen sender den igen', async () => {
+  let runde = 1;
+  const s = opsaet({
+    noter: [LANG], opdeling: falskOpdeling(), bidder: BIDDER_STD,
+    sendLyd: async (lyd) => {
+      const t = await lyd.text();
+      if (runde === 1 && t === 'd0:29-60') return { tekst: '' };
+      if (runde === 1 && t === 'd0:0-30') throw Object.assign(new Error(), { type: 'net' });
+      return bidTekst(lyd);
+    },
+  });
+  await s.forloeb.behandl('a');
+  assert.equal(s.lager.kort.get('a').status, STATUS.FEJL);
+  const gemt = s.lager.kort.get('a').bidder?.[0]?.tekster ?? {};
+  assert.ok(!Object.values(gemt).some((b) => b.mangler), 'ingen bid er låst fast som manglende');
+  runde = 2;
+  await s.forloeb.behandl('a');
+  const bid = s.t.referatKald[0][0].dele[0].bidder.find((b) => b.startSek === 1740);
+  assert.equal(bid.tekst, 'Tekst d0:29-60');
+});

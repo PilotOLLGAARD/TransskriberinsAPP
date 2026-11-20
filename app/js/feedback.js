@@ -94,6 +94,7 @@ export function lavFeedbackKoe({ hukommelse = globalThis.localStorage, send, nu 
       return [];
     }
   };
+  /** Kaster, hvis lageret er fuldt. tilfoej lader fejlen gå videre, så appen kan sige det. */
   const skriv = (liste) => {
     if (liste.length) hukommelse?.setItem(KOE_NOEGLE, JSON.stringify(liste));
     else hukommelse?.removeItem(KOE_NOEGLE);
@@ -109,17 +110,24 @@ export function lavFeedbackKoe({ hukommelse = globalThis.localStorage, send, nu 
     },
     /** Sender alt, der venter, én ad gangen. Stopper ved den første fejl, så rækkefølgen bevares. */
     sendVentende() {
+      // Køen læses igen efter hver feedback, så det, der lægges i imens, kommer med i samme kørsel.
+      // Hver feedback sendes højst én gang pr. kørsel, også hvis lageret ikke kan skrives.
       igang ??= (async () => {
+        const sendt = new Set();
         try {
-          for (const f of laes()) {
+          for (;;) {
+            const f = laes().find((x) => !sendt.has(x.id));
+            if (!f) return 'sendt';
             try {
               await send(f);
             } catch (e) {
               return ['net', 'login'].includes(e?.type) ? e.type : 'fejl';
             }
-            skriv(laes().filter((x) => x.id !== f.id));
+            sendt.add(f.id);
+            try {
+              skriv(laes().filter((x) => x.id !== f.id));
+            } catch { /* fuldt lager: fjernes næste gang; i værste fald får Rasmus den to gange */ }
           }
-          return 'sendt';
         } finally {
           igang = null;
         }

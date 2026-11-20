@@ -487,13 +487,15 @@ test('kan betjenes på 360 px', async () => {
   async function tjek(navn) {
     const m = await side.evaluate(() => ({
       bred: document.documentElement.scrollWidth,
-      knapper: [...document.querySelectorAll('button')].map((b) => [b.textContent, b.getBoundingClientRect().height, b.getAttribute('role'), b.getBoundingClientRect().right, b.className]),
+      // Skjulte knapper (fx feedback på lave skærme) tæller ikke.
+      knapper: [...document.querySelectorAll('button')].filter((b) => b.getClientRects().length).map((b) => [b.textContent, b.getBoundingClientRect().height, b.getAttribute('role'), b.getBoundingClientRect().right, b.className]),
       lille: [...document.querySelectorAll('button, p, h1, h2, input')].map((e) => parseFloat(getComputedStyle(e).fontSize)),
     }));
     assert.ok(m.bred <= 360, `${navn}: vandret rulning, ${m.bred}`);
     assert.ok(m.knapper.length > 0, navn);
     for (const [tekst, hoejde, rolle, hoejre, klasse] of m.knapper) {
-      const mindst = klasse.includes('top-knap') ? 44 : 72;
+      // De små piller (Information, Tilbage, Giv feedback) må være 44 px; alle andre knapper er store.
+      const mindst = /top-knap|feedback-knap/.test(klasse) ? 44 : 72;
       assert.ok(Math.round(hoejde) >= mindst, `${navn}: "${tekst}" er ${hoejde} px`);
       assert.ok(hoejre <= 360, `${navn}: "${tekst}" går ud over kanten`);
     }

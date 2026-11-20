@@ -635,7 +635,13 @@ async function sendFeedbackNu() {
     return;
   }
   // Gemmes på telefonen først, så intet går tabt, hvis nettet forsvinder midt i.
-  feedbackKoe.tilfoej(tekst);
+  try {
+    feedbackKoe.tilfoej(tekst);
+  } catch {
+    t.besked = { tekst: 'Telefonen kunne ikke gemme din feedback. Frigør plads, og prøv igen.', type: 'fejl' };
+    tegn();
+    return;
+  }
   t.feedbackTekst = '';
   t.senderFeedback = true;
   tegn();
