@@ -63,7 +63,7 @@ Når mailen er sendt, slettes lyden fra telefonen. Referatet og Word-dokumentet 
 
 ## Tidligere optagelser
 
-Tryk **Tidligere** øverst til højre på startskærmen. Du ser titel, type, dato, varighed og status for hver optagelse:
+Tryk **Tidligere** nederst på startskærmen. Du ser titel, type, dato, varighed og status for hver optagelse:
 
 | Status | Betyder | Slettes |
 |---|---|---|
@@ -84,10 +84,10 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 | Appen må ikke bruge mikrofonen | Giv appen tilladelse i telefonens indstillinger |
 | Optagelsen blev afbrudt. Det optagede er gemt | Tryk Fortsæt optagelsen for at optage videre, eller Send for at få referat af det, der er optaget |
 | Optagelsen kan ikke fortsættes mere | Send den, og start en ny. Grænsen er 4 timer eller 20 dele |
-| Din konto har ikke adgang | Kontakt IT |
+| Din konto har ikke adgang | Kontakt Rasmus Winther på rw@ollgaard.dk |
 | Det lykkedes ikke at lave referatet | Tryk på Prøv igen. Navnet er gemt |
 | Mailen blev ikke sendt | Tryk på Send igen |
-| Optagelsen kunne ikke behandles | Kontakt IT, hvis det sker igen |
+| Optagelsen kunne ikke behandles | Kontakt Rasmus Winther på rw@ollgaard.dk, hvis det sker igen |
 | Mailen er måske allerede sendt | Tjek din indbakke, før du sender igen |
 
 ## Godt at vide
@@ -98,3 +98,7 @@ Din optagelse bliver liggende på telefonen under **Afventer**, indtil det lykke
 - Svar Ja, når Microsoft spørger "Vil du forblive logget på?".
 - Er du ikke logget ind, står det øverst på startskærmen. Tryk **Log ind med din ØLLGAARD-konto**. Du kan altid optage først. Optagelser, der venter på login, sendes af sig selv, når du er logget ind.
 - Under **Information** kan du se, hvilken konto du er logget ind med, og logge ud. Log ud sletter ikke dine optagelser.
+
+## Hjælp
+
+Virker noget ikke? Kontakt Rasmus Winther på rw@ollgaard.dk. Skriv, hvornår det skete, hvad skærmen sagde, og hvilken telefon du har. Send ikke selve optagelsen.

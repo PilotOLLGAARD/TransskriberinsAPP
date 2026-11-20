@@ -1411,7 +1411,7 @@ function skaermInformation() {
     ),
     afsnit(
       'Kontakt',
-      h('p', {}, 'Hvis noget ikke virker, så kontakt Rasmus Winther på ', h('a', { href: 'mailto:rw@ollgaard.dk' }, 'rw@ollgaard.dk'), '.'),
+      h('p', {}, 'Hvis noget ikke virker: ', h('a', { href: 'mailto:rw@ollgaard.dk' }, 'Kontakt Rasmus Winther på rw@ollgaard.dk'), '.'),
     ),
   ];
 }

@@ -99,3 +99,18 @@ test('beskederne om lange optagelser og flere filer', () => {
   assert.equal(BESKEDER.blokeret, BESKEDER.kanIkkeBehandles);
   assert.equal(lidtPlads(42), 'Telefonen har kun plads til ca. 42 minutters optagelse. Slet gamle filer, hvis mødet bliver langt.');
 });
+
+test('én supportkontakt: beskeder, appen og vejledningen sender aldrig til IT', () => {
+  const KONTAKT = 'Kontakt Rasmus Winther på rw@ollgaard.dk';
+  for (const [n, t] of Object.entries(BESKEDER)) {
+    if (typeof t === 'string') assert.doesNotMatch(t, /kontakt IT/i, n);
+  }
+  assert.ok(BESKEDER.adgang.includes(KONTAKT), 'adgang');
+  assert.ok(BESKEDER.kanIkkeBehandles.includes(KONTAKT), 'kanIkkeBehandles');
+  assert.ok(BESKEDER.blokeret.includes(KONTAKT), 'blokeret');
+  for (const [f, kilde] of Object.entries(KILDER)) assert.doesNotMatch(kilde, /kontakt IT/i, f);
+  assert.ok(KILDER['app.js'].includes(KONTAKT), 'Information i appen');
+  const vejledning = readFileSync(new URL('../../docs/vejledning-medarbejdere.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(vejledning, /kontakt IT/i, 'vejledningen');
+  assert.ok(vejledning.includes(KONTAKT), 'vejledningen nævner kontakten');
+});
