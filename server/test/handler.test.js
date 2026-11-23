@@ -836,6 +836,46 @@ test('/referat med kun manglende bidder giver tom tekst og intet referat', async
   assert.equal(s.referat.kald, 0);
 });
 
+test('/referat: overskrift og tider står ved den rigtige fil, når et langt afsnit i en tidligere fil deles', async () => {
+  // Fil 1 er ét langt afsnit på 10 min. uden tider (som fra Transcribe), så bilaget deler det i flere stykker.
+  const langTekst = Array.from({ length: 120 }, (_, i) => `Fil et sætning ${i + 1}.`).join(' ');
+  const dele = [
+    { filnavn: 'a.m4a', varighedSek: 600, bidder: [{ startSek: 0, overlapSek: 0, varighedSek: 600, tekst: langTekst }] },
+    { filnavn: 'b.m4a', varighedSek: 1200, bidder: [
+      { startSek: 0, overlapSek: 0, varighedSek: 600, tekst: '', mangler: true },
+      { startSek: 570, overlapSek: 30, varighedSek: 630, tekst: 'Fil to slut.', afsnit: [{ sek: 0, tekst: 'Fil to slut.' }] },
+    ] },
+    { filnavn: 'c.m4a', varighedSek: 600, bidder: [
+      { startSek: 0, overlapSek: 0, varighedSek: 300, tekst: 'Fil tre.', afsnit: [{ sek: 5, tekst: 'Fil tre.' }] },
+      { startSek: 270, overlapSek: 30, varighedSek: 330, tekst: '', mangler: true },
+    ] },
+  ];
+  const s = await start();
+  const j = await (await postReferat(s.adresse, { dele, varighedSek: 2400 })).json();
+  assert.deepEqual(j.mangler, ['10:00-20:00', '34:30-40:00']);
+
+  const bilag = s.pdf.valg.bilag;
+  assert.ok(bilag.length > 3, 'fil 1 er delt i flere stykker');
+  assert.deepEqual(bilag.filter((g) => g.overskrift).map((g) => g.overskrift), ['Del 1: a.m4a', 'Del 2: b.m4a', 'Del 3: c.m4a']);
+  // Afsnittene under hver overskrift, til den næste.
+  const filer = [];
+  for (const g of bilag) {
+    if (g.overskrift) filer.push({ overskrift: g.overskrift, grupper: [] });
+    filer.at(-1).grupper.push(g);
+  }
+  const tekst = (f) => f.grupper.flatMap((g) => g.afsnit).join(' ');
+  assert.match(tekst(filer[0]), /^Fil et sætning 1\. .*Fil et sætning 120\.$/);
+  assert.doesNotMatch(tekst(filer[0]), /Fil to|Fil tre|kunne ikke/);
+  assert.equal(tekst(filer[1]), '[Dette afsnit (10:00-20:00) kunne ikke transskriberes] Fil to slut.');
+  assert.equal(tekst(filer[2]), 'Fil tre. [Dette afsnit (34:30-40:00) kunne ikke transskriberes]');
+  // Tiden inden for filen: aldrig negativ og aldrig over filens længde.
+  filer.forEach((f, n) => {
+    assert.equal(f.grupper[0].visSek, n === 2 ? 5 : 0, `${f.overskrift} starter ved filens start`);
+    for (const g of f.grupper) assert.ok(g.visSek >= 0 && g.visSek <= dele[n].varighedSek, `${f.overskrift}: visSek ${g.visSek}`);
+  });
+  assert.deepEqual(s.docx.valg.bilag, bilag);
+});
+
 test('/referat afviser mere end 200 bidder og ugyldige dele', async () => {
   const s = await start();
   const b = { startSek: 0, overlapSek: 0, varighedSek: 60, tekst: 'a' };
