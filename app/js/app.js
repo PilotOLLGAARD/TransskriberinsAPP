@@ -1499,6 +1499,30 @@ function godeRaad() {
   );
 }
 
+/** Om notifikationer er slået til, og hjælp til at slå dem til. Telefonens egne knapnavne på dansk. */
+function notifikationAfsnit() {
+  const forklaring = 'Du får besked, hvis optagelsen stopper, og når referatet er sendt.';
+  const tilstand = notifikationer.tilstand();
+  if (tilstand === 'til') return [h('p', {}, `Notifikationer er slået til. ${forklaring}`)];
+  if (tilstand === 'mangler') return [h('p', {}, 'Notifikationer virker kun, når appen er lagt på hjemmeskærmen.')];
+  if (tilstand === 'spoerg') {
+    return [
+      h('p', {}, `Slå notifikationer til. ${forklaring}`),
+      knap('Slå notifikationer til', async () => {
+        await notifikationer.bedOmTilladelse();
+        tegn();
+      }, { klasse: 'hvid' }),
+    ];
+  }
+  const p = platform();
+  const iphone = 'iPhone: Åbn Indstillinger → Notifikationer → Transskribering, og slå Tillad notifikationer til.';
+  const android = 'Android: Hold fingeren på appens ikon → Appinfo → Notifikationer, og slå dem til.';
+  return [
+    h('p', {}, `Notifikationer er slået fra. ${forklaring}`),
+    ...(p === 'ios' ? [iphone] : p === 'android' ? [android] : [iphone, android]).map((tekst) => h('p', {}, tekst)),
+  ];
+}
+
 function skaermInformation() {
   const afsnit = (titel, ...indhold) => h('section', { klasse: 'info-afsnit' }, h('h2', {}, titel), ...indhold);
   return [
@@ -1534,6 +1558,7 @@ function skaermInformation() {
         h('li', {}, 'Lyd og tekst behandles af Google for at lave transskription og referat. De bruges ikke til at træne AI-modeller. Mailen sendes fra din egen Outlook.'),
       ),
     ),
+    afsnit('Notifikationer', ...notifikationAfsnit()),
     afsnit(
       'Konto',
       ...(t.loginStatus === 'nej' || !login.harVaeretLoggetInd()
@@ -1908,6 +1933,8 @@ document.addEventListener('visibilitychange', () => {
   // Appen viser selv, hvordan det står. Gamle notifikationer om den fjernes.
   if (document.visibilityState === 'visible') {
     notifikationer.luk();
+    // Brugeren kan have slået notifikationer til i telefonens indstillinger.
+    if (t.visning === 'information') tegn();
     return;
   }
   if (document.visibilityState !== 'hidden') return;

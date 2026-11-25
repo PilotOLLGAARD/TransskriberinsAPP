@@ -1218,6 +1218,63 @@ test('en gammel afbrudt optagelse åbner ikke navneskærmen, og navneskærmen ha
   await kontekst.close();
 });
 
+// Information viser, om notifikationer er slået til, og hjælper med at slå dem til
+
+async function infoMedNotifikation(permission) {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript((p) => {
+    window.spurgt = 0;
+    const n = p === null ? undefined : {
+      permission: p,
+      requestPermission: async () => { window.spurgt++; n.permission = 'granted'; return 'granted'; },
+    };
+    Object.defineProperty(window, 'Notification', { value: n, configurable: true });
+  }, permission);
+  await logInd(side);
+  await knap(side, 'Information').click();
+  await side.getByRole('heading', { name: 'Notifikationer' }).waitFor();
+  return { kontekst, side };
+}
+
+test('Information: notifikationer slået til', async () => {
+  const { kontekst, side } = await infoMedNotifikation('granted');
+  await vis(side, 'Notifikationer er slået til.');
+  assert.equal(await knap(side, 'Slå notifikationer til').count(), 0);
+  await kontekst.close();
+});
+
+test('Information: ikke spurgt endnu giver en knap, der spørger og viser resultatet', async () => {
+  const { kontekst, side } = await infoMedNotifikation('default');
+  await knap(side, 'Slå notifikationer til').click();
+  await vis(side, 'Notifikationer er slået til.');
+  assert.equal(await side.evaluate(() => window.spurgt), 1);
+  await kontekst.close();
+});
+
+test('Information: afviste notifikationer giver en vejledning til telefonens indstillinger', async () => {
+  const { kontekst, side } = await infoMedNotifikation('denied');
+  await vis(side, 'Notifikationer er slået fra.');
+  await vis(side, 'Indstillinger → Notifikationer → Transskribering');
+  await vis(side, 'Appinfo → Notifikationer');
+  await kontekst.close();
+});
+
+test('Information: slås notifikationer til i telefonens indstillinger, står det, når appen kommer frem', async () => {
+  const { kontekst, side } = await infoMedNotifikation('denied');
+  await vis(side, 'Notifikationer er slået fra.');
+  await skjul(side);
+  await side.evaluate(() => { window.Notification.permission = 'granted'; });
+  await synlig(side);
+  await vis(side, 'Notifikationer er slået til.');
+  await kontekst.close();
+});
+
+test('Information: uden notifikationer i browseren står det, at appen skal på hjemmeskærmen', async () => {
+  const { kontekst, side } = await infoMedNotifikation(null);
+  await vis(side, 'Notifikationer virker kun, når appen er lagt på hjemmeskærmen.');
+  await kontekst.close();
+});
+
 // Tryk på en notifikation åbner det rigtige sted (sw.js giver målet i adressen eller som besked)
 
 async function gammelAfbrudt(side) {
