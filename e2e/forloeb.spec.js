@@ -883,14 +883,20 @@ test('Tidligere optagelser står i bundlinjen og kan ses uden at rulle', async (
 
 // Notifikation, hvis appen skjules, mens referatet laves eller sendes
 
-const IKKE_SENDT = 'Referatet er ikke sendt endnu — åbn appen igen, så det kan blive færdigt.';
+const IKKE_SENDT = 'Referatet er ikke sendt endnu – åbn appen, så det bliver færdigt';
+const SENDT_NOTIFIKATION = 'Dit referat er sendt til din mail';
+const FEJLET_NOTIFIKATION = 'Referatet blev ikke sendt – åbn appen, og tryk Prøv igen';
 
 /** Giver lov til notifikationer og gemmer dem, appen viser, i window.vist. */
 async function fangNotifikationer(side) {
   await side.addInitScript(() => {
     window.vist = [];
     Object.defineProperty(window, 'Notification', { value: { permission: 'granted', requestPermission: async () => 'granted' }, configurable: true });
+    window.lukket = 0;
     ServiceWorkerRegistration.prototype.showNotification = async function (titel, valg) { window.vist.push(valg.body); };
+    ServiceWorkerRegistration.prototype.getNotifications = async function () {
+      return window.vist.map(() => ({ close: () => { window.lukket++; } }));
+    };
   });
 }
 
@@ -910,6 +916,63 @@ test('skjult app, mens referatet laves, giver en notifikation', async () => {
   await kontekst.close();
 });
 
+test('referatet bliver færdigt, mens appen er skjult: "sendt" erstatter "ikke sendt endnu"', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await swKlar(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Langsom skjult' });
+  await vis(side, 'Referatet laves');
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length === 2, null, { timeout: 30000 });
+  assert.deepEqual(await side.evaluate(() => window.vist), [IKKE_SENDT, SENDT_NOTIFIKATION]);
+  await kontekst.close();
+});
+
+test('afsendelsen fejler, mens appen er skjult: én notifikation om fejlen', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await swKlar(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).fill('Fejler skjult');
+  await skjul(side);
+  await knap(side, 'Send').click();
+  await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 30000 });
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), [FEJLET_NOTIFIKATION]);
+  await kontekst.close();
+});
+
+test('referatet sendes, mens appen er fremme: ingen notifikation', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await swKlar(side);
+  await optag(side, { titel: 'Fremme' });
+  await vis(side, SENDT);
+  await side.waitForTimeout(300);
+  assert.deepEqual(await side.evaluate(() => window.vist), []);
+  await kontekst.close();
+});
+
+test('når appen kommer frem igen, fjernes dens notifikationer', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await swKlar(side);
+  await saetNaesteFejl(miljoe, 'langsom');
+  await optag(side, { titel: 'Ryd op' });
+  await vis(side, 'Referatet laves');
+  await skjul(side);
+  await side.waitForFunction(() => window.vist.length > 0, null, { timeout: 5000 });
+  await synlig(side);
+  await side.waitForFunction(() => window.lukket > 0, null, { timeout: 5000 });
+  await kontekst.close();
+});
+
 test('skjult app uden noget i gang giver ingen notifikation', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await fangNotifikationer(side);
@@ -924,7 +987,7 @@ test('skjult app uden noget i gang giver ingen notifikation', async () => {
 
 // Notifikation, når optagelsen stopper i baggrunden, uanset hvilket signal der kommer først
 
-const STOPPET_NY = 'Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager.';
+const STOPPET_NY = 'Optagelsen er stoppet – åbn appen for at fortsætte';
 
 async function gemStream(side) {
   await side.addInitScript(() => {

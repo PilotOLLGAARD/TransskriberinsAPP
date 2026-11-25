@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lavOptager, vaelgFormat, visAdvarsel, bedOmTilladelse } from '../js/optager.js';
+import { lavOptager, vaelgFormat } from '../js/optager.js';
 
 const MINUT = 60 * 1000;
 
@@ -731,34 +731,6 @@ test('to optagere, der fortsætter samme note samtidig, overskriver ikke hinande
   assert.equal(new Set(nr).size, nr.length, `samme nummer brugt to gange: ${nr}`);
   assert.deepEqual([...new Set(a.lager.stykker.map((x) => x.del))], [0, 1, 2]);
   assert.equal(a.lager.noter.get(id).dele, 3);
-});
-
-// Notifikation, når optagelsen stopper, fordi appen skjules
-
-const STOPPET = 'Optagelsen er stoppet — hold appen åben, mens du optager.';
-
-test('visAdvarsel viser kun notifikationen med tilladelse og via service workeren', async () => {
-  const vist = [];
-  const serviceWorker = { ready: Promise.resolve({ showNotification: async (titel, valg) => { vist.push([titel, valg.body]); } }) };
-  assert.equal(await visAdvarsel(STOPPET, { notifikation: { permission: 'denied' }, serviceWorker }), false);
-  assert.equal(await visAdvarsel(STOPPET, { notifikation: { permission: 'default' }, serviceWorker }), false);
-  assert.equal(await visAdvarsel(STOPPET, { notifikation: undefined, serviceWorker }), false);
-  assert.deepEqual(vist, []);
-  assert.equal(await visAdvarsel(STOPPET, { notifikation: { permission: 'granted' }, serviceWorker }), true);
-  assert.deepEqual(vist, [['Transskribering', STOPPET]]);
-  const fejler = { ready: Promise.resolve({ showNotification: async () => { throw new TypeError('nej'); } }) };
-  assert.equal(await visAdvarsel(STOPPET, { notifikation: { permission: 'granted' }, serviceWorker: fejler }), false);
-});
-
-test('bedOmTilladelse spørger kun, når tilladelsen ikke er afgjort', async () => {
-  let spurgt = 0;
-  const lav = (permission) => ({ permission, requestPermission: async () => { spurgt++; return 'granted'; } });
-  await bedOmTilladelse({ notifikation: lav('granted') });
-  await bedOmTilladelse({ notifikation: lav('denied') });
-  await bedOmTilladelse({ notifikation: undefined });
-  assert.equal(spurgt, 0);
-  await bedOmTilladelse({ notifikation: lav('default') });
-  assert.equal(spurgt, 1);
 });
 
 test('fuldt lager, når optagelsen skal starte, giver pladsTom og lukker mikrofonen', async () => {

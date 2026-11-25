@@ -12,13 +12,15 @@ import {
 import { lavIndeks } from './opdeling/index.js';
 import { lavLydkurve } from './lydkurve.js';
 import { sendMail } from './mail.js';
-import { LAAS_PRAEFIKS, bedOmTilladelse, browserMedier, lavOptager, visAdvarsel } from './optager.js';
+import { lavNotifikationer } from './notifikation.js';
+import { LAAS_PRAEFIKS, browserMedier, lavOptager } from './optager.js';
 import { lavTilbage } from './tilbage.js';
 import { FORTRYD_MS, STATUS, slettesOm } from './tilstand.js';
 import { sendLyd, sendReferat } from './transskribering.js';
 import { typeNavn } from './typer.js';
 
 const EFTER_LOGIN = 'efterLogin';
+const notifikationer = lavNotifikationer();
 
 const login = LOKAL
   ? lavLokalLogin()
@@ -210,7 +212,7 @@ async function logInd(efterLogin) {
 async function optag() {
   if (t.starter || t.fornyer || optager.erAktiv()) return;
   // Første gang: lov til at give besked, hvis optagelsen stopper. Venter ikke, så optagelsen starter straks.
-  bedOmTilladelse();
+  notifikationer.bedOmTilladelse();
   t.starter = true;
   t.besked = null;
   tegn();
@@ -238,7 +240,7 @@ async function optag() {
 /** Optager en ny del på en afbrudt note. Navnet fra navneskærmen gemmes først. */
 async function fortsaetOptagelse(id) {
   if (t.starter || optager.erAktiv()) return;
-  bedOmTilladelse();
+  notifikationer.bedOmTilladelse();
   t.starter = true;
   t.besked = null;
   try {
@@ -539,8 +541,24 @@ function uploadTrin(id) {
 async function efterAfsendelse(id) {
   t.upload.delete(id);
   t.bidder.delete(id);
-  if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
+  const note = forloeb.medUgemt(await lager.hentNote(id));
+  if (note?.status === STATUS.SENDT) t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   await opdater();
+  if (document.visibilityState === 'hidden') giVedAfsendelse(note);
+}
+
+/**
+ * Blev referatet færdigt eller fejlede det, mens appen var skjult, får brugeren besked. Er appen fremme, står det
+ * på skærmen. "Sendt" vises kun, når intet andet er i gang, så den ikke skjuler, at en anden note mangler.
+ */
+function giVedAfsendelse(note) {
+  if (!note) return;
+  if (note.status === STATUS.FEJL || note.fejlType) notifikationer.vis('fejlet', note.id);
+  else if (note.status === STATUS.SENDT && !afsendelseIGang()) notifikationer.vis('sendt', note.id);
+}
+
+function afsendelseIGang() {
+  return t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
 }
 
 /** Laver referatet, hvis det mangler, og mailer det. Bruges af Prøv igen og Send igen. */
@@ -697,12 +715,14 @@ async function sendTilMig(id) {
   } finally {
     t.igang.delete(id);
   }
-  if (forloeb.medUgemt(await lager.hentNote(id))?.status === STATUS.SENDT) {
+  const note = forloeb.medUgemt(await lager.hentNote(id));
+  if (note?.status === STATUS.SENDT) {
     t.visning = 'start';
     t.aabenNote = null;
     t.besked = { tekst: `Referatet er sendt til ${login.brugerMail()}.`, type: 'ok' };
   }
   await opdater();
+  if (document.visibilityState === 'hidden') giVedAfsendelse(note);
 }
 
 /** Sender en sendt notes referat igen fra telefonen. */
@@ -1865,10 +1885,7 @@ async function optagelserAndetSted() {
   }
 }
 
-// Telefonen kan stoppe appen i baggrunden. Så bliver referatet først færdigt, når appen åbnes igen.
-const IKKE_SENDT = 'Referatet er ikke sendt endnu — åbn appen igen, så det kan blive færdigt.';
 // På iPhone tager telefonen mikrofonen, før appen meldes skjult. Derfor regnes en afbrydelse lige før med.
-const STOPPET = 'Optagelsen er stoppet. Åbn appen og hold den åben, mens du optager.';
 const STOPPET_VINDUE_MS = 10 * 1000;
 const advaretOm = new Set();
 let sidstAfbrudt = null; // { id, tid }
@@ -1877,7 +1894,7 @@ let sidstAfbrudt = null; // { id, tid }
 function advarStoppet(id) {
   if (!id || advaretOm.has(id)) return false;
   advaretOm.add(id);
-  visAdvarsel(STOPPET);
+  notifikationer.vis('stoppet', id);
   return true;
 }
 
@@ -1888,6 +1905,11 @@ function nyDelStartet(id) {
 }
 
 document.addEventListener('visibilitychange', () => {
+  // Appen viser selv, hvordan det står. Gamle notifikationer om den fjernes.
+  if (document.visibilityState === 'visible') {
+    notifikationer.luk();
+    return;
+  }
   if (document.visibilityState !== 'hidden') return;
   if (optager.erAktiv()) {
     // Har brugeren lige trykket Stop, er der intet at advare om.
@@ -1896,8 +1918,8 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (sidstAfbrudt && Date.now() - sidstAfbrudt.tid < STOPPET_VINDUE_MS && advarStoppet(sidstAfbrudt.id)) return;
-  const igang = t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
-  if (igang) visAdvarsel(IKKE_SENDT);
+  // Telefonen kan stoppe appen i baggrunden. Så bliver referatet først færdigt, når appen åbnes igen.
+  if (afsendelseIGang()) notifikationer.vis('ikkeSendtEndnu');
 });
 
 // En afbrudt optagelse åbnes direkte ved start, hvis den er fra den sidste halve time. Ældre ligger i Afventer.

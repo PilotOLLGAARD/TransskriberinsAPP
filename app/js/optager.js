@@ -35,27 +35,6 @@ export class OptageFejl extends Error {
   }
 }
 
-/** Viser en notifikation via service workeren, hvis brugeren har givet lov. Giver true, hvis den blev vist. */
-export async function visAdvarsel(tekst, { notifikation = globalThis.Notification, serviceWorker = globalThis.navigator?.serviceWorker } = {}) {
-  if (notifikation?.permission !== 'granted') return false;
-  try {
-    const reg = await serviceWorker?.ready;
-    if (!reg) return false;
-    await reg.showNotification('Transskribering', { body: tekst, tag: 'optagelse-stoppet' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Beder om lov til notifikationer, når det ikke er afgjort. Skal kaldes ved et tryk. */
-export async function bedOmTilladelse({ notifikation = globalThis.Notification } = {}) {
-  if (notifikation?.permission !== 'default') return;
-  try {
-    await notifikation.requestPermission();
-  } catch { /* Ingen notifikation, men optagelsen virker som før. */ }
-}
-
 export function vaelgFormat(erUnderstoettet) {
   return FORMATER.find((f) => erUnderstoettet(f)) ?? null;
 }
