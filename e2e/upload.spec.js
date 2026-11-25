@@ -490,7 +490,7 @@ test('Information på Android: trin for Del-menuen, og intet om Memoer', async (
 });
 
 // Gode råd, foldet sammen under hver sin overskrift, så skærmen ikke bliver lang.
-const FOLDER = ['Læg appen på hjemmeskærmen', 'Gode optagelser', 'Hvis noget afbryder', 'Tidligere optagelser', 'Grænser'];
+const FOLDER = ['Lange møder', 'Læg appen på hjemmeskærmen', 'Gode optagelser', 'Hvis noget afbryder', 'Tidligere optagelser', 'Grænser'];
 const fold = (side, titel) => side.locator('details.info-fold').filter({ has: side.locator('summary', { hasText: titel }) });
 
 async function aabnFold(side, titel) {
@@ -516,7 +516,7 @@ test('Information har gode råd foldet sammen, og hvert afsnit åbner ved tryk',
   await vis(side, 'Sig i starten, hvad det handler om');
   await vis(side, '[uklart]');
   await aabnFold(side, 'Hvis noget afbryder');
-  await vis(side, 'Fortsæt optagelsen');
+  await fold(side, 'Hvis noget afbryder').getByText('Fortsæt optagelsen', { exact: false }).waitFor();
   await aabnFold(side, 'Tidligere optagelser');
   await vis(side, 'Send referat igen');
   await vis(side, 'Slet kan fortrydes i 7 sekunder');
@@ -525,7 +525,9 @@ test('Information har gode råd foldet sammen, og hvert afsnit åbner ved tryk',
   await vis(side, '4 timer og fylde 500 MB');
   await vis(side, 'op til 10 lydfiler');
   await vis(side, '3 timer fylder ca. 175 MB');
-  await vis(side, 'Autolås');
+  // Rådet om Autolås står under Lange møder.
+  await aabnFold(side, 'Lange møder');
+  await fold(side, 'Lange møder').getByText('Autolås til Aldrig', { exact: false }).waitFor();
   await kontekst.close();
 });
 
