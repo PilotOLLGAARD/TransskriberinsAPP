@@ -27,6 +27,7 @@ const FILER = [
   'js/login.js',
   'js/mail.js',
   'js/feedback.js',
+  'js/notifikation.js',
   'js/opdeling/index.js',
   'js/opdeling/laeser.js',
   'js/opdeling/mp3.js',
