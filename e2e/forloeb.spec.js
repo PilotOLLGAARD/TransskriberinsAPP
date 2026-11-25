@@ -946,6 +946,23 @@ test('afsendelsen fejler, mens appen er skjult: én notifikation om fejlen', asy
   await kontekst.close();
 });
 
+test('en fejl, mens appen er skjult, overskrives ikke af "sendt" for en anden optagelse', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await fangNotifikationer(side);
+  await logInd(side);
+  await swKlar(side);
+  await skjul(side);
+  await saetNaesteFejl(miljoe, 'tjeneste');
+  await optag(side, { titel: 'Fejler' });
+  await side.waitForFunction(() => window.vist.length === 1, null, { timeout: 30000 });
+  await tilForsiden(side);
+  await optag(side, { titel: 'Lykkes' });
+  await vis(side, SENDT);
+  await side.waitForTimeout(500);
+  assert.deepEqual(await side.evaluate(() => window.vist), [FEJLET_NOTIFIKATION]);
+  await kontekst.close();
+});
+
 test('referatet sendes, mens appen er fremme: ingen notifikation', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await fangNotifikationer(side);
@@ -1230,6 +1247,19 @@ test('optageskærmen siger det, når telefonen ikke vil holde skærmen tændt', 
   await logInd(side);
   await knap(side, 'Optag').click();
   await vis(side, SKAERM);
+  await knap(side, 'Stop').click();
+  await kontekst.close();
+});
+
+test('lidt plads vises, selvom skærmen ikke kan holdes tændt (pladsen er vigtigst)', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript(() => {
+    Object.defineProperty(navigator, 'wakeLock', { value: { request: async () => { throw new DOMException('nej', 'NotAllowedError'); } }, configurable: true });
+    navigator.storage.estimate = () => new Promise((ok) => setTimeout(() => ok({ quota: 100e6, usage: 50e6 }), 200));
+  });
+  await logInd(side);
+  await knap(side, 'Optag').click();
+  await vis(side, 'Telefonen har kun plads til ca. 52 minutters optagelse.');
   await knap(side, 'Stop').click();
   await kontekst.close();
 });

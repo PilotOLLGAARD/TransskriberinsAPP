@@ -554,9 +554,15 @@ async function efterAfsendelse(id) {
  */
 function giVedAfsendelse(note) {
   if (!note) return;
-  if (note.status === STATUS.FEJL || note.fejlType) notifikationer.vis('fejlet', note.id);
-  else if (note.status === STATUS.SENDT && !afsendelseIGang()) notifikationer.vis('sendt', note.id);
+  if (note.status === STATUS.FEJL || note.fejlType) {
+    // Har samme tag som "sendt". Den må ikke erstattes, før brugeren har set appen igen.
+    fejletVist = true;
+    notifikationer.vis('fejlet', note.id);
+  } else if (note.status === STATUS.SENDT && !afsendelseIGang() && !fejletVist) {
+    notifikationer.vis('sendt', note.id);
+  }
 }
+let fejletVist = false;
 
 function afsendelseIGang() {
   return t.igang.size > 0 || t.noter.some((n) => n.status === STATUS.SENDER || n.status === STATUS.SENDER_MAIL);
@@ -890,10 +896,13 @@ async function pladsIMinutter() {
   }
 }
 
-/** Under ca. 2 timers plads får brugeren en venlig besked på optageskærmen. Optagelsen kører uanset. */
+/**
+ * Under ca. 2 timers plads får brugeren en venlig besked på optageskærmen. Optagelsen kører uanset.
+ * Den går forud for beskeden om skærmen, som kan nå at komme først.
+ */
 async function advarOmPlads() {
   const minutter = await pladsIMinutter();
-  if (minutter !== null && minutter < 125 && optager.erAktiv() && !t.advarsel) {
+  if (minutter !== null && minutter < 125 && optager.erAktiv() && (!t.advarsel || t.advarsel === BESKEDER.skaerm)) {
     t.advarsel = lidtPlads(minutter);
     tegn();
   }
@@ -1967,6 +1976,7 @@ function nyDelStartet(id) {
 document.addEventListener('visibilitychange', () => {
   // Appen viser selv, hvordan det står. Gamle notifikationer om den fjernes.
   if (document.visibilityState === 'visible') {
+    fejletVist = false;
     notifikationer.luk();
     // Brugeren kan have slået notifikationer til i telefonens indstillinger.
     if (t.visning === 'information') tegn();
