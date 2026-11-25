@@ -89,6 +89,7 @@ test('teksterne siger, hvad der skete, i korte sætninger uden tankestreg', () =
 
 test('beskederne om lange optagelser og flere filer', () => {
   assert.equal(BESKEDER.snartSlut, 'Optagelsen stopper om 5 minutter.');
+  assert.equal(BESKEDER.skaerm, 'Skærmen kan slukke af sig selv, og så stopper optagelsen. Slå automatisk skærmlås fra under lange møder.');
   assert.equal(BESKEDER.lang, 'Optagelsen har kørt i 2 timer. Sæt gerne telefonen til opladning.');
   assert.equal(BESKEDER.maksNaaet, 'Optagelsen stoppede efter 4 timer. Det indtalte er gemt.');
   assert.equal(BESKEDER.maksNaaetKort, 'Optagelsen stoppede efter 59 minutter. Det indtalte er gemt.');

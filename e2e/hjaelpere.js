@@ -23,6 +23,15 @@ async function nyTelefon(miljoe, { mikrofon = true, ...valg } = {}) {
     ...valg,
     permissions: mikrofon ? ['microphone'] : [],
   });
+  // Chromium uden skærm afviser altid en skærmlås, men en telefon giver den. Så får testene en, der virker.
+  // En test kan selv lægge en anden ovenpå.
+  await kontekst.addInitScript(() => {
+    if (!('wakeLock' in navigator)) return;
+    Object.defineProperty(navigator, 'wakeLock', {
+      value: { request: async () => Object.assign(new EventTarget(), { released: false, async release() { this.released = true; } }) },
+      configurable: true,
+    });
+  });
   const side = await kontekst.newPage();
   return { kontekst, side };
 }

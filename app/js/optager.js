@@ -20,6 +20,8 @@ const KONTROL_MS = 60 * 1000;
 const MAKS_DELE = 20;
 const STOP_VENTETID_MS = 3000;
 const LAGER_VENTETID_MS = 5000;
+// Så mange gange pr. del tages skærmlåsen igen, når telefonen selv slipper den.
+const SKAERM_IGEN = 5;
 // Pauser før genforsøg, når et stykke ikke kunne gemmes. Et stop venter højst LAGER_VENTETID_MS på dem;
 // et genforsøg, der når længere, gemmes stadig, og låsen holdes til da (se frigivLaasNaarGemt).
 const GENFORSOEG_PAUSER_MS = [300, 1000];
@@ -76,14 +78,30 @@ export function lavOptager({ lager, medier, ur = standardUr, kanDeles = async ()
   let vedAfsluttet = () => {};
   let vedAdvaret = () => {};
 
+  /**
+   * Holder skærmen tændt. Slipper telefonen selv låsen, mens appen er fremme (fx ved lavt batteri), tages den igen,
+   * højst SKAERM_IGEN gange pr. del. Kan låsen ikke tages, får brugeren én advarsel. Optagelsen kører uanset.
+   */
   async function tagSkaermlaas(o) {
     if (o.laas && o.laas.released === false) return;
     try {
       const laas = await medier.skaermlaas();
-      if (o.afsluttet) await laas.release();
-      else o.laas = laas;
+      if (o.afsluttet || o.afslutter) {
+        await laas.release();
+        return;
+      }
+      o.laas = laas;
+      laas.addEventListener?.('release', () => {
+        if (o.afsluttet || o.afslutter || medier.dokument.visibilityState !== 'visible') return;
+        if ((o.skaermIgen = (o.skaermIgen ?? 0) + 1) > SKAERM_IGEN) return;
+        tagSkaermlaas(o);
+      }, { once: true });
     } catch {
-      // Ikke alle telefoner tillader det. Optagelsen kører videre.
+      // Ikke alle telefoner tillader det (fx iPhone før iOS 18.4 eller strømsparetilstand).
+      if (!o.skaermAdvaret && !o.afslutter) {
+        o.skaermAdvaret = true;
+        vedAdvaret('skaerm');
+      }
     }
   }
 

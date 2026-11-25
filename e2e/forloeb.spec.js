@@ -1218,6 +1218,36 @@ test('en gammel afbrudt optagelse åbner ikke navneskærmen, og navneskærmen ha
   await kontekst.close();
 });
 
+// Skærmen holdes tændt under optagelsen. Kan den ikke det, står det på optageskærmen.
+
+const SKAERM = 'Skærmen kan slukke af sig selv, og så stopper optagelsen.';
+
+test('optageskærmen siger det, når telefonen ikke vil holde skærmen tændt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript(() => {
+    Object.defineProperty(navigator, 'wakeLock', { value: { request: async () => { throw new DOMException('nej', 'NotAllowedError'); } }, configurable: true });
+  });
+  await logInd(side);
+  await knap(side, 'Optag').click();
+  await vis(side, SKAERM);
+  await knap(side, 'Stop').click();
+  await kontekst.close();
+});
+
+test('optageskærmen har ingen advarsel om skærmen, når den kan holdes tændt', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await side.addInitScript(() => {
+    Object.defineProperty(navigator, 'wakeLock', { value: { request: async () => Object.assign(new EventTarget(), { released: false, release: async () => {} }) }, configurable: true });
+  });
+  await logInd(side);
+  await knap(side, 'Optag').click();
+  await knap(side, 'Stop').waitFor();
+  await side.waitForTimeout(800);
+  assert.equal(await side.getByText(SKAERM).count(), 0);
+  await knap(side, 'Stop').click();
+  await kontekst.close();
+});
+
 // Information viser, om notifikationer er slået til, og hjælper med at slå dem til
 
 async function infoMedNotifikation(permission) {

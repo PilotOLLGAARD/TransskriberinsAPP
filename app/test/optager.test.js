@@ -534,6 +534,64 @@ test('skærmlås-fejl stopper ikke optagelsen', async () => {
   assert.equal(s.tilstand.recorder.state, 'recording');
 });
 
+// Telefonen kan selv slippe skærmlåsen (fx ved lavt batteri). Så slukker skærmen, og optagelsen stopper.
+
+/** En skærmlås som browserens: release() frigiver den og melder 'release'. telefonSlipper gør det samme udefra. */
+function lavSkaermlaase() {
+  const laase = [];
+  const tag = async () => {
+    const l = new EventTarget();
+    l.released = false;
+    l.release = async () => { if (!l.released) { l.released = true; l.dispatchEvent(new Event('release')); } };
+    laase.push(l);
+    return l;
+  };
+  return { laase, tag, telefonSlipper: async () => { await laase.at(-1).release(); await vent(); } };
+}
+const vent = () => new Promise((ok) => setTimeout(ok, 1));
+
+test('skærmlåsen tages igen, når telefonen selv slipper den under optagelsen', async () => {
+  const sl = lavSkaermlaase();
+  const s = opsaet({ skaermlaas: sl.tag });
+  await s.optager.start();
+  await vent();
+  await sl.telefonSlipper();
+  assert.equal(sl.laase.length, 2);
+  assert.equal(sl.laase[1].released, false);
+});
+
+test('skærmlåsen tages ikke igen, når optagelsen er slut', async () => {
+  const sl = lavSkaermlaase();
+  const s = opsaet({ skaermlaas: sl.tag });
+  await s.optager.start();
+  await vent();
+  s.tilstand.recorder.send('a');
+  await s.optager.stop();
+  await vent();
+  assert.equal(sl.laase.length, 1);
+  assert.equal(sl.laase[0].released, true);
+});
+
+test('skærmlåsen tages højst 5 gange igen i en del', async () => {
+  const sl = lavSkaermlaase();
+  const s = opsaet({ skaermlaas: sl.tag });
+  await s.optager.start();
+  await vent();
+  for (let i = 0; i < 10; i++) await sl.telefonSlipper();
+  assert.equal(sl.laase.length, 6);
+  assert.equal(s.tilstand.recorder.state, 'recording');
+});
+
+test('kan skærmen ikke holdes tændt, advares én gang, og optagelsen kører videre', async () => {
+  const s = opsaet({ skaermlaas: async () => { throw new DOMException('nej', 'NotAllowedError'); } });
+  await s.optager.start();
+  await vent();
+  s.dokument.dispatchEvent(new Event('visibilitychange'));
+  await vent();
+  assert.deepEqual(s.advarsler, ['skaerm']);
+  assert.equal(s.tilstand.recorder.state, 'recording');
+});
+
 test('nægtet mikrofon giver mikrofonNaegtet og ingen note', async () => {
   const s = opsaet();
   s.tilstand.mikrofonFejl = new DOMException('nej', 'NotAllowedError');

@@ -215,6 +215,8 @@ async function optag() {
   notifikationer.bedOmTilladelse();
   t.starter = true;
   t.besked = null;
+  // Nulstilles før start: optageren kan advare (fx om skærmen), før start er færdig.
+  t.advarsel = false;
   tegn();
   try {
     nyDelStartet(await optager.start({ titel: t.valgtNavn.trim() }));
@@ -225,7 +227,6 @@ async function optag() {
       kurve.start(sidsteStroem);
       t.visning = 'optager';
       t.startTid = Date.now();
-      t.advarsel = false;
       urTimer = setInterval(opdaterUr, 1000);
       advarOmPlads();
     }
@@ -243,6 +244,7 @@ async function fortsaetOptagelse(id) {
   notifikationer.bedOmTilladelse();
   t.starter = true;
   t.besked = null;
+  t.advarsel = false;
   try {
     if (t.visning === 'navn' && t.navnNote === id && t.navnUdkast !== null) {
       await lager.opdaterNote(id, { titel: [...t.navnUdkast.trim()].slice(0, 120).join('').trim() });
@@ -256,7 +258,6 @@ async function fortsaetOptagelse(id) {
       t.visning = 'optager';
       // Uret fortsætter fra den samlede tid.
       t.startTid = Date.now() - (note?.varighedMs ?? 0);
-      t.advarsel = false;
       urTimer = setInterval(opdaterUr, 1000);
     }
   } catch (e) {

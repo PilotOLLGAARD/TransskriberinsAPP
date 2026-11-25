@@ -20,6 +20,8 @@ export const BESKEDER = {
   lager: 'Telefonen kunne ikke gemme ændringen. Optagelsen er gemt. Prøv igen.',
   loginKraeverNet: 'Du skal have net for at logge ind. Optagelsen er gemt.',
   snartSlut: 'Optagelsen stopper om 5 minutter.',
+  // Telefonen vil ikke holde skærmen tændt (fx iPhone før iOS 18.4 eller strømsparetilstand).
+  skaerm: 'Skærmen kan slukke af sig selv, og så stopper optagelsen. Slå automatisk skærmlås fra under lange møder.',
   lang: 'Optagelsen har kørt i 2 timer. Sæt gerne telefonen til opladning.',
   maksNaaet: 'Optagelsen stoppede efter 4 timer. Det indtalte er gemt.',
   // Optagelser, der ikke kan klippes i bidder (fx et ukendt format fra en ny telefon), stopper som før.
