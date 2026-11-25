@@ -1579,6 +1579,22 @@ test('to optagelser venter på login: begge sendes efter login, og boksen forsvi
   await kontekst.close();
 });
 
+// Lange møder: vejen til telefonens egen optager står ét tryk fra forsiden
+
+test('"Langt møde? Sådan gør du" åbner Information med Lange møder foldet ud', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe, { viewport: { width: 393, height: 852 } });
+  await logInd(side);
+  await knap(side, 'Langt møde? Sådan gør du').click();
+  await side.getByRole('heading', { name: 'Information' }).waitFor();
+  assert.equal(await side.locator('#lange-moeder').evaluate((d) => d.open), true);
+  await side.getByText('Sikrest over 1 time', { exact: false }).waitFor({ state: 'visible' });
+  await side.getByText('Stopper optagelsen, så tryk Fortsæt optagelsen', { exact: false }).waitFor({ state: 'visible' });
+  // Rådet om Autolås er flyttet hertil fra Grænser.
+  assert.equal(await side.getByText('Autolås til Aldrig', { exact: false }).count(), 1);
+  assert.equal(await side.locator('#lange-moeder').getByText('Autolås til Aldrig', { exact: false }).count(), 1);
+  await kontekst.close();
+});
+
 // Forsiden kan ses uden at rulle
 
 for (const [navn, viewport] of [['lille iPhone SE', { width: 320, height: 568 }], ['iPhone SE', { width: 375, height: 647 }], ['stor iPhone', { width: 393, height: 759 }]]) {

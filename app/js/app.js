@@ -1234,6 +1234,7 @@ function skaermStart() {
       // Intet venter: en kort forklaring til den, der åbner appen første gang.
       : h('p', { klasse: 'kom-i-gang' }, ikon('mikrofon'), h('span', {}, 'Tryk Optag, og tal. Tryk Stop, når du er færdig. Så laver appen referatet.')),
     hjaelpTilHjemmeskaerm(),
+    h('button', { type: 'button', klasse: 'feedback-knap langt-moede-knap', vedTryk: aabnLangeMoeder }, ikon('info'), 'Langt møde? Sådan gør du'),
     feedbackKnap(),
     // Plads, så det nederste indhold kan rulles fri af bundlinjen.
     h('div', { klasse: 'bund-plads', 'aria-hidden': 'true' }),
@@ -1456,11 +1457,45 @@ function foldAfsnit(titel, ...indhold) {
 
 const punkter = (...linjer) => h('ul', { klasse: 'info-liste' }, ...linjer.map((l) => h('li', {}, l)));
 
+const LANGE_MOEDER = 'Lange møder';
+
+/** Fra forsiden: Information med afsnittet om lange møder foldet ud og rullet frem. */
+function aabnLangeMoeder() {
+  t.infoAaben.add(LANGE_MOEDER);
+  aabnInformation();
+  requestAnimationFrame(() => document.getElementById('lange-moeder')?.scrollIntoView({ block: 'start' }));
+}
+
+/**
+ * Telefonens egen optager optager også med låst skærm. Det kan en webapp ikke (iPhone slår mikrofonen fra,
+ * når appen ikke er fremme). Derfor er den vejen til lange møder. Kæden er for ens egen telefon.
+ */
+function langeMoederAfsnit() {
+  const p = platform();
+  const kaeder = {
+    ios: 'iPhone: Memoer → ⋯ → Del → Gem i Arkiver → Upload lydfil i appen.',
+    android: 'Android: Stemmeoptager eller Optager → Del → Transskribering.',
+  };
+  const kaede = p === 'ios' || p === 'android' ? [kaeder[p]] : [kaeder.ios, kaeder.android];
+  const el = foldAfsnit(
+    LANGE_MOEDER,
+    punkter(
+      'Sikrest over 1 time: Optag i telefonens egen optager. Den optager også med låst skærm. Send filen til appen bagefter.',
+      ...kaede,
+      'Eller optag i appen: Sæt telefonen til opladning, lad skærmen være tændt, og lås den ikke. Stopper optagelsen, så tryk Fortsæt optagelsen. Det bliver til ét referat.',
+      ...(p === 'android' ? [] : ['iPhone: Slukker skærmen af sig selv, så sæt Autolås til Aldrig under lange møder (Indstillinger → Skærm & lysstyrke → Autolås).']),
+    ),
+  );
+  el.id = 'lange-moeder';
+  return el;
+}
+
 function godeRaad() {
   return h(
     'section',
     { klasse: 'info-afsnit' },
     h('h2', {}, 'Gode råd'),
+    langeMoederAfsnit(),
     foldAfsnit('Læg appen på hjemmeskærmen', ...hjemmeskaermVejledning()),
     foldAfsnit(
       'Gode optagelser',
@@ -1494,7 +1529,6 @@ function godeRaad() {
         'Du kan vælge op til 10 lydfiler på én gang. De bliver til ét referat i den rækkefølge, du vælger.',
         'Et langt møde sendes i dele og kan tage nogle minutter. Lyden bliver den samme.',
         '3 timer fylder ca. 175 MB på telefonen, og skærmen er tændt hele tiden. Det bruger anslået en tredjedel af batteriet, så sæt telefonen til opladning.',
-        'iPhone: Hvis optagelsen stopper, når skærmen slukker, så sæt Autolås til Aldrig under lange møder (Indstillinger → Skærm & lysstyrke → Autolås).',
       ),
     ),
   );
@@ -1502,13 +1536,13 @@ function godeRaad() {
 
 /** Om notifikationer er slået til, og hjælp til at slå dem til. Telefonens egne knapnavne på dansk. */
 function notifikationAfsnit() {
-  const forklaring = 'Du får besked, hvis optagelsen stopper, og når referatet er sendt.';
   const tilstand = notifikationer.tilstand();
-  if (tilstand === 'til') return [h('p', {}, `Notifikationer er slået til. ${forklaring}`)];
+  if (tilstand === 'til') return [h('p', {}, 'Notifikationer er slået til. Du får besked, hvis optagelsen stopper, og når referatet er sendt.')];
   if (tilstand === 'mangler') return [h('p', {}, 'Notifikationer virker kun, når appen er lagt på hjemmeskærmen.')];
+  const forklaring = 'Slå dem til, så du får besked, hvis optagelsen stopper, og når referatet er sendt.';
   if (tilstand === 'spoerg') {
     return [
-      h('p', {}, `Slå notifikationer til. ${forklaring}`),
+      h('p', {}, `Notifikationer er ikke slået til. ${forklaring}`),
       knap('Slå notifikationer til', async () => {
         await notifikationer.bedOmTilladelse();
         tegn();
@@ -1520,7 +1554,7 @@ function notifikationAfsnit() {
   const android = 'Android: Hold fingeren på appens ikon → Appinfo → Notifikationer, og slå dem til.';
   return [
     h('p', {}, `Notifikationer er slået fra. ${forklaring}`),
-    ...(p === 'ios' ? [iphone] : p === 'android' ? [android] : [iphone, android]).map((tekst) => h('p', {}, tekst)),
+    punkter(...(p === 'ios' ? [iphone] : p === 'android' ? [android] : [iphone, android])),
   ];
 }
 
