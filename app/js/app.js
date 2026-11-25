@@ -1922,6 +1922,36 @@ document.addEventListener('visibilitychange', () => {
   if (afsendelseIGang()) notifikationer.vis('ikkeSendtEndnu');
 });
 
+/**
+ * Et tryk på en notifikation (sw.js). Skærmen skiftes kun fra forsiden, så intet, brugeren er i gang med,
+ * forsvinder. 'navn' åbner navneskærmen for en gemt optagelse, så den kan fortsættes; findes den ikke, bliver
+ * forsiden. 'tidligere' åbner Tidligere optagelser. 'start' er forsiden, hvor noten står under Afventer.
+ */
+async function aabnFraNotifikation(maal, id) {
+  if (t.visning !== 'start' || t.starter || t.gemmerFil || optager.erAktiv()) return;
+  if (maal === 'tidligere') {
+    aabnTidligere();
+    return;
+  }
+  if (maal !== 'navn' || typeof id !== 'string') return;
+  const note = await lager.hentNote(id).catch(() => null);
+  if (note?.status !== STATUS.GEMT || note.slettet || t.visning !== 'start' || optager.erAktiv()) return;
+  aabnNavn(id);
+}
+
+/** Blev appen åbnet af et tryk på en notifikation, står målet i adressen. Adressen ryddes, så det ikke gentages. */
+async function aabnFraAdresse() {
+  const s = new URLSearchParams(location.search);
+  const maal = s.get('aabn');
+  if (maal === null) return;
+  history.replaceState(null, '', location.pathname);
+  await aabnFraNotifikation(maal, s.get('id'));
+}
+
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.aabn) aabnFraNotifikation(e.data.aabn, e.data.id).catch(() => {});
+});
+
 // En afbrudt optagelse åbnes direkte ved start, hvis den er fra den sidste halve time. Ældre ligger i Afventer.
 const NYLIG_AFBRUDT_MS = 30 * 60 * 1000;
 
@@ -1975,6 +2005,7 @@ async function start() {
     visFejl('afbrudt');
   }
   tegn();
+  await aabnFraAdresse().catch(() => {});
   document.body.dataset.klar = '1';
   // Beder telefonen om ikke at slette optagelserne. Afgøres af telefonen.
   navigator.storage?.persist?.().catch(() => {});

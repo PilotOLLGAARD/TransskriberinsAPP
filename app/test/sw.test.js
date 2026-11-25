@@ -62,6 +62,32 @@ test('tryk på notifikationen åbner appen eller viser den, der allerede er åbe
   assert.deepEqual([...sw.aabnet], ['./']);
 });
 
+test('tryk på en notifikation med mål åbner appen det rigtige sted', async () => {
+  const sw = lavServiceWorker();
+  let venter;
+  const tryk = (data) => sw.lyttere.notificationclick({ notification: { close: () => {}, data }, waitUntil: (p) => { venter = p; } });
+  tryk({ maal: 'navn', id: 'abc-1' });
+  await venter;
+  assert.deepEqual([...sw.aabnet], ['./?aabn=navn&id=abc-1']);
+  tryk({ maal: 'tidligere', id: null });
+  await venter;
+  assert.equal(sw.aabnet[1], './?aabn=tidligere');
+});
+
+test('tryk på en notifikation med mål sender målet til den åbne app', async () => {
+  const sw = lavServiceWorker();
+  const beskeder = [];
+  let fokus = false;
+  sw.aabnet.vinduer = [{ focus: async () => { fokus = true; }, postMessage: (b) => beskeder.push(b) }];
+  let venter;
+  sw.lyttere.notificationclick({ notification: { close: () => {}, data: { maal: 'navn', id: 'abc-1' } }, waitUntil: (p) => { venter = p; } });
+  await venter;
+  assert.equal(fokus, true);
+  // Objektet er lavet i service workerens egen kontekst. Derfor sammenlignes indholdet.
+  assert.deepEqual(JSON.parse(JSON.stringify(beskeder)), [{ aabn: 'navn', id: 'abc-1' }]);
+  assert.deepEqual([...sw.aabnet], []);
+});
+
 // Del-menuen på Android (Web Share Target): filen lægges midlertidigt i Cache Storage, og appen åbnes.
 
 function lavDelSW({ putFejl = null } = {}) {

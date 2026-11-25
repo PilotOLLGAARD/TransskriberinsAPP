@@ -1218,6 +1218,69 @@ test('en gammel afbrudt optagelse åbner ikke navneskærmen, og navneskærmen ha
   await kontekst.close();
 });
 
+// Tryk på en notifikation åbner det rigtige sted (sw.js giver målet i adressen eller som besked)
+
+async function gammelAfbrudt(side) {
+  await afbrydOptagelse(side);
+  await knap(side, 'Til forsiden').click();
+  await knap(side, 'Optag').waitFor();
+  return side.evaluate(async () => {
+    const l = await import('/js/lager.js');
+    const [note] = await l.alleNoter();
+    const gammel = Date.now() - 2 * 60 * 60 * 1000;
+    await l.opdaterNote(note.id, { oprettet: gammel, sidstAktiv: gammel });
+    return note.id;
+  });
+}
+
+test('notifikationen om en stoppet optagelse åbner dens navneskærm, også når den er gammel', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  const id = await gammelAfbrudt(side);
+  await side.goto(`${miljoe.adresse}?aabn=navn&id=${id}`);
+  await side.getByLabel(FELT).waitFor({ timeout: 15000 });
+  await knap(side, 'Fortsæt optagelsen').waitFor();
+  assert.equal(new URL(side.url()).search, '');
+  await kontekst.close();
+});
+
+test('notifikationen om en note, der ikke findes, åbner forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.goto(`${miljoe.adresse}?aabn=navn&id=findes-ikke`);
+  await knap(side, 'Optag').waitFor();
+  await side.waitForTimeout(500);
+  assert.equal(await side.getByLabel(FELT).count(), 0);
+  await kontekst.close();
+});
+
+test('notifikationen om et sendt referat åbner Tidligere optagelser', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await side.goto(`${miljoe.adresse}?aabn=tidligere`);
+  await side.getByRole('heading', { name: 'Tidligere optagelser' }).waitFor({ timeout: 15000 });
+  await kontekst.close();
+});
+
+test('et tryk, mens appen er åben, skifter kun skærm fra forsiden', async () => {
+  const { kontekst, side } = await nyTelefon(miljoe);
+  await logInd(side);
+  await swKlar(side);
+  const send = (data) => side.evaluate((d) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: d })), data);
+  // Midt i navngivningen må intet skifte.
+  await stopOptagelse(side);
+  await side.getByLabel(FELT).fill('Mit udkast');
+  await send({ aabn: 'tidligere', id: null });
+  await side.waitForTimeout(500);
+  assert.equal(await side.getByLabel(FELT).inputValue(), 'Mit udkast');
+  await knap(side, 'Send').click();
+  await vis(side, SENDT);
+  await tilForsiden(side);
+  await send({ aabn: 'tidligere', id: null });
+  await side.getByRole('heading', { name: 'Tidligere optagelser' }).waitFor({ timeout: 5000 });
+  await kontekst.close();
+});
+
 test('Fortryd-bjælken er den samme, mens skærmen tegnes igen, og glider derfor kun ind én gang', async () => {
   const { kontekst, side } = await nyTelefon(miljoe);
   await logInd(side);

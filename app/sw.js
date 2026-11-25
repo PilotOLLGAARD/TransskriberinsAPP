@@ -64,13 +64,23 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
-// Et tryk på beskeden om en stoppet optagelse åbner appen igen.
+// Et tryk på en notifikation åbner appen igen. Har den et mål (fx navneskærmen for en stoppet optagelse),
+// får en åben app målet som besked, og en lukket app åbnes med det i adressen (se aabnFraNotifikation i app.js).
+const MAAL = ['navn', 'tidligere', 'start'];
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const data = e.notification.data;
+  const maal = MAAL.includes(data?.maal) ? data.maal : null;
+  const id = maal && typeof data.id === 'string' ? data.id : null;
   e.waitUntil((async () => {
     const [vindue] = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (vindue) await vindue.focus();
-    else await self.clients.openWindow('./');
+    if (vindue) {
+      await vindue.focus();
+      if (maal) vindue.postMessage({ aabn: maal, id });
+    } else {
+      await self.clients.openWindow(maal ? `./?aabn=${maal}${id ? `&id=${encodeURIComponent(id)}` : ''}` : './');
+    }
   })());
 });
 
